@@ -20,7 +20,34 @@ router.get('/', (req, res) => {
 // ✅ Incoming messages (POST)
 router.post('/', async (req, res) => {
   try {
-    await onMessageReceived(req.body); // or req.body.entry[0].changes[0] depending on structure
+    const body = req.body;
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const messages = value?.messages;
+
+    if (messages && messages.length > 0) {
+      const message = messages[0];
+      const sender = message.from;
+
+      let msgText = '';
+
+      if (message.type === 'interactive') {
+        const interactive = message.interactive;
+        if (interactive.type === 'button_reply') {
+          msgText = interactive.button_reply.id;
+        } else if (interactive.type === 'list_reply') {
+          msgText = interactive.list_reply.id;
+        }
+      } else if (message.type === 'text') {
+        msgText = message.text.body.trim().toLowerCase();
+      }
+
+      if (msgText) {
+        await onMessageReceived(sender, msgText);
+      }
+    }
+
     res.sendStatus(200);
   } catch (error) {
     console.error("❌ Error processing message:", error);

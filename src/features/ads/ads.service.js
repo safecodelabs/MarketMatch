@@ -1,5 +1,3 @@
-const { fetchAdContacts } = require('./ads.service');
-
 async function handleAdsIntent(message, sendMessage) {
   const text = typeof message === 'string'
     ? message
