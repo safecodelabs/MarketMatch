@@ -20,27 +20,37 @@ async function getAdInfo(req, res) {
 
 // WhatsApp Flow usage
 async function handleAdsIntent(message, sendMessage) {
-      const text = typeof message === 'string'
+  const text = typeof message === 'string'
     ? message
     : message?.text?.body || message?.body || '';
-  const lower = message.toLowerCase();
 
-  // Match messages like "show metro ads in delhi"
-  const match = lower.match(/(metro\s+ads).*(in\s+)?([a-z\s]+)/i);
+  if (typeof text !== 'string') {
+    return false;
+  }
+
+  const lower = text.toLowerCase();
+
+  // Flexible matching pattern for "metro ads in <city>"
+  const match = lower.match(/(metro\s+ads?|ads?|advertis(e|ing)?)\s*(in)?\s*([a-z\s]+)/i);
 
   if (match) {
-    const type = 'metro ads';
-    const city = match[3]?.trim();
+    const type = match[1]?.includes('metro') ? 'metro ads' : 'ads';
+    const city = match[5]?.trim();
+
+    if (!city) {
+      await sendMessage("❌ Please specify a city for ad contacts.");
+      return true;
+    }
 
     const results = await fetchAdContacts(city, type);
 
     if (results.length === 0) {
-      await sendMessage(`❌ No metro ad contacts found in ${city}.`);
+      await sendMessage(`❌ No ${type} contacts found in ${city}.`);
     } else {
-      await sendMessage(`📢 *Metro Ads in ${city}*\n\nHere are our advertising contacts:\n\n${results.join('\n')}`);
+      await sendMessage(`📢 *${type.charAt(0).toUpperCase() + type.slice(1)} in ${city}*\n\nHere are our advertising contacts:\n\n${results.join('\n')}`);
     }
 
-    return true; // handled
+    return true;
   }
 
   return false;
