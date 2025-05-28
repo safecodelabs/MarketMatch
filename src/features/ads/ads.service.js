@@ -6,7 +6,7 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const SHEET_ID = process.env.SHEET_ID;
-const SHEET_NAME = 'Sheet1';
+const SHEET_NAME = process.env.SHEET_NAME || 'AdContacts';
 
 async function fetchAdContacts(city, type) {
   const client = await auth.getClient();
