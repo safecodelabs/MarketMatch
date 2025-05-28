@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const webhookRoutes = require('./src/routes/webhook');
+const webhookRoutes = require('./src/routes/webHook');
 
 const app = express();
 app.use(bodyParser.json({ limit: '2mb' }));
