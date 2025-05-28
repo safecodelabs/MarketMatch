@@ -1,5 +1,6 @@
 const { fetchAdContacts } = require('../features/ads/ads.service');
 
+// Handle fetching ad contacts
 async function handleAdRequest({ city, type }, sendMessage) {
   const contacts = await fetchAdContacts(city, type);
 
@@ -11,12 +12,13 @@ async function handleAdRequest({ city, type }, sendMessage) {
   sendMessage(response);
 }
 
+// Parse intent from incoming message
 function parseAdIntent(message) {
-  const lower = message.toLowerCase();
-  if (lower.includes('ad') || lower.includes('advertise')) {
-    return true;
-  }
-  return false;
+  const text = message?.text?.body || message?.body;
+  if (typeof text !== 'string') return false;
+
+  const lower = text.toLowerCase();
+  return lower.includes('ad') || lower.includes('advertise');
 }
 
 module.exports = {
