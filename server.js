@@ -1,23 +1,24 @@
-require('dotenv').config();
-import express from 'express';
-import { json } from 'body-parser';
+const express = require('express');
+const dotenv = require('dotenv');
+const bodyParser = require('body-parser');
+const adRoutes = require('./src/features/ads/ads.routes');
+const { onMessageReceived } = require('./src/bots/whatsappBot');
 
-import adRoutes from './src/features/ads/ads.routes';
-const PORT = process.env.PORT || 3000;
+// Load environment variables
+dotenv.config();
 
 const app = express();
-app.use(json());
+const PORT = process.env.PORT || 3000;
 
-app.use('/api', adRoutes); // Now available at /api/ad-info
+// Middleware
+app.use(bodyParser.json());
 
-app.listen(PORT, () => {
-  console.log(`Bot API running on http://localhost:${PORT}`);
-});
+// Routes
+app.use('/api', adRoutes); // /api/ad-info
 
-import { onMessageReceived } from './src/bots/whatsappBot';
-
+// Webhook verification
 app.get('/webhook', (req, res) => {
-  const VERIFY_TOKEN = "marketmatchai";
+  const VERIFY_TOKEN = 'marketmatchai';
 
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -31,8 +32,14 @@ app.get('/webhook', (req, res) => {
   }
 });
 
+// Webhook message handler
 app.post('/webhook', async (req, res) => {
   const userMessage = req.body.message;
   await onMessageReceived({ body: userMessage });
   res.send('OK');
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Bot API running on http://localhost:${PORT}`);
 });
