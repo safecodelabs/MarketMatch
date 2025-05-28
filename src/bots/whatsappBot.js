@@ -13,7 +13,8 @@ async function onMessageReceived(message) {
   if (mainHandled) return;
 
   // Try ads handler
-  const adsHandled = await handleAdsIntent(message, sendMessage);
+  const text = message?.text?.body || message?.body || '';
+  const adsHandled = await handleAdsIntent(text, sendMessage);
   if (adsHandled) return;
 
   // Default fallback message
