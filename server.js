@@ -1,12 +1,12 @@
 require('dotenv').config();
-const express = require('express');
-const bodyParser = require('body-parser');
+import express from 'express';
+import { json } from 'body-parser';
 
-const adRoutes = require('./src/features/ads/ads.routes');
+import adRoutes from './src/features/ads/ads.routes';
 const PORT = process.env.PORT || 3000;
 
 const app = express();
-app.use(bodyParser.json());
+app.use(json());
 
 app.use('/api', adRoutes); // Now available at /api/ad-info
 
@@ -14,7 +14,7 @@ app.listen(PORT, () => {
   console.log(`Bot API running on http://localhost:${PORT}`);
 });
 
-const { onMessageReceived } = require('./src/bots/whatsappBot');
+import { onMessageReceived } from './src/bots/whatsappBot';
 
 app.get('/webhook', (req, res) => {
   const VERIFY_TOKEN = "marketmatchai";
