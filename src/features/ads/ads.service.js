@@ -11,6 +11,7 @@ const SHEET_NAME = process.env.SHEET_NAME || 'AdContacts';
 async function fetchAdContacts(city, type) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
+  console.log('Rows from Google Sheets:', rows);
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
@@ -19,9 +20,14 @@ async function fetchAdContacts(city, type) {
 
   const rows = response.data.values || [];
 
-  return rows
-    .filter(row => row[0]?.toLowerCase() === city.toLowerCase() && row[2]?.toLowerCase() === type.toLowerCase())
-    .map(row => `📍 ${row[1]} – Contact: ${row[3] || 'N/A'} ${row[4] ? `(${row[4]})` : ''}`);
+return rows
+  .filter(row =>
+    row[0]?.toLowerCase() === city.toLowerCase() &&
+    (row[2]?.toLowerCase() === type.toLowerCase() || row[4]?.toLowerCase() === type.toLowerCase())
+  )
+  .map(row =>
+    `📍 ${row[1]} – Contact: ${row[3] || 'N/A'}`
+  );
 }
 
 module.exports = { fetchAdContacts };
