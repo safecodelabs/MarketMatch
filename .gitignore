@@ -1,0 +1,37 @@
+# Node modules
+node_modules/
+
+# Env and config
+.env
+.env.local
+config/serviceAccountKey.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# IDEs and editors
+.vscode/
+.idea/
+
+# Build outputs
+dist/
+build/
+
+# Mac trash
+.Trashes
+
+# Firebase secrets
+config/*.json
+
+firebaseCreds/serviceAccount.json
+
+#docs
+readmedev.md
+/credentials/
+creds/*.json
