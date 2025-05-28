@@ -1,38 +1,38 @@
-const axios = require('axios');
+const { handleAdRequest } = require('../../flows/ads.flow');
 
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
-
-if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
-  console.error('❌ Missing WHATSAPP_TOKEN or PHONE_NUMBER_ID in environment variables.');
+// Intent check based on string content
+function isAdIntent(message) {
+  const text = message?.text?.body || message?.body;
+  if (typeof text !== 'string') return false;
+  return text.toLowerCase().includes('ad') || text.toLowerCase().includes('advertise');
 }
 
-const apiUrl = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+// Controller function to route ad messages
+async function handleAdsIntent(message, sendMessage) {
+  const text = message?.text?.body || message?.body;
 
-async function sendMessage(to, message) {
-  try {
-    const response = await axios.post(
-      apiUrl,
-      {
-        messaging_product: 'whatsapp',
-        to,
-        type: 'text',
-        text: { body: message },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    console.log(`✅ Message sent to ${to}: ${message}`);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Failed to send message:', error?.response?.data || error.message);
-    throw error;
+  if (typeof text !== 'string') {
+    return sendMessage("❓ I couldn't understand your message. Please try again.");
   }
+
+  if (isAdIntent(message)) {
+    return sendMessage(
+      `🧩 Where would you like to advertise?\n\n🏙️ Metro Stations\n🚌 Bus Stops\n🏬 Malls\n📺 Local Cable\n🎨 Wall Paintings\n\nExample: *Show metro ads in Delhi*`
+    );
+  }
+
+  const cityMatch = text.match(/in\s([a-zA-Z\s]+)/i);
+  const typeMatch = text.match(/(metro|bus|mall|cable|wall)/i);
+
+  if (cityMatch && typeMatch) {
+    const city = cityMatch[1].trim().toLowerCase();
+    const type = typeMatch[1].trim().toLowerCase();
+    return await handleAdRequest({ city, type }, sendMessage);
+  }
+
+  return sendMessage("👋 Hi! You can type *'advertise'* to get started with ad placements.");
 }
 
-module.exports = { sendMessage };
+module.exports = {
+  handleAdsIntent,
+};
