@@ -1,7 +1,7 @@
-const express = require('express');
-const router = express.Router();
-const { getAdInfo } = require('./ads.controller');
+import { Router } from 'express';
+const router = Router();
+import { getAdInfo } from './ads.controller';
 
 router.post('/ad-info', getAdInfo);
 
-module.exports = router;
+export default router;
