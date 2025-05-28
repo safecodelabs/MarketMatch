@@ -1,13 +1,23 @@
 const { mainFlow } = require('../flows/main.flow');
+const { handleAdsIntent } = require('../features/ads/ads.controller');
 
-// Dummy function simulating WhatsApp message received
+// Simulated WhatsApp Bot Handler
 async function onMessageReceived(message) {
   const sendMessage = (reply) => {
     console.log(`Bot: ${reply}`);
-    // replace this with WhatsApp API send logic
+    // TODO: Replace this with actual WhatsApp API sendMessage logic
   };
 
-  await mainFlow(message, sendMessage);
+  // Run main flow first
+  const mainHandled = await mainFlow(message, sendMessage);
+  if (mainHandled) return;
+
+  // Try ads handler
+  const adsHandled = await handleAdsIntent(message, sendMessage);
+  if (adsHandled) return;
+
+  // Default fallback message
+  await sendMessage("🤖 I didn't understand that. Try asking about metro ads in your city.");
 }
 
 module.exports = { onMessageReceived };
