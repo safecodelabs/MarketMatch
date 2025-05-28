@@ -1,4 +1,4 @@
-const { handleAdRequest } = require('../features/ads/ads.flow');
+const { handleAdRequest } = require('../flows/ads.flow');
 
 // Intent check based on string content
 function isAdIntent(message) {
