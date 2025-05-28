@@ -20,6 +20,9 @@ async function getAdInfo(req, res) {
 
 // WhatsApp Flow usage
 async function handleAdsIntent(message, sendMessage) {
+      const text = typeof message === 'string'
+    ? message
+    : message?.text?.body || message?.body || '';
   const lower = message.toLowerCase();
 
   // Match messages like "show metro ads in delhi"
