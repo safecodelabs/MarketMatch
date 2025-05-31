@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const { getFirestore } = require('firebase-admin/firestore');
 
-const serviceAccount = require('../../serviceAccountKey.json'); // adjust path
+const serviceAccount = require('../../creds/firebase-service-account.json'); // adjust path
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
