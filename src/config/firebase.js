@@ -18,6 +18,5 @@ if (!admin.apps.length) {
     credential: admin.credential.cert(serviceAccount),
   });
 }
-
 const db = admin.firestore();
 module.exports = { db };
