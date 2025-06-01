@@ -1,6 +1,9 @@
 const { db } = require('../config/firebase');
 
 const getUserById = async (userId) => {
+  if (!userId) {
+    throw new Error('getUserById called with invalid userId');
+  }
   const doc = await db.collection('users').doc(userId).get();
   return doc.exists ? doc.data() : null;
 };
