@@ -17,23 +17,34 @@ async function onMessageReceived(sender, userMessage) {
   // Step 2: Check if it's a new user
   const isNewUser = await createUserIfNotExists(sender);
 
-  // Step 3: Greet if new user or intent is a greeting
-  const greetingIntents = ['greeting', 'start', 'hello'];
+// Step 3: Handle based on intent
+  switch (intent) {
+    case 'greeting':
+      if (isNewUser) {
+        await greetingFlow(sender, sendMessage, { newUser: true });
+      } else {
+        await greetingFlow(sender, sendMessage, { newUser: false });
+      }
+      return;
 
-  if (isNewUser || greetingIntents.includes(intent)) {
-    await greetingFlow(sender, sendMessage);
+    case 'ads_inquiry':
+      await handleAdsIntent(userMessage, sendMessage);
+      return;
+
+    case 'about_bot':
+      await sendMessage("🤖 I'm your smart assistant. I can help you with advertising, FAQs, and more. Try saying something like *'Show metro ads in Delhi'*.");
+      return;
+
+    case 'fallback':
+    case 'unknown':
+    default:
+      if (isNewUser) {
+        await greetingFlow(sender, sendMessage, { fallback: true });
+      } else {
+        await sendMessage("😕 I'm not sure what you meant. Try asking for ad info or say *hi*.");
+      }
+      return;
   }
-
-  // Step 4: Handle main flow (commands, etc.)
-  const mainHandled = await mainFlow(userMessage, sendMessage);
-  if (mainHandled) return;
-
-  // Step 5: Handle ads flow
-  const adsHandled = await handleAdsIntent(userMessage, sendMessage);
-  if (adsHandled) return;
-
-  // Step 6: Fallback
-  await sendMessage("🤖 I didn't understand that. Try asking about metro ads in your city.");
 }
 
 module.exports = { onMessageReceived };
