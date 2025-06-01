@@ -68,5 +68,4 @@ async function onMessageReceived(sender, userMessage) {
       return;
   }
 }
-
 module.exports = { onMessageReceived };
