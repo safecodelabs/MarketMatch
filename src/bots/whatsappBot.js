@@ -6,8 +6,8 @@ const { handleAdsIntent } = require('../features/ads/ads.controller');
 const greetingFlow = require('../flows/greeting.flow');
 
 const WHATSAPP_API_URL = 'https://graph.facebook.com/v15.0'; // adjust version if needed
-const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID; // from FB Business Manager
-const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN; // your token here
+const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID; // from FB Business Manager
+const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_TOKEN; // your token here
 
 // Send message to user via WhatsApp API
 async function sendWhatsAppMessage(to, message) {
