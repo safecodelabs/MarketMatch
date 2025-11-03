@@ -1,28 +1,18 @@
-require('dotenv').config();
+require('dotenv').config(); // Loads environment variables from a .env file
 const express = require('express');
-const bodyParser = require('body-parser');
-const webhookRoutes = require('./routes/webhook');
 
+// Initialize the express app
 const app = express();
-app.use(bodyParser.json({ limit: '2mb' }));
 
-// Incoming messages
-app.use('/webhook', webhookRoutes);
+// Use port from environment variables or default to 3000
+const port = process.env.PORT || 3000;
 
-// GET verification from Meta
-app.get('/webhook', (req, res) => {
-  const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'your_verify_token';
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  if (mode && token && mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log("✅ WEBHOOK VERIFIED");
-    return res.status(200).send(challenge);
-  } else {
-    return res.sendStatus(403);
-  }
+// A simple route for the root URL
+app.get('/', (req, res) => {
+  res.send('Hello from the MarketMatchAI Bot server!');
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// Start the server
+app.listen(port, () => {
+  console.log(`Server is running on http://localhost:${port}`);
+});
