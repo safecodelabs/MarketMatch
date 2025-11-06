@@ -1,4 +1,4 @@
-const chatbotController = require('../controllers/chatbotController');
+const chatbotController = require('../chatbotController');
 const { flowSteps } = require('../utils/constants');
 const express = require('express');
 const router = express.Router();
@@ -57,13 +57,13 @@ router.post('/', async (req, res) => {
       }
       
       const greetings = ['hi', 'hello', 'hey', 'start'];
-      if (greetings.includes(msg)) {
+      if (greetings.includes(msg.toLowerCase())) {
         session.step = 'chooseService';
       
         const greetingText = getGreetingByIST();
         const welcomeMessage = `${greetingText}!`;
       
-        await chatbotController.sendMessage(sender, welcomeMessage);
+        await chatbotController.sendMessage(sender, welcomeMessage); // This now works
         await chatbotController.sendMessage(sender, flowSteps.chooseService);
       
         await saveSession(sender, session);
