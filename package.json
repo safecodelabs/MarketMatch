@@ -9,11 +9,25 @@
         "axios": "^1.8.4",
         "body-parser": "^1.20.2",
         "choco": "^0.2.1",
-        "dotenv": "^16.3.1",
-        "express": "^4.18.2",
+        "dotenv": "^16.6.1",
+        "express": "^4.21.2",
         "firebase-admin": "^13.2.0",
+        "googleapis": "^164.1.0",
         "moment-timezone": "^0.5.48",
         "qrcode-terminal": "^0.12.0",
         "whatsapp-web.js": "^1.27.0"
-    }
+    },
+    "description": "marketmatchai/\r ├── src/\r │   ├── api/                     # Route entrypoints\r │   │   ├── index.js             # Main router\r │   │   ├── jobs.js              # /jobs\r │   │   ├── cars.js              # /cars\r │   │   ├── housing.js           # /housing\r │   │   ├── services.js          # /local services\r │   │   ├── users.js             # /profile, auth\r │   │   └── admin.js             # /moderation tools\r │\r │   ├── bots/\r │   │   ├── whatsappBot.js       # Main webhook logic\r │   │   ├── messageParser.js     # Parse user input\r │   │   ├── commandRouter.js     # Match input → action\r │   │   └── templates/           # Prewritten bot responses\r │\r │   ├── categories/              # Category logic (modular)\r │   │   ├── jobs.js\r │   │   ├── cars.js\r │   │   ├── housing.js\r │   │   ├── services.js\r │   │   └── clothing.js\r │\r │   ├── controllers/             # Business logic per route\r │   │   ├── jobsController.js\r │   │   ├── carsController.js\r │   │   ├── usersController.js\r │   │   └── housingController.js\r │\r │   ├── firebase/\r │   │   ├── firebaseConfig.js    # Init Firebase App + Firestore\r │   │   └── auth.js              # Session validation\r │\r │   ├── services/                # Shared services\r │   │   ├── whatsappService.js\r │   │   ├── searchService.js     # Filter/search helpers\r │   │   ├── favoritesService.js\r │   │   ├── notificationService.js\r │   │   └── paymentService.js    # (future)\r │\r │   ├── middlewares/\r │   │   └── verifyToken.js\r │\r │   ├── utils/\r │   │   ├── logger.js\r │   │   ├── formatter.js\r │   │   └── idGenerator.js\r │\r │   └── index.js                # Main server entry\r │\r ├── .env                        # Firebase + WhatsApp creds\r ├── .gitignore\r ├── package.json\r └── README.md",
+    "main": "server.js",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/safecodelabs/MarketMatch.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/safecodelabs/MarketMatch/issues"
+    },
+    "homepage": "https://github.com/safecodelabs/MarketMatch#readme"
 }
