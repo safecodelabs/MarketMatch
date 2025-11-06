@@ -3,14 +3,29 @@ const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
 
-// ✅ 1. Load Google Sheets credentials (separate from Firebase)
-const CREDENTIALS_PATH = path.join(__dirname, "../../credentials/credentials-sheets.json");
-const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf-8"));
+let credentials;
 
-// ✅ 2. Define the required scopes for Google Sheets access
+// ✅ 1. Load credentials
+try {
+  // If env var is set (e.g., in Railway)
+  if (process.env.GOOGLE_SHEETS_CREDENTIALS) {
+    credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
+    console.log("✅ Loaded Google Sheets credentials from environment variables.");
+  } else {
+    // Else fallback to local file (for local dev)
+    const CREDENTIALS_PATH = path.join(__dirname, "../../credentials/credentials-sheets.json");
+    credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf-8"));
+    console.log("✅ Loaded Google Sheets credentials from local file.");
+  }
+} catch (error) {
+  console.error("❌ Failed to load Google Sheets credentials:", error.message);
+  throw new Error("Google Sheets credentials missing or invalid");
+}
+
+// ✅ 2. Define required scopes
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
-// ✅ 3. Authorize with the Sheets service account
+// ✅ 3. Authorize
 const auth = new google.auth.JWT(
   credentials.client_email,
   null,
@@ -21,7 +36,7 @@ const auth = new google.auth.JWT(
 // ✅ 4. Initialize Sheets API
 const sheets = google.sheets({ version: "v4", auth });
 
-// ✅ 5. Your Google Sheet ID
+// ✅ 5. Google Sheet ID
 const SPREADSHEET_ID = "17dJX69_h4TeL8_D7-Htzlzw9NdXvsCqkvBwbO-XerCE";
 
 // ✅ 6. Fetch housing data
@@ -48,7 +63,7 @@ async function getHousingData() {
   }
 }
 
-// ✅ 7. Append a new housing lead
+// ✅ 7. Append new housing lead
 async function addHousingLead(lead) {
   try {
     await sheets.spreadsheets.values.append({
