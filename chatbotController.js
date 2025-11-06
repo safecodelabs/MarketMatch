@@ -2,6 +2,7 @@ const axios = require('axios');
 const { getSession, saveSession } = require('./utils/sessionStore');
 const { detectIntent, getMissingInfo } = require('./utils/messageUtils');
 const { flowSteps } = require('./utils/constants');
+const { getHousingData } = require('./utils/googleSheets');
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
@@ -12,70 +13,122 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
  * @param {object|string} message - The message object (for interactive) or text string.
  * @param {string} phone_number_id - The phone number ID to send the message from.
  */
-async function sendMessage(to, message, phone_number_id) {
+async function sendMessage(to, message, phone_number_id = PHONE_NUMBER_ID) {
   console.log(`✉️  Sending message to ${to}:`, JSON.stringify(message));
   try {
     const url = `https://graph.facebook.com/v19.0/${phone_number_id}/messages`;
     const payload = {
       messaging_product: 'whatsapp',
       to: to,
-      ...(typeof message === 'string' ? { type: 'text', text: { body: message } } : message),
+      ...(typeof message === 'string'
+        ? { type: 'text', text: { body: message } }
+        : message),
     };
 
     await axios.post(url, payload, {
       headers: {
-        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
         'Content-Type': 'application/json',
       },
     });
+
     console.log('✅ Message sent successfully.');
   } catch (error) {
-    console.error('❌ Error sending message:', error.response ? error.response.data : error.message);
+    console.error(
+      '❌ Error sending message:',
+      error.response ? error.response.data : error.message
+    );
   }
 }
 
 /**
  * Handles incoming messages based on the user's session.
- * @param {string} sender - The user's phone number.
- * @param {string} msg - The incoming message text or button ID.
- * @param {object} session - The user's current session data.
- * @returns {object} The updated session object.
  */
-async function handleIncomingMessage(sender, msg, session, phone_number_id) {
+async function handleIncomingMessage(sender, msg, session, phone_number_id = PHONE_NUMBER_ID) {
   const currentStep = session.step;
 
+  // 🔍 Quick Intent Detection
+  if (msg.includes('rent') || msg.includes('flat') || msg.includes('house')) {
+    const listings = await getHousingData();
+    const sample = listings.slice(0, 3); // show first 3 only
+
+    let message = '🏠 Available Properties:\n\n';
+    sample.forEach((item, i) => {
+      message += `${i + 1}. ${item.property_type} in ${item.location} - ${item.price}\n📞 ${item.contact}\n\n`;
+    });
+
+    await sendMessage(sender, message, phone_number_id);
+    return session;
+  }
+
   switch (currentStep) {
-    case 'chooseService':
+    case 'chooseService': {
       const validServices = ['housing', 'jobs', 'leads'];
       if (validServices.includes(msg)) {
         session.step = 'collectingInfo';
         session.intent = msg;
-        await sendMessage(sender, `Great! You're interested in *${msg}*. What are you looking for? \n\n(e.g., "1bhk in Noida under 15000", "marketing job with 2 years experience in Delhi")`, phone_number_id);
+        await sendMessage(
+          sender,
+          `Great! You're interested in *${msg}*. What are you looking for?\n\n(e.g., "1bhk in Noida under 15000", "marketing job in Delhi")`,
+          phone_number_id
+        );
       } else {
-        await sendMessage(sender, "Sorry, I didn't get that. Please choose one of the options.", phone_number_id);
+        await sendMessage(
+          sender,
+          "Sorry, I didn't get that. Please choose one of the options below 👇",
+          phone_number_id
+        );
         await sendMessage(sender, flowSteps.chooseService, phone_number_id);
       }
       break;
+    }
 
-    case 'collectingInfo':
+    case 'collectingInfo': {
       const intent = session.intent;
       const missing = getMissingInfo(intent, msg);
 
       if (missing.length > 0) {
-        await sendMessage(sender, `I see you're looking for *${intent}*. Could you please also provide: *${missing.join(", ")}*?`, phone_number_id);
+        await sendMessage(
+          sender,
+          `I see you're looking for *${intent}*. Could you also provide: *${missing.join(', ')}*?`,
+          phone_number_id
+        );
       } else {
         session.step = 'showResults';
-        await sendMessage(sender, `✅ Perfect! Searching for *${intent}* with the details you provided. One moment...`, phone_number_id);
-        // TODO: Add logic here to fetch data from Google Sheets
-        await sendMessage(sender, "Here are some matching results (demo):\n- Listing 1\n- Listing 2", phone_number_id);
+        await sendMessage(
+          sender,
+          `✅ Perfect! Searching for *${intent}* based on your request...`,
+          phone_number_id
+        );
+
+        if (intent === 'housing') {
+          const listings = await getHousingData();
+          const sample = listings.slice(0, 3);
+
+          let message = '🏠 Top housing options:\n\n';
+          sample.forEach((item, i) => {
+            message += `${i + 1}. ${item.property_type} in ${item.location} - ${item.price}\n📞 ${item.contact}\n\n`;
+          });
+
+          await sendMessage(sender, message, phone_number_id);
+        } else {
+          await sendMessage(sender, 'Feature coming soon 🚧', phone_number_id);
+        }
       }
       break;
+    }
 
-    default:
-      await sendMessage(sender, "I'm not sure how to help with that. Let's start over.", phone_number_id);
+    default: {
+      await sendMessage(
+        sender,
+        "I'm not sure how to help with that. Let's start over.",
+        phone_number_id
+      );
       await sendMessage(sender, flowSteps.chooseService, phone_number_id);
       session.step = 'chooseService';
+    }
   }
+
   return session;
 }
 

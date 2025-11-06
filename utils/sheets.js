@@ -1,36 +1,53 @@
-import { google } from "googleapis";
-import path from "path";
-import { fileURLToPath } from "url";
-import dotenv from "dotenv";
-dotenv.config();
+// src/utils/googleSheets.js
+const { google } = require("googleapis");
+const fs = require("fs");
+const path = require("path");
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const CREDENTIALS_PATH = path.join(__dirname, "../../credentials/serviceAccount.json");
+const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
 
-const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(__dirname, "../../credentials/serviceAccount.json"),
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-});
+const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+const auth = new google.auth.JWT(
+  credentials.client_email,
+  null,
+  credentials.private_key.replace(/\\n/g, "\n"),
+  SCOPES
+);
 
 const sheets = google.sheets({ version: "v4", auth });
 
-const SPREADSHEET_ID = process.env.SHEET_ID;
+// Your spreadsheet ID (from the URL)
+const SPREADSHEET_ID = "YOUR_SHEET_ID_HERE";
 
-// Read all data from a sheet tab (like 'housing')
-export async function readData(sheetName) {
+async function getHousingData() {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:H`,
+    range: "housing!A2:G", // skip headers
   });
-  return response.data.values;
+
+  const rows = response.data.values || [];
+  return rows.map(([id, name, location, property_type, price, contact, description]) => ({
+    id,
+    name,
+    location,
+    property_type,
+    price,
+    contact,
+    description,
+  }));
 }
 
-// Append a new row (like new lead)
-export async function appendData(sheetName, rowData) {
+async function addHousingLead(lead) {
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:H`,
-    valueInputOption: "USER_ENTERED",
-    resource: { values: [rowData] },
+    range: "housing!A:G",
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [
+        [lead.id, lead.name, lead.location, lead.property_type, lead.price, lead.contact, lead.description],
+      ],
+    },
   });
 }
+
+module.exports = { getHousingData, addHousingLead };
