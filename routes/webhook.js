@@ -61,7 +61,7 @@ router.post('/', async (req, res) => {
         session.step = 'chooseService';
       
         const greetingText = getGreetingByIST();
-        const welcomeMessage = `${greetingText}!ee!`;
+        const welcomeMessage = `${greetingText}!`;
       
         await chatbotController.sendMessage(sender, welcomeMessage);
         await chatbotController.sendMessage(sender, flowSteps.chooseService);
