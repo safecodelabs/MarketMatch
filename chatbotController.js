@@ -2,7 +2,7 @@ const axios = require('axios');
 const { getSession, saveSession } = require('./utils/sessionStore');
 const { detectIntent, getMissingInfo } = require('./utils/messageUtils');
 const { flowSteps } = require('./utils/constants');
-const { getHousingData } = require('./utils/googleSheets');
+const { getHousingData } = require('./utils/sheets');
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
