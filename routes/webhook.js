@@ -28,6 +28,8 @@ router.post('/', async (req, res) => {
     const entry = body.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;
+    const phone_number_id = value?.metadata?.phone_number_id;
+    console.log("📞 phone_number_id:", phone_number_id);
     const messages = value?.messages;
 
     if (messages && messages.length > 0) {
@@ -63,15 +65,15 @@ router.post('/', async (req, res) => {
         const greetingText = getGreetingByIST();
         const welcomeMessage = `${greetingText}!`;
       
-        await chatbotController.sendMessage(sender, welcomeMessage); // This now works
-        await chatbotController.sendMessage(sender, flowSteps.chooseService);
+        await chatbotController.sendMessage(sender, welcomeMessage, phone_number_id); // This now works
+        await chatbotController.sendMessage(sender, flowSteps.chooseService, phone_number_id);
       
         await saveSession(sender, session);
         return res.sendStatus(200); // 🛑 stops further execution
       }
       
       if (msg) {
-        const newSession = await chatbotController.handleIncomingMessage(sender, msg, session);
+        const newSession = await chatbotController.handleIncomingMessage(sender, msg, session, phone_number_id);
       
         if (newSession && typeof newSession === 'object') {
           await saveSession(sender, newSession);
