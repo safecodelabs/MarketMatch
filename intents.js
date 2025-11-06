@@ -1,15 +1,14 @@
-// intents.js
 module.exports = {
   housing: {
-    keywords: ["flat", "1bhk", "2bhk", "3bhk", "house", "villa", "apartment", "pg", "room", "rent", "tenant"],
-    requiredInfo: ["city", "area", "budget"],
+    keywords: ["flat", "bhk", "room", "rent", "house", "pg"],
+    requiredInfo: ["city", "property type", "budget"]
   },
   jobs: {
-    keywords: ["job", "hiring", "vacancy", "recruitment", "work", "internship", "position"],
-    requiredInfo: ["job_type", "experience", "location"],
+    keywords: ["job", "hiring", "work", "career", "internship"],
+    requiredInfo: ["job type", "experience", "location"]
   },
   leads: {
-    keywords: ["lead", "database", "contact list", "buyers", "sellers"],
-    requiredInfo: ["category", "quantity"],
+    keywords: ["lead", "leads", "database", "contacts"],
+    requiredInfo: ["category", "quantity"]
   }
 };

@@ -61,7 +61,7 @@ router.post('/', async (req, res) => {
         session.step = 'chooseService';
       
         const greetingText = getGreetingByIST();
-        const welcomeMessage = `${greetingText}! Welcome to GlossDrive 🚗✨\nDoorstep car cleaning, done right — fast, spotless, hassle-free!`;
+        const welcomeMessage = `${greetingText}!ee!`;
       
         await chatbotController.sendMessage(sender, welcomeMessage);
         await chatbotController.sendMessage(sender, flowSteps.chooseService);
