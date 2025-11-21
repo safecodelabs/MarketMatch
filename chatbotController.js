@@ -1,164 +1,116 @@
-const axios = require('axios');
-const { getSession, saveSession } = require('./utils/sessionStore');
-const { detectIntent, getMissingInfo } = require('./utils/messageUtils');
-const { flowSteps } = require('./utils/constants');
-const { getHousingData } = require('./utils/sheets');
+const axios = require("axios");
+const { getSession, saveSession } = require("./utils/sessionStore");
+const { getHousingData } = require("./utils/sheets");
+const detectIntent = require("./utils/intents");   // ✅ Moved to separate file
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
-/**
- * Sends a message to a WhatsApp user.
- */
+/* ---------------------------------------------------
+   📤 UNIVERSAL SEND MESSAGE
+-----------------------------------------------------*/
 async function sendMessage(to, message, phone_number_id = PHONE_NUMBER_ID) {
-  console.log(`✉️  Sending message to ${to}:`, JSON.stringify(message, null, 2));
+  console.log(`✉️ Sending message to ${to}:`, message);
+
+  const url = `https://graph.facebook.com/v19.0/${phone_number_id}/messages`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "text",
+    text: { body: message },
+  };
+
   try {
-    const url = `https://graph.facebook.com/v19.0/${phone_number_id}/messages`;
-    const payload = {
-      messaging_product: 'whatsapp',
-      to: to,
-      ...(typeof message === 'string'
-        ? { type: 'text', text: { body: message } }
-        : message),
-    };
-
-    console.log('🪵 DEBUG → WhatsApp API Payload:', JSON.stringify(payload, null, 2));
-
     await axios.post(url, payload, {
       headers: {
         Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
     });
-
-    console.log('✅ Message sent successfully.');
-  } catch (error) {
+    console.log("✅ Message sent successfully");
+  } catch (err) {
     console.error(
-      '❌ Error sending message:',
-      error.response ? JSON.stringify(error.response.data, null, 2) : error.message
+      "❌ Error sending:",
+      err.response ? err.response.data : err.message
     );
   }
 }
 
-/**
- * Handles incoming messages based on the user's session.
- */
-async function handleIncomingMessage(sender, msg, session, phone_number_id = PHONE_NUMBER_ID) {
-  console.log(`\n📩 Incoming message from ${sender}: "${msg}"`);
-  console.log('🪵 DEBUG → Current Session:', JSON.stringify(session, null, 2));
+/* ---------------------------------------------------
+   🧠 MAIN LOGIC — HANDLE INCOMING MESSAGE
+-----------------------------------------------------*/
+async function handleIncomingMessage(sender, msg, session, phone_number_id) {
+  console.log(`📩 Incoming from ${sender}: ${msg}`);
+  console.log("Current session:", session);
 
-  const currentStep = session.step || 'chooseService';
-  console.log(`🪵 DEBUG → Current Step: ${currentStep}`);
+  const intent = detectIntent(msg);  // ✅ Now externalized
 
-  // 🔍 Quick Intent Detection
-  if (msg.toLowerCase().includes('rent') || msg.toLowerCase().includes('flat') || msg.toLowerCase().includes('house')) {
-    console.log('🪵 DEBUG → Quick Intent: housing/rent/flat detected');
-    try {
-      const listings = await getHousingData();
-      console.log(`🪵 DEBUG → ${listings.length} housing listings fetched from Google Sheets.`);
+  if (intent === "housing") {
+    return await handleHousing(sender, msg, session, phone_number_id);
+  }
 
-      const sample = listings.slice(0, 3);
-      let message = '🏠 Available Properties:\n\n';
-      sample.forEach((item, i) => {
-        message += `${i + 1}. ${item.property_type} in ${item.location} - ${item.price}\n📞 ${item.contact}\n\n`;
-      });
-
-      await sendMessage(sender, message, phone_number_id);
-    } catch (err) {
-      console.error('❌ Error fetching housing data:', err.message);
-      await sendMessage(sender, '⚠️ Something went wrong while fetching data. Please try again later.');
-    }
+  if (intent === "jobs") {
+    await sendMessage(sender, "💼 Job search module coming soon!");
     return session;
   }
 
-  switch (currentStep) {
-    case 'chooseService': {
-      console.log('🪵 DEBUG → Handling "chooseService" step');
-
-      const validServices = ['housing', 'jobs', 'leads'];
-      if (validServices.includes(msg.toLowerCase())) {
-        session.step = 'collectingInfo';
-        session.intent = msg.toLowerCase();
-        console.log(`🪵 DEBUG → User selected service: ${session.intent}`);
-
-        await sendMessage(
-          sender,
-          `Great! You're interested in *${msg}*. What are you looking for?\n\n(e.g., "1bhk in Noida under 15000", "marketing job in Delhi")`,
-          phone_number_id
-        );
-      } else {
-        console.log('🪵 DEBUG → Invalid service selected, showing options again');
-        await sendMessage(
-          sender,
-          "Sorry, I didn't get that. Please choose one of the options below 👇",
-          phone_number_id
-        );
-        await sendMessage(sender, flowSteps.chooseService, phone_number_id);
-      }
-      break;
-    }
-
-    case 'collectingInfo': {
-      console.log('🪵 DEBUG → Handling "collectingInfo" step');
-      const intent = session.intent;
-      console.log(`🪵 DEBUG → Current intent: ${intent}`);
-
-      const missing = getMissingInfo(intent, msg);
-      console.log(`🪵 DEBUG → Missing info fields:`, missing);
-
-      if (missing.length > 0) {
-        await sendMessage(
-          sender,
-          `I see you're looking for *${intent}*. Could you also provide: *${missing.join(', ')}*?`,
-          phone_number_id
-        );
-      } else {
-        session.step = 'showResults';
-        console.log('🪵 DEBUG → All required info gathered, moving to showResults');
-
-        await sendMessage(
-          sender,
-          `✅ Perfect! Searching for *${intent}* based on your request...`,
-          phone_number_id
-        );
-
-        if (intent === 'housing') {
-          try {
-            const listings = await getHousingData();
-            console.log(`🪵 DEBUG → ${listings.length} housing listings fetched from Google Sheets.`);
-
-            const sample = listings.slice(0, 3);
-            let message = '🏠 Top housing options:\n\n';
-            sample.forEach((item, i) => {
-              message += `${i + 1}. ${item.property_type} in ${item.location} - ${item.price}\n📞 ${item.contact}\n\n`;
-            });
-
-            await sendMessage(sender, message, phone_number_id);
-          } catch (err) {
-            console.error('❌ Error fetching housing listings:', err.message);
-            await sendMessage(sender, '⚠️ Unable to fetch housing listings. Try again later.');
-          }
-        } else {
-          await sendMessage(sender, '🚧 Feature coming soon!', phone_number_id);
-        }
-      }
-      break;
-    }
-
-    default: {
-      console.log('🪵 DEBUG → Unknown step, resetting to chooseService');
-      await sendMessage(
-        sender,
-        "I'm not sure how to help with that. Let's start over.",
-        phone_number_id
-      );
-      await sendMessage(sender, flowSteps.chooseService, phone_number_id);
-      session.step = 'chooseService';
-    }
+  if (intent === "leads") {
+    await sendMessage(sender, "📊 Leads finder module is coming soon!");
+    return session;
   }
 
-  console.log('🪵 DEBUG → Updated Session:', JSON.stringify(session, null, 2));
+  await sendMessage(
+    sender,
+    "I'm here to help! Try:\n\n" +
+      "• *2bhk in Noida under 15k*\n" +
+      "• *IT job in Bangalore*\n" +
+      "• *Real estate buyer leads in Gurgaon*"
+  );
+
   return session;
 }
 
-module.exports = { sendMessage, handleIncomingMessage };
+/* ---------------------------------------------------
+   🏠 HOUSING HANDLER
+-----------------------------------------------------*/
+async function handleHousing(sender, msg, session, phone_number_id) {
+  await sendMessage(sender, "🔍 Searching the best options for you...");
+
+  try {
+    const listings = await getHousingData();
+
+    if (!listings || listings.length === 0) {
+      await sendMessage(sender, "⚠️ No listings found at the moment.");
+      return session;
+    }
+
+    let message = "🏠 *Top Properties Matching Your Query:*\n\n";
+
+    listings.slice(0, 3).forEach((item, i) => {
+      message += `${i + 1}. *${item.property_type}* in *${item.location}*\n`;
+      message += `💰 ${item.price}\n`;
+      message += `📞 ${item.contact}\n\n`;
+    });
+
+    await sendMessage(sender, message);
+
+    session.step = "housingShown";
+    session.lastQuery = msg;
+
+    return session;
+  } catch (err) {
+    console.error("❌ Error fetching housing data:", err.message);
+    await sendMessage(
+      sender,
+      "⚠️ Something went wrong while fetching properties. Try again shortly."
+    );
+
+    return session;
+  }
+}
+
+module.exports = {
+  sendMessage,
+  handleIncomingMessage,
+};
