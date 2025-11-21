@@ -31,3 +31,6 @@ config/*.json
 
 firebaseCreds/serviceAccount.json
 credentials/
+testSheets.js
+testAI.js
+testReq.js

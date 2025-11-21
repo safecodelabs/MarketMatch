@@ -5,7 +5,7 @@ const { flowSteps } = require('./utils/constants');
 const { getHousingData } = require('./utils/sheets');
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 /**
  * Sends a message to a WhatsApp user.

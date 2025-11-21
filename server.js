@@ -1,5 +1,7 @@
 require('dotenv').config();
 const express = require('express');
+app.use('/webhook', webhookRouter);
+
 const webhookRouter = require('./routes/webhook'); // Import the webhook router
 
 // --- EXPRESS SETUP ---
