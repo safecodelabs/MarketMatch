@@ -1,6 +1,6 @@
+// intentEngine.js
 /**
  * INTENT ENGINE — scalable & modular
- * Add more intents anytime without touching chatbotController.
  */
 
 function detectIntent(message) {
@@ -27,7 +27,6 @@ function detectIntent(message) {
     }
   ];
 
-  // Auto-detect by matching keywords
   for (const intent of intents) {
     if (intent.keywords.some(k => text.includes(k))) {
       return intent.name;
