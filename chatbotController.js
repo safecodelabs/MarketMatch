@@ -117,7 +117,7 @@ function getMissingHousingFields(h) {
 /* ---------------------------------------------------
    ✨ AI generates follow-up question dynamically
 -----------------------------------------------------*/
-const { askAI } = require("./ai/aiEngine");
+const { askAI } = require("./src/ai/aiEngine");
 
 async function buildDynamicQuestion(missing, userMsg) {
   const prompt = `
