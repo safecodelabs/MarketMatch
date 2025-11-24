@@ -1,7 +1,7 @@
 const axios = require("axios");
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { getHousingData } = require("./utils/sheets");
-const { classify } = require("./ai/aiEngine");  // ❗ Use AI for intent + extraction
+const { classify } = require("./src/ai/aiEngine");  // ❗ Use AI for intent + extraction
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
