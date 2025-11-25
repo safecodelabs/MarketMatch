@@ -1,7 +1,4 @@
 // src/flows/housingFlow.js
-const { handleBuy } = require("./buy.flow");
-const { handleSell } = require("./sell.flow");
-const { handlePost } = require("./postListing.flow");
 
 const DEFAULT_SESSION = {
   flow: "housing",
@@ -37,17 +34,17 @@ async function startOrContinue(action, text, session = {}, entities = {}, userId
     session.step = "collect";
   }
 
-  // Route based on action
+  // Unified flow handlers
   try {
     switch (action) {
       case "buy":
-        return await handleBuy(text, session, userId);
+        return handleBuy(text, session);
 
       case "sell":
-        return await handleSell(text, session, userId);
+        return handleSell(text, session);
 
       case "post":
-        return await handlePost(text, session, userId);
+        return handlePost(text, session);
 
       default:
         return {
@@ -72,6 +69,72 @@ async function startOrContinue(action, text, session = {}, entities = {}, userId
       nextSession: session
     };
   }
+}
+
+// -----------------------
+// Internal handlers
+// -----------------------
+function handleBuy(text, session) {
+  // Collect or confirm buy details
+  if (!session.data.location && !session.data.budget) {
+    return {
+      reply: {
+        type: "text",
+        text: { body: "🏠 You're looking to *buy*. Please provide location and budget." }
+      },
+      nextSession: session
+    };
+  }
+
+  return {
+    reply: {
+      type: "text",
+      text: { body: `Searching for properties in ${session.data.location || "your area"} under ${session.data.budget || "your budget"}...` }
+    },
+    nextSession: session
+  };
+}
+
+function handleSell(text, session) {
+  if (!session.data.propertyType && !session.data.location && !session.data.price) {
+    return {
+      reply: {
+        type: "text",
+        text: { body: "📤 You want to *sell/rent out* a property. Please provide property type, location and price/rent." }
+      },
+      nextSession: session
+    };
+  }
+
+  return {
+    reply: {
+      type: "text",
+      text: { body: `Your listing for ${session.data.propertyType || "property"} in ${session.data.location || "location"} at ${session.data.price || "price"} has been noted.` }
+    },
+    nextSession: session
+  };
+}
+
+function handlePost(text, session) {
+  if (!text) {
+    return {
+      reply: {
+        type: "text",
+        text: { body: "📝 Please send your complete listing:\nExample:\n'2BHK in Noida sector 62, Rent 15k, Contact 9876543210'" }
+      },
+      nextSession: session
+    };
+  }
+
+  session.data.listingText = text;
+
+  return {
+    reply: {
+      type: "text",
+      text: { body: "✅ Your listing has been received. Thank you!" }
+    },
+    nextSession: session
+  };
 }
 
 module.exports = { startOrContinue };
