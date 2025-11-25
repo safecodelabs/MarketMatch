@@ -16,7 +16,7 @@
 
 require("dotenv").config();
 const Groq = require("groq-sdk");
-const intents = require("../../intentsintents");
+const intents = require("../../intents");
 const { detectIntent: fallbackDetectIntent } = require("../utils/messageUtils");
 
 const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
