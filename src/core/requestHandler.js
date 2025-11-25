@@ -1,7 +1,6 @@
-// src/core/requestHandler.js
 const { getSession, saveSession } = require("../../utils/sessionStore");
 const flowManager = require("../flows/flowManager");
-const { sendMessageWhatsapp } = require("../../utils/messageUtils"); // adapt name if different
+const { sendMessage } = require("../../services/messageService"); // Use the same sendMessage as other files
 
 /**
  * requestHandler handles incoming webhook payload (whatsapp)
@@ -9,32 +8,30 @@ const { sendMessageWhatsapp } = require("../../utils/messageUtils"); // adapt na
  */
 async function requestHandler(payload) {
   try {
-    const { from, text } = payload; // adapt based on how your webhook sends data
+    const { from, text } = payload; 
     if (!from || !text) {
       console.warn("Invalid payload:", payload);
       return false;
     }
 
-    // load session
-    const session = (await getSession(from)) || { step: "start" };
+    // Load session
+    let session = (await getSession(from)) || { housingFlow: { step: "start" } };
 
-    // route message
+    // Route message through AI / flow manager
     const { reply, nextSession } = await flowManager.processMessage(text, session, from);
 
-    // save session (defensive)
+    // Save session defensively
     if (nextSession && typeof nextSession === "object") {
       await saveSession(from, nextSession);
     }
 
-    // send reply
+    // Send reply
     if (reply) {
-      // unify reply shape: if text string is passed, convert to object
-      let out = reply;
-      if (typeof reply === "string") {
-        out = { type: "text", text: { body: reply } };
-      }
+      let out = typeof reply === "string"
+        ? { type: "text", text: { body: reply } }
+        : reply;
 
-      await sendMessageWhatsapp(from, out);
+      await sendMessage(from, out);
     }
 
     return true;

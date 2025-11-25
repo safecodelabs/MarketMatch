@@ -12,38 +12,66 @@ const DEFAULT_SESSION = {
 
 /**
  * startOrContinue(action, text, session, entities, userId)
- * action: "buy" | "sell" | "post"
+ * Routes user input to the appropriate housing flow handler.
+ * 
+ * @param {"buy"|"sell"|"post"} action
+ * @param {string} text
+ * @param {object} session
+ * @param {object} entities
+ * @param {string} userId
+ * @returns {Promise<{reply: object, nextSession: object}>}
  */
 async function startOrContinue(action, text, session = {}, entities = {}, userId) {
+  // Initialize session safely
   session = session && typeof session === "object" ? { ...DEFAULT_SESSION, ...session } : { ...DEFAULT_SESSION };
 
+  // Set current intent
   session.intent = action;
   session.flow = "housing";
-  // merge entities into session.data
+
+  // Merge entities into session data
   session.data = { ...(session.data || {}), ...(entities || {}) };
 
-  // if session.step is start or collecting, route accordingly
-  if (!session.step || session.step === "start" || session.step === "collect") {
+  // Ensure step is set
+  if (!session.step || ["start", "collect"].includes(session.step)) {
     session.step = "collect";
   }
 
-  if (action === "buy") {
-    return await handleBuy(text, session);
-  }
+  // Route based on action
+  try {
+    switch (action) {
+      case "buy":
+        return await handleBuy(text, session, userId);
 
-  if (action === "sell") {
-    return await handleSell(text, session);
-  }
+      case "sell":
+        return await handleSell(text, session, userId);
 
-  if (action === "post") {
-    return await handlePost(text, session);
-  }
+      case "post":
+        return await handlePost(text, session, userId);
 
-  // default fallback
-  return {
-    reply: { type: "text", text: { body: "Tell me what you are looking for (example: 2BHK in Mumbai under 25k)." } },
-    nextSession: session
-  };
+      default:
+        return {
+          reply: {
+            type: "text",
+            text: {
+              body: "I didn't understand that. Please tell me what you are looking for (e.g., '2BHK in Mumbai under 25k')."
+            }
+          },
+          nextSession: session
+        };
+    }
+  } catch (err) {
+    console.error("housingFlow error:", err);
+    return {
+      reply: {
+        type: "text",
+        text: {
+          body: "Oops! Something went wrong. Please try again."
+        }
+      },
+      nextSession: session
+    };
+  }
 }
 
 module.exports = { startOrContinue };
