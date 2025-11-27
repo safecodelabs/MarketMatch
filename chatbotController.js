@@ -1,7 +1,5 @@
 // chatbotController.js
 const axios = require("axios");
-
-// ✅ Corrected imports: import each function only once
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { getUserProfile, saveUserLanguage } = require("./database/firestore");
 
@@ -9,14 +7,10 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 // -------------------------------------------------------
-// 📤 Send WhatsApp Message
+// 📤 Send WhatsApp Message (NO TRANSLATION)
 // -------------------------------------------------------
-async function sendMessage(to, text, lang = "en") {
+async function sendMessage(to, text) {
   if (!text) return;
-
-  if (lang !== "en") {
-    text = await aiTranslate(text, lang); // make sure aiTranslate is defined/imported
-  }
 
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
@@ -69,29 +63,19 @@ async function sendLanguageButtons(to) {
 }
 
 // -------------------------------------------------------
-// 🧠 MAIN HANDLER
+// 🧠 MAIN HANDLER (NO TRANSLATION)
 // -------------------------------------------------------
 async function handleIncoming(sender, msg) {
   const session = (await getSession(sender)) || {};
   const user = await getUserProfile(sender);
+
   const lang = user?.preferredLanguage || "en";
 
-  // 1️⃣ Returning user → different welcome
-  if (user && msg.toLowerCase() === "hi") {
-    await sendMessage(
-      sender,
-      "Welcome back! 😊 How can I help you today? Looking to buy, sell, rent, or find services like cleaner, maid, handyman, technician, electrician?",
-      lang
-    );
-    return session;
-  }
-
-  // 2️⃣ New user → Introduction + language buttons
+  // NEW USER → show welcome + language buttons
   if (!user && msg.toLowerCase() === "hi") {
     await sendMessage(
       sender,
-      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Buying or selling properties\n• Renting houses or PG\n• Finding a cleaner or maid\n• Hiring a handyman, technician or electrician\n\nChoose your preferred language below 👇",
-      "en"
+      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Buying or selling properties\n• Renting houses or PG\n• Finding a cleaner or maid\n• Hiring a handyman, technician or electrician"
     );
 
     await sendLanguageButtons(sender);
@@ -101,17 +85,24 @@ async function handleIncoming(sender, msg) {
     return session;
   }
 
-  // 3️⃣ Handle language selection
-  if (session.awaitingLang && msg.startsWith("lang_")) {
-    const langCode = msg.replace("lang_", "");
-
-    await saveUserLanguage(sender, langCode);
-
-    await sendMessage(sender, "Language saved! 🎉", langCode);
+  // RETURNING USER
+  if (user && msg.toLowerCase() === "hi") {
     await sendMessage(
       sender,
-      "How can I assist you today?\nYou may tell me:\n• Buy a house\n• 2BHK in Mumbai\n• Sell my plot\n• Find a maid\n• Find an electrician",
-      langCode
+      "Welcome back! 😊 How can I help you today?"
+    );
+    return session;
+  }
+
+  // LANGUAGE SELECTION
+  if (session.awaitingLang && msg.startsWith("lang_")) {
+    const langCode = msg.replace("lang_", "");
+    await saveUserLanguage(sender, langCode);
+
+    await sendMessage(sender, `Language updated successfully! 🎉`);
+    await sendMessage(
+      sender,
+      "How can I assist you today?\nTry:\n• 2BHK in Noida\n• Sell my house\n• I need a maid"
     );
 
     session.awaitingLang = false;
@@ -119,11 +110,10 @@ async function handleIncoming(sender, msg) {
     return session;
   }
 
-  // 4️⃣ From now on → all replies must be in user language
+  // DEFAULT RESPONSE
   await sendMessage(
     sender,
-    "I’m ready! Tell me how I can help.\nTry:\n• 2BHK in Noida\n• Sell my apartment\n• I need a maid",
-    lang
+    "I'm ready! Tell me what you are looking for.\nExamples:\n• 2BHK in Noida\n• Sell my plot\n• 1RK in Pune\n• Need an electrician"
   );
 
   return session;
