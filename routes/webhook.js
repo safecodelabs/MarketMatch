@@ -2,10 +2,8 @@ const chatbotController = require('../chatbotController');
 const { flowSteps } = require('../utils/constants');
 const express = require('express');
 const router = express.Router();
-const axios = require('axios'); // Required for API call to WhatsApp
 
 const { getSession, saveSession } = require('../utils/sessionStore');
-
 
 function getGreetingByIST() {
   const date = new Date();
@@ -13,8 +11,6 @@ function getGreetingByIST() {
   const istDate = new Date(date.getTime() + istOffset);
   const hour = istDate.getUTCHours();
 
-  let greeting;
-  
   if (hour < 12) return 'Good Morning ☀️';
   else if (hour < 17) return 'Good Afternoon 🌤️';
   else return 'Good Evening 🌙';
@@ -28,8 +24,6 @@ router.post('/', async (req, res) => {
     const entry = body.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;
-    const phone_number_id = value?.metadata?.phone_number_id;
-    console.log("📞 phone_number_id:", phone_number_id);
     const messages = value?.messages;
 
     if (messages && messages.length > 0) {
@@ -51,30 +45,30 @@ router.post('/', async (req, res) => {
 
       let session = await getSession(sender);
       if (!session) {
-        session = { step: null, data: {} };
+        session = { step: null, housingFlow: {} };
       }
-      
+
       if (!session.step) {
         session.step = 'chooseService';
       }
-      
+
       const greetings = ['hi', 'hello', 'hey', 'start'];
       if (greetings.includes(msg.toLowerCase())) {
         session.step = 'chooseService';
-      
+
         const greetingText = getGreetingByIST();
         const welcomeMessage = `${greetingText}!`;
-      
-        await chatbotController.sendMessage(sender, welcomeMessage, phone_number_id); // This now works
-        await chatbotController.sendMessage(sender, flowSteps.chooseService, phone_number_id);
-      
+
+        await chatbotController.sendMessage(sender, welcomeMessage);
+        await chatbotController.sendMessage(sender, flowSteps.chooseService);
+
         await saveSession(sender, session);
-        return res.sendStatus(200); // 🛑 stops further execution
+        return res.sendStatus(200);
       }
-      
+
       if (msg) {
-        const newSession = await chatbotController.handleIncomingMessage(sender, msg, session, phone_number_id);
-      
+        const newSession = await chatbotController.handleIncomingMessage(sender, msg, session);
+
         if (newSession && typeof newSession === 'object') {
           await saveSession(sender, newSession);
         } else {

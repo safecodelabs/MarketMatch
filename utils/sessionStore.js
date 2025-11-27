@@ -1,5 +1,5 @@
 // sessionStore.js
-const { db } = require('./firebase'); // correct import
+const { db } = require('../database/firestore'); // correct import
 
 const collection = db.collection('sessions');
 

@@ -1,6 +1,6 @@
 const axios = require("axios");
 const { getSession, saveSession } = require("./utils/sessionStore");
-const { getHousingData } = require("./utils/sheets");
+const { getAllListings } = require("./database/firestore"); // replaced Sheets
 const { classify, searchListings, generateFollowUpQuestion, generatePropertyReply } = require("./src/ai/aiEngine");
 const { startOrContinue } = require("./src/flows/housingFlow");
 
@@ -48,7 +48,6 @@ async function handleIncomingMessage(sender, msg, session) {
 
   // Step 2 → Determine flow
   if (["browse_housing", "buy_house", "sell_house", "post_listing"].includes(ai.category)) {
-    // startOrContinue handles buy/sell/post flow with AI-driven messages
     const action = mapCategoryToAction(ai.category); // buy/sell/post
     const nextSession = await startOrContinue(action, msg, session?.housingFlow, ai.entities, sender);
 
@@ -61,9 +60,10 @@ async function handleIncomingMessage(sender, msg, session) {
       });
       await sendMessage(sender, question);
     } else if (ai.category === "buy_house" || ai.category === "browse_housing") {
-      // Fetch listings and generate AI reply
-      const listings = await getHousingData();
+      // Fetch listings from Firestore and generate AI reply
+      const listings = await getAllListings(200); // 200 = max listings
       const filtered = searchListings(listings, nextSession.data);
+
       if (filtered.length === 0) {
         await sendMessage(sender, "⚠️ No properties match your criteria.");
       } else {

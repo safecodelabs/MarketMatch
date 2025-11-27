@@ -2,7 +2,7 @@ const { sendMessage } = require('../services/messageService');
 const { startOrContinue } = require('../flows/housingFlow');
 const { getSession, saveSession } = require('../utils/sessionStore');
 const { classify, generateFollowUpQuestion } = require('../ai/aiEngine');
-const { getAllListings } = require('../database/firestore');
+const { getAllListings } = require('../../database/firestore');
 
 /**
  * Main entry for incoming WhatsApp messages
