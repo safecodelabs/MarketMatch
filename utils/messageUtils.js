@@ -19,17 +19,6 @@ function getMissingInfo(intent, text) {
     if (!text.match(/\₹?\d{4,6}/)) missing.push("budget");
   }
 
-  if (intent === "jobs") {
-    if (!text.match(/developer|sales|marketing|designer|teacher|driver/)) missing.push("job type");
-    if (!text.match(/\d+\s?(yrs|years)/)) missing.push("experience");
-    if (!text.match(/noida|delhi|gurgaon|remote|mumbai|pune/)) missing.push("location");
-  }
-
-  if (intent === "leads") {
-    if (!text.match(/education|real estate|finance|insurance|retail/)) missing.push("category");
-    if (!text.match(/\d+/)) missing.push("quantity");
-  }
-
   return missing;
 }
 
