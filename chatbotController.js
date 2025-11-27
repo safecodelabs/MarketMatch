@@ -9,25 +9,32 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 /* ---------------------------------------------------
    📤 UNIVERSAL SEND MESSAGE
+   - Detects text vs interactive/object messages
 -----------------------------------------------------*/
 async function sendMessage(to, message, phone_number_id = PHONE_NUMBER_ID) {
   console.log(`✉️ Sending message to ${to}:`, message);
 
   const url = `https://graph.facebook.com/v19.0/${phone_number_id}/messages`;
 
-  const payload = {
-    messaging_product: "whatsapp",
-    to: to,
-    type: "text",
-    text: { body: message }
-  };
+  let payload = { messaging_product: "whatsapp", to: to };
+
+  if (typeof message === "string") {
+    payload.type = "text";
+    payload.text = { body: message };
+  } else if (typeof message === "object" && message !== null) {
+    // Use the object as the payload (interactive message, etc.)
+    payload = { ...payload, ...message };
+  } else {
+    console.error("❌ Invalid message type. Must be string or object.");
+    return;
+  }
 
   try {
     await axios.post(url, payload, {
       headers: {
         Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json"
-      }
+        "Content-Type": "application/json",
+      },
     });
     console.log("✅ Message sent");
   } catch (err) {
@@ -56,7 +63,7 @@ async function handleIncomingMessage(sender, msg, session) {
       const question = await generateFollowUpQuestion({
         missing: nextSession.missing,
         entities: nextSession.data,
-        language: nextSession.language
+        language: nextSession.language,
       });
       await sendMessage(sender, question);
     } else if (ai.category === "buy_house" || ai.category === "browse_housing") {
@@ -70,7 +77,7 @@ async function handleIncomingMessage(sender, msg, session) {
         const reply = await generatePropertyReply({
           entities: nextSession.data,
           listings: filtered,
-          language: nextSession.language
+          language: nextSession.language,
         });
         await sendMessage(sender, reply);
       }
