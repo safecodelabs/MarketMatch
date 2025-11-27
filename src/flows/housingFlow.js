@@ -1,5 +1,6 @@
 // src/flows/housingFlow.js
-const { getHousingData, addHousingLead } = require("../../utils/sheets");
+
+const { addListing, getAllListings } = require("../../database/firestore");
 
 const DEFAULT_SESSION = {
   flow: "housing",
@@ -9,17 +10,13 @@ const DEFAULT_SESSION = {
 };
 
 /**
- * startOrContinue(action, text, session, entities, userId)
- * Routes user input to the appropriate housing flow handler.
- * @param {"buy"|"sell"|"post"} action
- * @param {string} text
- * @param {object} session
- * @param {object} entities
- * @param {string} userId
+ * Main router for all housing actions
  */
 async function startOrContinue(action, text, session = {}, entities = {}, userId) {
-  // Initialize session safely
-  session = session && typeof session === "object" ? { ...DEFAULT_SESSION, ...session } : { ...DEFAULT_SESSION };
+  session = session && typeof session === "object"
+    ? { ...DEFAULT_SESSION, ...session }
+    : { ...DEFAULT_SESSION };
+
   session.intent = action;
   session.flow = "housing";
   session.data = { ...(session.data || {}), ...(entities || {}) };
@@ -31,8 +28,6 @@ async function startOrContinue(action, text, session = {}, entities = {}, userId
         return await handleBuy(text, session, userId);
 
       case "sell":
-        return await handleSell(text, session, userId);
-
       case "post":
         return await handlePost(text, session, userId);
 
@@ -40,9 +35,7 @@ async function startOrContinue(action, text, session = {}, entities = {}, userId
         return {
           reply: {
             type: "text",
-            text: {
-              body: "I didn't understand that. Please tell me what you are looking for (e.g., '2BHK in Delhi under 30k')."
-            }
+            text: { body: "I didn’t understand that. Please tell me what you're looking for." }
           },
           nextSession: session
         };
@@ -52,90 +45,102 @@ async function startOrContinue(action, text, session = {}, entities = {}, userId
     return {
       reply: {
         type: "text",
+        text: { body: "Oops! Something went wrong. Try again." }
+      },
+      nextSession: session
+    };
+  }
+}
+
+/* -----------------------------------
+   BUY → Fetch & Filter Firestore data
+------------------------------------- */
+async function handleBuy(text, session, userId) {
+  const filters = {
+    category: session.data.property_type || null,
+    location: session.data.location || null,
+    maxPrice: session.data.budget || null
+  };
+
+  const allListings = await getAllListings();
+  const listings = filterListings(allListings, filters);
+
+  if (!listings.length) {
+    return {
+      reply: { type: "text", text: { body: "⚠️ No properties match your criteria." }},
+      nextSession: session
+    };
+  }
+
+  const replyText = listings
+    .slice(0, 5)
+    .map(item =>
+      `${item.property_type || item.type} in ${item.location}\n` +
+      `Price: ${item.price}\n` +
+      `Contact: ${item.contact}\n` +
+      `Description: ${item.description || "N/A"}`
+    )
+    .join("\n\n");
+
+  return {
+    reply: { type: "text", text: { body: replyText }},
+    nextSession: session
+  };
+}
+
+/* -----------------------------------
+ SELL / POST → Add listing to Firestore
+------------------------------------- */
+async function handlePost(text, session, userId) {
+  const parts = text.split(",").map(p => p.trim());
+
+  if (parts.length < 6) {
+    return {
+      reply: {
+        type: "text",
         text: {
-          body: "Oops! Something went wrong. Please try again."
+          body: "⚠️ Provide details in this exact format:\n\nName, Location, Type, Price, Contact, Description"
         }
       },
       nextSession: session
     };
   }
-}
 
-// ------------------------
-// HANDLERS
-// ------------------------
+  const [name, location, type, price, contact, description] = parts;
 
-async function handleBuy(text, session, userId) {
-  const listings = await getHousingData();
-
-  // Filter listings based on session.entities
-  const filtered = listings.filter(item => {
-    return (!session.data.property_type || item.property_type.toLowerCase() === session.data.property_type.toLowerCase()) &&
-           (!session.data.location || item.location.toLowerCase() === session.data.location.toLowerCase()) &&
-           (!session.data.budget || parseInt(item.price) <= parseInt(session.data.budget));
+  await addListing({
+    title: name,
+    location,
+    property_type: type,
+    price,
+    contact,
+    description,
+    userId,
+    createdAt: Date.now()
   });
 
-  if (!filtered.length) {
-    return {
-      reply: {
-        type: "text",
-        text: { body: "⚠️ No properties match your criteria." }
-      },
-      nextSession: session
-    };
-  }
-
-  const replyText = filtered
-    .slice(0, 5) // limit results
-    .map(f => `${f.property_type} in ${f.location}, Price: ${f.price}, Contact: ${f.contact}`)
-    .join("\n\n");
-
   return {
-    reply: {
-      type: "text",
-      text: { body: replyText }
-    },
+    reply: { type: "text", text: { body: "✅ Your property has been posted successfully!" }},
     nextSession: session
   };
 }
 
-async function handleSell(text, session, userId) {
-  // Collect info from user
-  session.step = "collect";
-
-  return {
-    reply: {
-      type: "text",
-      text: { body: "Please provide your property details in the format: Name, Location, Property Type, Price, Contact, Description" }
-    },
-    nextSession: session
-  };
-}
-
-async function handlePost(text, session, userId) {
-  // Parse user input
-  const parts = text.split(",").map(p => p.trim());
-  if (parts.length < 6) {
-    return {
-      reply: {
-        type: "text",
-        text: { body: "⚠️ Please provide all details: Name, Location, Property Type, Price, Contact, Description" }
-      },
-      nextSession: session
-    };
-  }
-
-  const [name, location, property_type, price, contact, description] = parts;
-
-  await addHousingLead({ name, location, property_type, price, contact, description });
-
-  return {
-    reply: {
-      type: "text",
-      text: { body: "✅ Your property has been posted successfully!" }
-    },
-    nextSession: session
-  };
+/* -----------------------------------
+ Listing Filter Logic
+------------------------------------- */
+function filterListings(list, filters) {
+  return list.filter(item => {
+    if (filters.category && item.property_type?.toLowerCase() !== filters.category.toLowerCase()) {
+      return false;
+    }
+    if (filters.location && item.location?.toLowerCase() !== filters.location.toLowerCase()) {
+      return false;
+    }
+    if (filters.maxPrice && Number(item.price) > Number(filters.maxPrice)) {
+      return false;
+    }
+    return true;
+  });
 }
 
 module.exports = { startOrContinue };
