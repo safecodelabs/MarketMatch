@@ -12,11 +12,6 @@ const flowSteps = {
             type: 'reply',
             reply: { id: 'housing', title: '🏠 Housing' },
           },
-          {
-            type: 'reply',
-            reply: { id: 'jobs', title: '💼 Jobs' },
-          },
-          { type: 'reply', reply: { id: 'leads', title: '📈 Leads' } },
         ],
       },
     },

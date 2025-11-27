@@ -1,116 +1,134 @@
+// chatbotController.js
 const axios = require("axios");
 const { getSession, saveSession } = require("./utils/sessionStore");
-const { getAllListings } = require("./database/firestore"); // replaced Sheets
-const { classify, searchListings, generateFollowUpQuestion, generatePropertyReply } = require("./src/ai/aiEngine");
-const { startOrContinue } = require("./src/flows/housingFlow");
+const { getUserProfile, saveUserLanguage } = require("./database/firestore");
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
-/* ---------------------------------------------------
-   📤 UNIVERSAL SEND MESSAGE
-   - Detects text vs interactive/object messages
------------------------------------------------------*/
-async function sendMessage(to, message, phone_number_id = PHONE_NUMBER_ID) {
-  console.log(`✉️ Sending message to ${to}:`, message);
+// -------------------------------------------------------
+// 📤 Send WhatsApp Message
+// -------------------------------------------------------
+async function sendMessage(to, text, lang = "en") {
+  if (!text) return;
 
-  const url = `https://graph.facebook.com/v19.0/${phone_number_id}/messages`;
-
-  let payload = { messaging_product: "whatsapp", to: to };
-
-  if (typeof message === "string") {
-    payload.type = "text";
-    payload.text = { body: message };
-  } else if (typeof message === "object" && message !== null) {
-    // Use the object as the payload (interactive message, etc.)
-    payload = { ...payload, ...message };
-  } else {
-    console.error("❌ Invalid message type. Must be string or object.");
-    return;
+  if (lang !== "en") {
+    text = await aiTranslate(text, lang);
   }
+
+  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: text }
+  };
 
   try {
     await axios.post(url, payload, {
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
     });
-    console.log("✅ Message sent");
   } catch (err) {
-    console.error("❌ Send error:", err.response?.data || err.message);
+    console.error("❌ WhatsApp send error:", err.response?.data || err);
   }
 }
 
-/* ---------------------------------------------------
-   🧠 MAIN HANDLER
------------------------------------------------------*/
-async function handleIncomingMessage(sender, msg, session) {
-  console.log(`📩 Incoming from ${sender}: ${msg}`);
-  console.log("Session now:", session);
+// -------------------------------------------------------
+// 📤 Send Language Buttons
+// -------------------------------------------------------
+async function sendLanguageButtons(to) {
+  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
-  // Step 1 → AI classification
-  const ai = await classify(msg);
-  console.log("AI classify:", ai);
-
-  // Step 2 → Determine flow
-  if (["browse_housing", "buy_house", "sell_house", "post_listing"].includes(ai.category)) {
-    const action = mapCategoryToAction(ai.category); // buy/sell/post
-    const nextSession = await startOrContinue(action, msg, session?.housingFlow, ai.entities, sender);
-
-    // Check if flow has missing info → generate follow-up
-    if (nextSession?.missing?.length > 0) {
-      const question = await generateFollowUpQuestion({
-        missing: nextSession.missing,
-        entities: nextSession.data,
-        language: nextSession.language,
-      });
-      await sendMessage(sender, question);
-    } else if (ai.category === "buy_house" || ai.category === "browse_housing") {
-      // Fetch listings from Firestore and generate AI reply
-      const listings = await getAllListings(200); // 200 = max listings
-      const filtered = searchListings(listings, nextSession.data);
-
-      if (filtered.length === 0) {
-        await sendMessage(sender, "⚠️ No properties match your criteria.");
-      } else {
-        const reply = await generatePropertyReply({
-          entities: nextSession.data,
-          listings: filtered,
-          language: nextSession.language,
-        });
-        await sendMessage(sender, reply);
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: "Choose your preferred language:" },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "lang_en", title: "English" } },
+          { type: "reply", reply: { id: "lang_hi", title: "हिंदी" } },
+          { type: "reply", reply: { id: "lang_ta", title: "தமிழ்" } }
+        ]
       }
     }
+  };
 
-    await saveSession(sender, { ...session, housingFlow: nextSession });
-    return { ...session, housingFlow: nextSession };
+  try {
+    await axios.post(url, payload, {
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
+    });
+  } catch (err) {
+    console.error("❌ WhatsApp button send error:", err.response?.data || err);
+  }
+}
+
+// -------------------------------------------------------
+// 🧠 MAIN HANDLER
+// -------------------------------------------------------
+async function handleIncoming(sender, msg) {
+  // Load DB + session
+  const session = (await getSession(sender)) || {};
+  const user = await getUserProfile(sender);
+  const lang = user?.preferredLanguage || "en";
+
+  // 1️⃣ Returning user → different welcome
+  if (user && msg === "hi") {
+    await sendMessage(
+      sender,
+      "Welcome back! 😊 How can I help you today? Looking to buy, sell, rent, or find services like cleaner, maid, handyman, technician, electrician?",
+      lang
+    );
+    return session;
   }
 
-  // fallback for unknown intents
+  // 2️⃣ New user → Introduction + language buttons
+  if (!user && msg === "hi") {
+    await sendMessage(
+      sender,
+      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Buying or selling properties\n• Renting houses or PG\n• Finding a cleaner or maid\n• Hiring a handyman, technician or electrician\n\nChoose your preferred language below 👇",
+      "en"
+    );
+
+    await sendLanguageButtons(sender);
+
+    session.awaitingLang = true;
+    await saveSession(sender, session);
+    return session;
+  }
+
+  // 3️⃣ Handle language selection
+  if (session.awaitingLang && msg.startsWith("lang_")) {
+    const langCode = msg.replace("lang_", "");
+
+    await saveUserLanguage(sender, langCode);
+
+    await sendMessage(sender, "Language saved! 🎉", langCode);
+    await sendMessage(
+      sender,
+      "How can I assist you today?\nYou may tell me:\n• Buy a house\n• 2BHK in Mumbai\n• Sell my plot\n• Find a maid\n• Find an electrician",
+      langCode
+    );
+
+    session.awaitingLang = false;
+    await saveSession(sender, session);
+    return session;
+  }
+
+  // 4️⃣ From now on → all replies must be in user language
   await sendMessage(
     sender,
-    "Hi! I can help you with properties. Try typing examples like:\n• 2BHK in Mumbai under 25k\n• Flat in Delhi\n• 1BHK Noida"
+    "I’m ready! Tell me how I can help.\nTry:\n• 2BHK in Noida\n• Sell my apartment\n• I need a maid",
+    lang
   );
 
   return session;
 }
 
-/* ---------------------------------------------------
-   🗂 Helper: map category to flow action
------------------------------------------------------*/
-function mapCategoryToAction(category) {
-  switch (category) {
-    case "buy_house":
-    case "browse_housing":
-      return "buy";
-    case "sell_house":
-      return "sell";
-    case "post_listing":
-      return "post";
-    default:
-      return "buy";
-  }
-}
-
-module.exports = { sendMessage, handleIncomingMessage };
+module.exports = {
+  handleIncoming,
+  sendMessage
+};
