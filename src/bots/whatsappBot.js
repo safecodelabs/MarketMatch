@@ -1,3 +1,10 @@
+const { sendMessage, sendButtons, sendTranslated } = require('../services/messageService');
+const { getSession, saveSession } = require('../utils/sessionStore');
+const { classify } = require('../ai/aiEngine');
+const { handleAIAction } = require('../flows/housingFlow');
+const { getUserProfile, saveUserLanguage } = require('../database/firestore');
+const { getString } = require('../utils/languageStrings');
+
 async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   if (!sender || !msgBody) return;
 
@@ -6,12 +13,12 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   const userProfile = await getUserProfile(sender);
   const userLang = userProfile?.preferredLanguage || 'en';
 
-  // --- LANGUAGE FEATURE: New user or language change ---
   const lowerMsg = msgBody.toLowerCase();
   const languageKeywords = ['change language', 'language', 'lang'];
 
+  // --- LANGUAGE SELECTION FLOW ---
   if (!userProfile?.preferredLanguage || languageKeywords.includes(lowerMsg) || session?.housingFlow?.awaitingLangSelection) {
-    await sendButtons(sender, getString(userLang, 'selectLanguage') || 'Select your language:', [
+    await sendButtons(sender, getString(userLang, 'chooseLanguage') || 'Select your language:', [
       { id: 'lang_en', title: 'English' },
       { id: 'lang_hi', title: 'हिंदी' },
       { id: 'lang_ta', title: 'தமிழ்' }
@@ -29,14 +36,14 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
     if (lowerMsg.includes('ta') || lowerMsg.includes('தமிழ்')) lang = 'ta';
 
     await saveUserLanguage(sender, lang);
-    session.housingFlow = { ...session.housingFlow, step: 'start', awaitingLangSelection: false, data: {} };
+    session.housingFlow = { step: 'start', data: {}, awaitingLangSelection: false };
     await saveSession(sender, session);
 
-    await sendTranslated(sender, 'menu', lang); // show menu in selected language
+    await sendTranslated(sender, 'menu', lang);
     return session;
   }
 
-  // --- Continue normal AI-first flow ---
+  // --- AI-FIRST FLOW ---
   const ai = await classify(msgBody);
   console.log('🤖 AI classify:', ai);
 
@@ -49,11 +56,9 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       userLang: userProfile?.preferredLanguage || ai.language || 'en'
     });
 
-    if (mustSaveLanguage) {
-      await saveUserLanguage(sender, mustSaveLanguage);
-    }
+    if (mustSaveLanguage) await saveUserLanguage(sender, mustSaveLanguage);
 
-    if (buttons && buttons.length) {
+    if (buttons?.length) {
       await sendButtons(sender, reply || getString(userLang, 'chooseOption') || 'Choose an option:', buttons);
     } else if (reply) {
       await sendMessage(sender, reply);
