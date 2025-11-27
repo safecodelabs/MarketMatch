@@ -1,5 +1,6 @@
 const { startOrContinue } = require('../flows/housingFlow');
 const { generateFollowUpQuestion } = require('../ai/aiEngine');
+const { getString } = require('../utils/languageStrings');
 
 /**
  * Handle explicit commands
@@ -10,9 +11,7 @@ async function handle(cmd, session = {}, userId, language = "en") {
       return {
         reply: {
           type: "text",
-          text: {
-            body: "Menu:\n• Type 'Buy' to find houses\n• Type 'Sell' to post a listing\n• Type 'Post:' to post directly\n• Type 'Listings' to view latest"
-          }
+          text: { body: getString(language, "menu") }
         },
         nextSession: { ...session, step: "start" }
       };
@@ -21,7 +20,7 @@ async function handle(cmd, session = {}, userId, language = "en") {
       return {
         reply: {
           type: "text",
-          text: { body: "Session restarted. What do you want to do?\nBuy / Sell / Post" }
+          text: { body: getString(language, "restart") }
         },
         nextSession: {
           ...session,
@@ -34,7 +33,7 @@ async function handle(cmd, session = {}, userId, language = "en") {
       return {
         reply: {
           type: "text",
-          text: { body: "Please type location or say 'Show me listings' to see latest properties." }
+          text: { body: getString(language, "listings") }
         },
         nextSession: { ...session, step: "start" }
       };
@@ -50,7 +49,7 @@ async function handle(cmd, session = {}, userId, language = "en") {
       return {
         reply: {
           type: "text",
-          text: { body: question || "Please provide your listing details." }
+          text: { body: question || getString(language, "postPrompt") }
         },
         nextSession: { ...session, housingFlow: postSession }
       };
@@ -67,7 +66,7 @@ async function handle(cmd, session = {}, userId, language = "en") {
       return {
         reply: {
           type: "text",
-          text: { body: buyQuestion || "Which location or budget are you looking for?" }
+          text: { body: buyQuestion || getString(language, "buyPrompt") }
         },
         nextSession: { ...session, housingFlow: buySession }
       };
@@ -84,7 +83,7 @@ async function handle(cmd, session = {}, userId, language = "en") {
       return {
         reply: {
           type: "text",
-          text: { body: sellQuestion || "Please provide property details to post." }
+          text: { body: sellQuestion || getString(language, "sellPrompt") }
         },
         nextSession: { ...session, housingFlow: sellSession }
       };
@@ -94,7 +93,7 @@ async function handle(cmd, session = {}, userId, language = "en") {
       return {
         reply: {
           type: "text",
-          text: { body: "Unknown command. Try 'Menu' to see options." }
+          text: { body: getString(language, "unknownCommand") }
         },
         nextSession: session
       };

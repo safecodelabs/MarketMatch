@@ -1,8 +1,35 @@
-const { sendMessage } = require('../services/messageService');
+const { sendMessage, sendButtons } = require('../services/messageService');
 const { startOrContinue } = require('../flows/housingFlow');
 const { getSession, saveSession } = require('../utils/sessionStore');
 const { classify, generateFollowUpQuestion } = require('../ai/aiEngine');
-const { getAllListings } = require('../../database/firestore');
+const { getAllListings, db } = require('../../database/firestore');
+const { getString } = require('../utils/languageStrings');
+
+/**
+ * Helper: send translated text
+ */
+async function sendTranslated(sender, key, lang, extra = "") {
+  const text = getString(lang, key);
+  return sendMessage(sender, extra ? `${text}\n${extra}` : text);
+}
+
+/**
+ * Helper: get user profile
+ */
+async function getUserProfile(sender) {
+  const doc = await db.collection('users').doc(sender).get();
+  return doc.exists ? doc.data() : null;
+}
+
+/**
+ * Helper: save user language preference
+ */
+async function saveUserLanguage(sender, lang) {
+  await db.collection('users').doc(sender).set(
+    { preferredLanguage: lang },
+    { merge: true }
+  );
+}
 
 /**
  * Main entry for incoming WhatsApp messages
@@ -10,16 +37,40 @@ const { getAllListings } = require('../../database/firestore');
 async function handleIncomingMessage(sender, msgBody) {
   if (!sender || !msgBody) return;
 
+  msgBody = msgBody.trim();
+  
   // Load session
   let session = await getSession(sender) || { housingFlow: { step: "start" } };
+  const userProfile = await getUserProfile(sender);
+  const userLang = userProfile?.preferredLanguage || "en";
+
   console.log("📨 Incoming:", msgBody);
   console.log("📌 Current Session:", session);
 
-  // Step 1 — AI classification
+  // --- Handle /start ---
+  if (msgBody.toLowerCase() === "/start") {
+    if (!userProfile?.preferredLanguage) {
+      // Ask user to select language with buttons
+      await sendButtons(sender, "Select your language:", [
+        { id: "lang_en", title: "English" },
+        { id: "lang_hi", title: "हिंदी" },
+        { id: "lang_mr", title: "Marathi" }
+      ]);
+    } else {
+      // Show Home Menu
+      await sendTranslated(sender, "menu", userProfile.preferredLanguage);
+    }
+
+    // Reset session
+    await saveSession(sender, { step: "start", housingFlow: { step: "start", data: {} } });
+    return;
+  }
+
+  // --- Step 1: AI classification ---
   const ai = await classify(msgBody);
   console.log("🤖 AI classify:", ai);
 
-  // Map category → flow action
+  // Map AI category → flow action
   let action;
   switch (ai.category) {
     case "buy_house":
@@ -45,16 +96,16 @@ async function handleIncomingMessage(sender, msgBody) {
       sender
     );
 
-    // Missing fields → ask follow-up
+    // Step 2: Ask follow-up if missing fields
     if (nextSession.missing?.length > 0) {
       const question = await generateFollowUpQuestion({
         missing: nextSession.missing,
         entities: nextSession.data,
-        language: nextSession.language || "en"
+        language: userLang
       });
-      await sendMessage(sender, question || "Can you provide more details?");
-    }
-    // Buying → fetch listings
+      await sendMessage(sender, question || getString(userLang, "moreDetails"));
+    } 
+    // Step 3: Buying → fetch listings
     else if (action === "buy") {
       const listings = await getAllListings(200);
 
@@ -68,7 +119,7 @@ async function handleIncomingMessage(sender, msgBody) {
       });
 
       if (filtered.length === 0) {
-        await sendMessage(sender, "⚠️ No properties match your criteria.");
+        await sendTranslated(sender, "noProperties", userLang);
       } else {
         const reply = filtered
           .slice(0, 5)
@@ -85,12 +136,8 @@ async function handleIncomingMessage(sender, msgBody) {
     return { ...session, housingFlow: nextSession };
   }
 
-  // Fallback
-  await sendMessage(
-    sender,
-    "Hi! I can help you with properties. Try:\n• 2BHK in Mumbai under 20k\n• Flat in Delhi\n• 1BHK Noida"
-  );
-
+  // --- Fallback ---
+  await sendTranslated(sender, "fallback", userLang);
   return session;
 }
 

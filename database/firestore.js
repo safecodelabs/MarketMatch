@@ -1,22 +1,23 @@
 // src/database/firestore.js
 const admin = require("firebase-admin");
+const path = require("path");
 
 // ----------------------------------------
-// 1. Initialize Firebase Admin with Railway env variable
+// 1. Initialize Firebase Admin with env var or local JSON
 // ----------------------------------------
 if (!admin.apps.length) {
   let serviceAccount;
 
   try {
-    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-      throw new Error(
-        "Missing GOOGLE_APPLICATION_CREDENTIALS_JSON in Railway Variables"
-      );
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      // Use Railway / cloud env variable
+      serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+      console.log("🔥 Loaded Firebase service account from env var:", serviceAccount.project_id);
+    } else {
+      // Fallback to local JSON file
+      serviceAccount = require(path.join(__dirname, "../credentials/firebase-credentials.json"));
+      console.log("🔥 Loaded Firebase service account from local file:", serviceAccount.project_id);
     }
-
-    serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-
-    console.log("🔥 Loaded Firebase service account for project:", serviceAccount.project_id);
 
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
