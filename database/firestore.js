@@ -1,13 +1,17 @@
 // database/firestore.js
-
 const admin = require("firebase-admin");
-const path = require("path");
 
-const serviceAccountPath = path.join(__dirname, "../credentials/firebase-credentials.json");
+let serviceAccount = null;
+
+try {
+  serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+} catch (err) {
+  console.error("❌ Firebase credentials missing or invalid:", err);
+}
 
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath),
+    credential: admin.credential.cert(serviceAccount),
   });
 }
 
