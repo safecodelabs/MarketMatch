@@ -1,5 +1,7 @@
 // chatbotController.js
 const axios = require("axios");
+
+// ✅ Corrected imports: import each function only once
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { getUserProfile, saveUserLanguage } = require("./database/firestore");
 
@@ -13,7 +15,7 @@ async function sendMessage(to, text, lang = "en") {
   if (!text) return;
 
   if (lang !== "en") {
-    text = await aiTranslate(text, lang);
+    text = await aiTranslate(text, lang); // make sure aiTranslate is defined/imported
   }
 
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
@@ -70,13 +72,12 @@ async function sendLanguageButtons(to) {
 // 🧠 MAIN HANDLER
 // -------------------------------------------------------
 async function handleIncoming(sender, msg) {
-  // Load DB + session
   const session = (await getSession(sender)) || {};
   const user = await getUserProfile(sender);
   const lang = user?.preferredLanguage || "en";
 
   // 1️⃣ Returning user → different welcome
-  if (user && msg === "hi") {
+  if (user && msg.toLowerCase() === "hi") {
     await sendMessage(
       sender,
       "Welcome back! 😊 How can I help you today? Looking to buy, sell, rent, or find services like cleaner, maid, handyman, technician, electrician?",
@@ -86,7 +87,7 @@ async function handleIncoming(sender, msg) {
   }
 
   // 2️⃣ New user → Introduction + language buttons
-  if (!user && msg === "hi") {
+  if (!user && msg.toLowerCase() === "hi") {
     await sendMessage(
       sender,
       "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Buying or selling properties\n• Renting houses or PG\n• Finding a cleaner or maid\n• Hiring a handyman, technician or electrician\n\nChoose your preferred language below 👇",

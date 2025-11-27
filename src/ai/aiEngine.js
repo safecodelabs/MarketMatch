@@ -1,27 +1,14 @@
 // src/ai/aiEngine.js
-/**
- * AI Engine — intent + entity extraction & listing search
- * - Lightweight Groq wrapper (askAI)
- * - classify(message) -> { intent, category, entities, missing, language }
- * - searchListings(listings, entities, opts) -> filtered listings + scores
- * - generateFollowUpQuestion(missing, ctx) -> single LLM question (user language)
- * - generatePropertyReply(entities, listings, ctx) -> conversational reply (user language)
- *
- * This file assumes:
- * - src/intents.js exists and exports intent definitions (keywords + requiredInfo)
- * - src/utils/messageUtils.js provides fallbackDetectIntent()
- */
-
 require("dotenv").config();
 const Groq = require("groq-sdk");
-const intents = require("../../intents");
-const { detectIntent: fallbackDetectIntent } = require("../../utils/messageUtils");
+const { detectIntent: fallbackDetectIntent } = require("../utils/messageUtils");
 
-const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const client = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
 
-// ------------------ Low-level LLM ------------------
+// low-level LLM call (may throw if no key)
 async function askAI(prompt, opts = {}) {
   try {
+    if (!process.env.GROQ_API_KEY) throw new Error("Missing GROQ_API_KEY");
     const res = await client.chat.completions.create({
       model: opts.model || "llama-3.1-8b-instant",
       messages: [{ role: "user", content: prompt }],
@@ -30,12 +17,11 @@ async function askAI(prompt, opts = {}) {
     });
     return res.choices?.[0]?.message?.content || "";
   } catch (err) {
-    console.error("AI call failed:", err?.message || err);
+    console.warn("askAI warning:", err?.message || err);
     throw err;
   }
 }
 
-// ------------------ Utilities ------------------
 function normalizeText(s = "") {
   return (s || "").toString().trim().toLowerCase();
 }
@@ -64,10 +50,7 @@ function parseBudget(raw) {
 function detectLanguageByScript(text = "") {
   if (!text) return "en";
   if (/[ऀ-ॿ]/.test(text)) return "hi";
-  if (/[ಀ-೿]/.test(text)) return "kn";
   if (/[஀-௿]/.test(text)) return "ta";
-  if (/[ء-ي]/.test(text)) return "ar";
-  if (/[À-ÖØ-öø-ÿ]/.test(text)) return "fr";
   return "en";
 }
 
@@ -76,55 +59,57 @@ function mapToIntentCategory(intentName, userText = "") {
     const k = intentName.toString().trim().toLowerCase();
     if (["buy_house", "browse_housing", "post_listing", "sell_house"].includes(k)) return k;
   }
-
-  const text = (userText || "").toString().toLowerCase();
-  for (const key of Object.keys(intents)) {
-    const def = intents[key];
-    if (!def?.keywords) continue;
-    for (const kw of def.keywords) {
-      if (!kw) continue;
-      if (text.includes(kw.toString().toLowerCase())) {
-        if (key === "housing" || key === "browse") return "buy_house";
-        if (key === "sellProperty" || key === "sell") return "sell_house";
-        if (key === "budget" || key === "location") return "buy_house";
-        return "buy_house";
-      }
-    }
-  }
-
+  // last fallback: simple keyword fallback
   const fb = fallbackDetectIntent(userText);
   return fb === "housing" ? "buy_house" : "unknown";
 }
 
-// ------------------ Classification ------------------
 async function classify(message) {
-  if (!message?.trim()) {
+  if (!message || !message.trim()) {
     return { intent: "unknown", category: "unknown", entities: {}, missing: [], language: "en" };
   }
 
   const prompt = `
-You are an assistant extracting intent and entities for a marketplace.
-Allowed intents: buy_house, sell_house, post_listing, browse_housing, unknown
-Extract entities: property_type, city, locality, budget, bhk, contact, name, details
-Suggest optional missing fields in "missing" array.
-Detect language as two-letter code in "language".
-Return STRICT JSON only.
+You are an assistant that extracts intent and structured entities from a user's short message for a marketplace.
+User message may be in ANY language. Do NOT translate the message.
+TASK:
+1. Detect the user's intent. Allowed outputs: buy_house, sell_house, post_listing, browse_housing, unknown.
+2. Extract entities if present. Output keys:
+   property_type, city, locality, budget, bhk, contact, name, details
+3. Suggest OPTIONAL fields that might refine the search; return them in array "missing".
+4. Detect the user's language as a two-letter code in "language".
+5. Return STRICT JSON only.
 User message: """${message.replace(/`/g, "'")}"""
-  `.trim();
+`.trim();
 
+  // Try LLM classification but gracefully fallback
   try {
-    const raw = await askAI(prompt, { temperature: 0.0, max_tokens: 500 });
-    const cleaned = raw.replace(/```json|```/gi, "").trim();
-
-    let parsed;
+    let raw;
     try {
-      parsed = JSON.parse(cleaned);
-    } catch {
+      raw = await askAI(prompt, { temperature: 0.0, max_tokens: 500 });
+    } catch (e) {
+      // LLM call failed — fallback to heuristic
       const fb = fallbackDetectIntent(message) || "unknown";
       return {
         intent: "fallback",
         category: fb === "housing" ? "buy_house" : "unknown",
-        entities: { raw_text: message },
+        entities: { raw_text: message, contact: extractPhone(message) },
+        missing: [],
+        language: detectLanguageByScript(message)
+      };
+    }
+
+    const cleaned = raw.replace(/```json|```/gi, "").trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err) {
+      // LLM returned non-JSON — fallback to heuristics
+      const fb = fallbackDetectIntent(message) || "unknown";
+      return {
+        intent: "fallback",
+        category: fb === "housing" ? "buy_house" : "unknown",
+        entities: { raw_text: message, contact: extractPhone(message) },
         missing: [],
         language: detectLanguageByScript(message)
       };
@@ -137,7 +122,7 @@ User message: """${message.replace(/`/g, "'")}"""
       locality: rawEntities.locality || "",
       budget: rawEntities.budget || "",
       bhk: rawEntities.bhk || "",
-      contact: rawEntities.contact || extractPhone(message),
+      contact: rawEntities.contact || extractPhone(message) || rawEntities.contact || "",
       name: rawEntities.name || "",
       details: rawEntities.details || "",
       raw_text: message
@@ -158,14 +143,13 @@ User message: """${message.replace(/`/g, "'")}"""
     return {
       intent: "error",
       category: fb === "housing" ? "buy_house" : "unknown",
-      entities: { raw_text: message },
+      entities: { raw_text: message, contact: extractPhone(message) },
       missing: [],
       language: detectLanguageByScript(message)
     };
   }
 }
 
-// ------------------ Listing Search ------------------
 function scoreListing(listing = {}, entities = {}) {
   let score = 0;
   const low = (s) => normalizeText(s || "");
@@ -200,7 +184,10 @@ function scoreListing(listing = {}, entities = {}) {
 
   if (entities.budget && typeof entities.budget === "number" && lPrice) {
     if (lPrice <= entities.budget) score += 25;
-    else if (lPrice / entities.budget <= 1.2) score += 5;
+    else {
+      const ratio = lPrice / entities.budget;
+      if (ratio <= 1.2) score += 5;
+    }
   }
 
   if ((listing.contact || "").toString().trim()) score += 5;
@@ -209,30 +196,42 @@ function scoreListing(listing = {}, entities = {}) {
 
 function searchListings(listings = [], entities = {}, opts = {}) {
   const maxResults = opts.maxResults || 10;
-  const scored = listings.map(item => ({ score: scoreListing(item, entities), item }));
+  const scored = listings.map(item => {
+    const s = scoreListing(item, entities);
+    return { score: s, item };
+  });
+
   const hasFilter = !!(entities.city || entities.locality || entities.property_type || entities.bhk || entities.budget);
   const threshold = typeof opts.scoreThreshold === "number" ? opts.scoreThreshold : (hasFilter ? 1 : 0);
 
-  return scored
+  const filtered = scored
     .filter(s => s.score >= threshold)
     .sort((a, b) => b.score - a.score)
-    .slice(0, Math.max(maxResults, 50))
-    .map(f => ({ ...f.item, _score: f.score }));
+    .slice(0, Math.max(maxResults, 50));
+
+  return filtered.map(f => ({ ...f.item, _score: f.score }));
 }
 
-// ------------------ Follow-up & Reply ------------------
 async function generateFollowUpQuestion({ missing = [], entities = {}, language = "en" } = {}) {
   if (!Array.isArray(missing) || missing.length === 0) return "";
   const prompt = `
-You are a polite WhatsApp assistant asking ONE short follow-up question.
-User language: ${language}
-Partial query: ${JSON.stringify(entities)}
+You are a concise, polite WhatsApp assistant that asks ONE short follow-up question.
+User language hint: ${language}
+User partial query (extracted): ${JSON.stringify(entities)}
 Missing refinements: ${JSON.stringify(missing)}
-Write ONE short natural question (optional, non-mandatory).
+Write ONE short natural question (in user's language) that invites optional clarification — do NOT demand or make it sound mandatory.
 Return only the question (single line).
   `.trim();
-  const res = await askAI(prompt, { temperature: 0.2, max_tokens: 80 });
-  return res?.toString().trim().split("\n")[0] || "";
+  try {
+    const res = await askAI(prompt, { temperature: 0.2, max_tokens: 80 });
+    return res ? res.toString().trim().split("\n")[0] : "";
+  } catch (err) {
+    console.warn("generateFollowUpQuestion fallback:", err?.message || err);
+    // fallback simple question
+    if (missing.includes("city")) return "Which city or area are you looking in?";
+    if (missing.includes("budget")) return "Do you have a budget range in mind?";
+    return "Can you share more details?";
+  }
 }
 
 async function generatePropertyReply({ entities = {}, listings = [], language = "en", maxResults = 5 } = {}) {
@@ -244,17 +243,27 @@ async function generatePropertyReply({ entities = {}, listings = [], language = 
     desc: l.description || l.details || ""
   }));
   const prompt = `
-You are a helpful real-estate assistant composing a WhatsApp reply (${language}).
-User query: ${JSON.stringify(entities)}
-Listings (JSON): ${JSON.stringify(small, null, 2)}
-Task: write concise, friendly summary of listings.
-Do NOT invent data. Return only the message.
+You are a helpful real-estate assistant composing a WhatsApp response in the user's language (${language}).
+User query (extracted): ${JSON.stringify(entities)}
+Listings to summarize (JSON): ${JSON.stringify(small, null, 2)}
+Task:
+- Write a concise conversational reply in the user's language.
+- Confirm what the user asked for.
+- Summarize the given listings (numbered) with title/location/price/contact.
+- Offer a short next step at the end.
+- IMPORTANT: Do NOT invent or change listing data.
+Return only the message text.
   `.trim();
-  const out = await askAI(prompt, { temperature: 0.2, max_tokens: 700 });
-  return out?.toString().trim() || "";
+  try {
+    const out = await askAI(prompt, { temperature: 0.2, max_tokens: 700 });
+    return out ? out.toString().trim() : "";
+  } catch (err) {
+    console.warn("generatePropertyReply fallback:", err?.message || err);
+    // fallback to simple summary
+    return small.map((s, i) => `${i+1}. ${s.title} in ${s.location}\nPrice: ${s.price}\nContact: ${s.contact}`).join("\n\n");
+  }
 }
 
-// ------------------ Exports ------------------
 module.exports = {
   askAI,
   classify,

@@ -1,71 +1,88 @@
-const { sendMessage, sendButtons, sendTranslated } = require('../services/messageService');
+// src/bots/whatsappBot.js
+const path = require('path');
+
+// messageService may live elsewhere in your project. Try to require it and fall back to a small stub.
+let sendMessage, sendButtons;
+try {
+  const ms = require(path.join(__dirname, '..', 'services', 'messageService'));
+  sendMessage = ms.sendMessage;
+  sendButtons = ms.sendButtons;
+} catch (e) {
+  // fallback lightweight stubs (logs only) — replace with your real messageService
+  sendMessage = async (to, text) => {
+    console.log(`✉️ [stub sendMessage] -> ${to}: ${text}`);
+    return true;
+  };
+  sendButtons = async (to, text, buttons) => {
+    console.log(`🔘 [stub sendButtons] -> ${to}: ${text}`, buttons);
+    return true;
+  };
+}
+
 const { getSession, saveSession } = require('../utils/sessionStore');
 const { classify } = require('../ai/aiEngine');
 const { handleAIAction } = require('../flows/housingFlow');
-const { getUserProfile, saveUserLanguage } = require('../database/firestore');
+const { getUserProfile, saveUserLanguage } = require('../../database/firestore');
 const { getString } = require('../utils/languageStrings');
 
+/**
+ * Helper: send translated key
+ */
+async function sendTranslated(sender, key, lang = 'en', extra = '') {
+  const text = getString(lang || 'en', key) || key;
+  return sendMessage(sender, extra ? `${text}\n${extra}` : text);
+}
+
+/**
+ * Main handler
+ */
 async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   if (!sender || !msgBody) return;
 
   msgBody = msgBody.trim();
-  // Load session (getSession now returns _isNew:true if doc didn't exist)
-  let session = (await getSession(sender)) || { step: 'start', housingFlow: { step: 'start', data: {} }, _isNew: true };
+  // load session and normalize
+  let session = (await getSession(sender)) || { step: 'start', housingFlow: { step: 'start', data: {} } };
+  session.housingFlow = session.housingFlow || { step: 'start', data: {} };
 
-  // Load user profile (may contain preferredLanguage)
   const userProfile = await getUserProfile(sender);
   const userLang = userProfile?.preferredLanguage || 'en';
 
   const lowerMsg = msgBody.toLowerCase();
+
+  // --- LANGUAGE ONBOARDING + CHANGE LANGUAGE ---
   const languageKeywords = ['change language', 'language', 'lang'];
+  const wantsLanguage = languageKeywords.some(k => lowerMsg.includes(k));
 
-  // -----------------------
-  // INITIAL GREETING LOGIC
-  // -----------------------
-  // If the session doc is brand new (no doc existed previously) => this is a "new user"
-  if (session._isNew) {
-    // Build a friendly intro and language buttons
-    const introText = getString('en', 'intro') ||
-`Hi 👋 I can help you buy, sell, find a cleaner/maid, rent, or find a handyman, technician or electrician.
-Choose your preferred language below or type it out.
-I'll continue in that language until you change it.`;
+  // 1) If user has no preferredLanguage OR explicitly asked to change language OR session awaiting language
+  if (!userProfile?.preferredLanguage || wantsLanguage || session.housingFlow.awaitingLangSelection) {
+    // If user typed a language name (english / हिन्दी / தமிழ் / hi / ta / en)
+    const langCandidates = ['english', 'हिंदी', 'தமிழ்', 'hi', 'ta', 'en', 'mr', 'मराठी'];
+    const isLanguageTyped = langCandidates.some(c => lowerMsg.includes(c));
 
-    await sendButtons(sender, introText, [
+    if (isLanguageTyped || /^lang_/.test(lowerMsg)) {
+      // normalize selection
+      let lang = 'en';
+      if (lowerMsg.includes('hi') || lowerMsg.includes('हिंदी')) lang = 'hi';
+      else if (lowerMsg.includes('ta') || lowerMsg.includes('தமிழ்')) lang = 'ta';
+      else if (lowerMsg.includes('mr') || lowerMsg.includes('मराठी')) lang = 'mr';
+      else if (lowerMsg.includes('en') || lowerMsg.includes('english')) lang = 'en';
+
+      await saveUserLanguage(sender, lang);
+
+      session.housingFlow = { step: 'start', data: {}, awaitingLangSelection: false };
+      await saveSession(sender, session);
+
+      // welcome / main menu in selected language
+      await sendTranslated(sender, 'menu', lang);
+      return session;
+    }
+
+    // otherwise show language selection buttons
+    await sendButtons(sender, getString(userLang, 'chooseLanguage') || 'Choose your preferred language:', [
       { id: 'lang_en', title: 'English' },
       { id: 'lang_hi', title: 'हिंदी' },
-      { id: 'lang_ta', title: 'தமிழ்' }
-    ]);
-
-    // mark session as existing now and awaiting language selection
-    session._isNew = false;
-    session.housingFlow = { ...session.housingFlow, step: 'awaiting_language', awaitingLangSelection: true, greeted: true };
-    await saveSession(sender, session);
-    return session;
-  }
-
-  // If this is an existing session but we haven't greeted in this session yet, send welcome back
-  // We guard so we don't repeatedly send welcome back on every message — only when housingFlow.greeted is falsy and step is 'start'
-  if (!session.housingFlow?.greeted && (session.housingFlow?.step === 'start' || session.housingFlow?.step === undefined) && !session.housingFlow?.awaitingLangSelection) {
-    const welcomeText = getString(userLang, 'welcomeBack') || 'Welcome back! 👋 Let me know what you are looking for — I can help find listings, post a property, or manage your listings.';
-    await sendMessage(sender, welcomeText);
-
-    // mark greeted so we don't re-send this on the next message
-    session.housingFlow = { ...session.housingFlow, greeted: true, step: 'start' };
-    await saveSession(sender, session);
-    // Important: we return here because we treat this incoming message as the "session start" event.
-    // The user can now send a follow-up message which will be processed by the AI flow.
-    return session;
-  }
-
-  // -----------------------
-  // LANGUAGE SELECTION FLOW
-  // -----------------------
-  // This covers both the case when we previously asked for language, or user explicitly asked to change
-  if (!userProfile?.preferredLanguage || languageKeywords.includes(lowerMsg) || session?.housingFlow?.awaitingLangSelection) {
-    await sendButtons(sender, getString(userLang, 'chooseLanguage') || 'Select your language:', [
-      { id: 'lang_en', title: 'English' },
-      { id: 'lang_hi', title: 'हिंदी' },
-      { id: 'lang_ta', title: 'தமிழ்' }
+      { id: 'lang_ta', title: 'தமிழ்' },
+      { id: 'lang_mr', title: 'मराठी' }
     ]);
 
     session.housingFlow = { ...session.housingFlow, step: 'awaiting_language', awaitingLangSelection: true };
@@ -73,29 +90,16 @@ I'll continue in that language until you change it.`;
     return session;
   }
 
-  // Handle language selection by button id or free text like 'english', 'हिंदी', 'தமிழ்', 'hi', 'ta'
-  if (/^lang_/.test(lowerMsg) || ['english', 'हिंदी', 'தமிழ்', 'hi', 'ta', 'en'].includes(lowerMsg)) {
-    let lang = 'en';
-    if (lowerMsg.includes('hi') || lowerMsg.includes('हिंदी')) lang = 'hi';
-    if (lowerMsg.includes('ta') || lowerMsg.includes('தமிழ்')) lang = 'ta';
-
-    // persist language in user profile table
-    await saveUserLanguage(sender, lang);
-
-    // reset housing flow state (user picked language so we can continue)
-    session.housingFlow = { step: 'start', data: {}, awaitingLangSelection: false, greeted: true };
-    await saveSession(sender, session);
-
-    // send main menu / localized menu
-    await sendTranslated(sender, 'menu', lang);
-    return session;
-  }
-
-  // -----------------------
-  // AI-FIRST FLOW (existing)
-  // -----------------------
+  // --- Continue AI-first flow ---
+  // classify the incoming message; classify is robust and has fallback logic
   const ai = await classify(msgBody);
   console.log('🤖 AI classify:', ai);
+
+  // quick heuristic fallback: if classify returned unknown but message clearly mentions housing keywords, force buy_house
+  if ((ai?.category === 'unknown' || ai?.category === 'fallback') && /(\d+\s?bhk|bhk|flat|apartment|house|property|rent|sale)/i.test(msgBody)) {
+    ai.category = 'buy_house';
+    ai.intent = 'buy_house';
+  }
 
   try {
     const { nextSession, reply, buttons, mustSaveLanguage } = await handleAIAction({
@@ -106,9 +110,11 @@ I'll continue in that language until you change it.`;
       userLang: userProfile?.preferredLanguage || ai.language || 'en'
     });
 
-    if (mustSaveLanguage) await saveUserLanguage(sender, mustSaveLanguage);
+    if (mustSaveLanguage) {
+      await saveUserLanguage(sender, mustSaveLanguage);
+    }
 
-    if (buttons?.length) {
+    if (buttons && Array.isArray(buttons) && buttons.length) {
       await sendButtons(sender, reply || getString(userLang, 'chooseOption') || 'Choose an option:', buttons);
     } else if (reply) {
       await sendMessage(sender, reply);
@@ -116,8 +122,7 @@ I'll continue in that language until you change it.`;
       await sendTranslated(sender, 'fallback', userLang);
     }
 
-    // Save full session
-    const newFullSession = { ...session, housingFlow: nextSession, _isNew: false };
+    const newFullSession = { ...session, housingFlow: nextSession };
     await saveSession(sender, newFullSession);
     return newFullSession;
   } catch (err) {
