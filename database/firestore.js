@@ -1,14 +1,30 @@
 // src/database/firestore.js
-
 const admin = require("firebase-admin");
 
 // ----------------------------------------
-// 1. Initialize Firebase Admin safely
+// 1. Initialize Firebase Admin with Railway env variable
 // ----------------------------------------
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(), // Railway uses built-in SA
-  });
+  let serviceAccount;
+
+  try {
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      throw new Error(
+        "Missing GOOGLE_APPLICATION_CREDENTIALS_JSON in Railway Variables"
+      );
+    }
+
+    serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+
+    console.log("🔥 Loaded Firebase service account for project:", serviceAccount.project_id);
+
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+  } catch (error) {
+    console.error("❌ Firestore initialization failed:", error.message);
+    throw error;
+  }
 }
 
 const db = admin.firestore();
@@ -38,33 +54,22 @@ async function addListing(listingData) {
 }
 
 // ----------------------------------------
-// 3. Get listings with combined filters
+// 3. Get listings with filters
 // ----------------------------------------
 async function getListings(filters = {}) {
   try {
     let ref = listingsRef;
 
-    if (filters.category) {
-      ref = ref.where("category", "==", filters.category);
-    }
-    if (filters.location) {
-      ref = ref.where("location", "==", filters.location);
-    }
-    if (filters.maxPrice) {
-      ref = ref.where("price", "<=", Number(filters.maxPrice));
-    }
+    if (filters.category) ref = ref.where("category", "==", filters.category);
+    if (filters.location) ref = ref.where("location", "==", filters.location);
+    if (filters.maxPrice) ref = ref.where("price", "<=", Number(filters.maxPrice));
 
     const snapshot = await ref
       .orderBy("timestamp", "desc")
       .limit(50)
       .get();
 
-    let results = [];
-    snapshot.forEach((doc) => {
-      results.push({ id: doc.id, ...doc.data() });
-    });
-
-    return results;
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   } catch (err) {
     console.error("🔥 Error fetching listings:", err);
     return [];
@@ -72,14 +77,14 @@ async function getListings(filters = {}) {
 }
 
 // ----------------------------------------
-// 4. Fetch listings by category only
+// 4. Get by category
 // ----------------------------------------
 async function getListingsByCategory(category) {
   return await getListings({ category });
 }
 
 // ----------------------------------------
-// 5. Fetch ALL listings (for AI pre-loading)
+// 5. Get ALL listings for AI
 // ----------------------------------------
 async function getAllListings(limit = 200) {
   try {
@@ -88,12 +93,7 @@ async function getAllListings(limit = 200) {
       .limit(limit)
       .get();
 
-    let results = [];
-    snapshot.forEach((doc) => {
-      results.push({ id: doc.id, ...doc.data() });
-    });
-
-    return results;
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   } catch (err) {
     console.error("🔥 Error fetching all listings:", err);
     return [];
@@ -101,7 +101,7 @@ async function getAllListings(limit = 200) {
 }
 
 // ----------------------------------------
-// 6. Fetch listings by user
+// 6. Get listings by a specific user
 // ----------------------------------------
 async function getUserListings(userId) {
   try {
@@ -110,12 +110,7 @@ async function getUserListings(userId) {
       .orderBy("timestamp", "desc")
       .get();
 
-    let results = [];
-    snapshot.forEach((doc) => {
-      results.push({ id: doc.id, ...doc.data() });
-    });
-
-    return results;
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   } catch (err) {
     console.error("🔥 Error fetching user listings:", err);
     return [];
