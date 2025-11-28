@@ -1,13 +1,13 @@
 // chatbotController.js
 const axios = require("axios");
-const { getSession, saveSession } = require("./utils/sessionStore");
+const { getSession, saveSession } = require("./utils/sessionStore");   // FIXED PATH
 const { getUserProfile, saveUserLanguage } = require("./database/firestore");
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 // -------------------------------------------------------
-// 📤 Send WhatsApp Message (NO TRANSLATION)
+// 📤 Send WhatsApp Message
 // -------------------------------------------------------
 async function sendMessage(to, text) {
   if (!text) return;
@@ -63,16 +63,19 @@ async function sendLanguageButtons(to) {
 }
 
 // -------------------------------------------------------
-// 🧠 MAIN HANDLER (NO TRANSLATION)
+// 🧠 MAIN HANDLER
 // -------------------------------------------------------
 async function handleIncoming(sender, msg) {
   const session = (await getSession(sender)) || {};
   const user = await getUserProfile(sender);
 
   const lang = user?.preferredLanguage || "en";
+  const message = msg.toLowerCase();
 
-  // NEW USER → show welcome + language buttons
-  if (!user && msg.toLowerCase() === "hi") {
+  // ---------------------------
+  // 1️⃣ NEW USER → SAY "HI"
+  // ---------------------------
+  if (!user && message === "hi") {
     await sendMessage(
       sender,
       "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Buying or selling properties\n• Renting houses or PG\n• Finding a cleaner or maid\n• Hiring a handyman, technician or electrician"
@@ -85,8 +88,10 @@ async function handleIncoming(sender, msg) {
     return session;
   }
 
-  // RETURNING USER
-  if (user && msg.toLowerCase() === "hi") {
+  // ---------------------------
+  // 2️⃣ RETURNING USER → "HI"
+  // ---------------------------
+  if (user && message === "hi") {
     await sendMessage(
       sender,
       "Welcome back! 😊 How can I help you today?"
@@ -94,9 +99,12 @@ async function handleIncoming(sender, msg) {
     return session;
   }
 
-  // LANGUAGE SELECTION
-  if (session.awaitingLang && msg.startsWith("lang_")) {
-    const langCode = msg.replace("lang_", "");
+  // ---------------------------
+  // 3️⃣ LANGUAGE SELECTION
+  // ---------------------------
+  if (session.awaitingLang && message.startsWith("lang_")) {
+    const langCode = message.replace("lang_", "");
+
     await saveUserLanguage(sender, langCode);
 
     await sendMessage(sender, `Language updated successfully! 🎉`);
@@ -110,7 +118,9 @@ async function handleIncoming(sender, msg) {
     return session;
   }
 
-  // DEFAULT RESPONSE
+  // ---------------------------
+  // 4️⃣ DEFAULT FALLBACK
+  // ---------------------------
   await sendMessage(
     sender,
     "I'm ready! Tell me what you are looking for.\nExamples:\n• 2BHK in Noida\n• Sell my plot\n• 1RK in Pune\n• Need an electrician"
