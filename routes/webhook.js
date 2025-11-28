@@ -1,10 +1,10 @@
-// routes/webhook.js
 const express = require("express");
 const router = express.Router();
 
 const chatbotController = require("../chatbotController");
 const { getSession, saveSession } = require("../utils/sessionStore");
 
+// Helper: Greeting based on IST
 function getGreetingByIST() {
   const date = new Date();
   const istOffset = 5.5 * 60 * 60 * 1000;
@@ -17,17 +17,19 @@ function getGreetingByIST() {
 }
 
 // ------------------------------
-// MAIN WEBHOOK
+// MAIN WEBHOOK (POST)
 // ------------------------------
 router.post("/", async (req, res) => {
   try {
-    console.log("📩 Incoming Webhook:", JSON.stringify(req.body));
+    console.log("📩 Incoming Webhook:", JSON.stringify(req.body, null, 2));
 
     const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
 
-    if (!value || !value.messages) return res.sendStatus(200);
+    if (!value || !value.messages) {
+      return res.sendStatus(200); // Ignore non-message webhooks
+    }
 
     const phoneNumberId = value.metadata?.phone_number_id;
     const message = value.messages[0];
@@ -36,21 +38,23 @@ router.post("/", async (req, res) => {
     let text = "";
 
     // ------------------------------
-    // EXTRACT MESSAGE PROPERLY
+    // PARSE MESSAGE PROPERLY
     // ------------------------------
     if (message.type === "text") {
       text = message.text.body.trim();
-    }
-
-    if (message.type === "interactive") {
+    } else if (message.type === "interactive") {
       const inter = message.interactive;
 
-      if (inter.button_reply) text = inter.button_reply.id || inter.button_reply.title;
-      if (inter.list_reply) text = inter.list_reply.id || inter.list_reply.title;
+      if (inter.button_reply) {
+        text = inter.button_reply.id || inter.button_reply.title;
+      }
+      if (inter.list_reply) {
+        text = inter.list_reply.id || inter.list_reply.title;
+      }
     }
 
     text = text.toLowerCase();
-    console.log("💬 User:", sender, "said:", text);
+    console.log(`💬 User ${sender} said: ${text}`);
 
     // ------------------------------
     // GET OR CREATE SESSION
@@ -59,14 +63,14 @@ router.post("/", async (req, res) => {
     if (!session) session = { step: "start", data: {} };
 
     // ------------------------------
-    // GREETINGS RESET LOGIC
+    // GREETING RESET LOGIC
     // ------------------------------
     const greetings = ["hi", "hello", "hey", "start"];
 
     if (greetings.includes(text)) {
       const greet = getGreetingByIST();
-      await chatbotController.sendMessage(sender, `${greet}! 👋`, phoneNumberId);
 
+      await chatbotController.sendMessage(sender, `${greet}! 👋`, phoneNumberId);
       await chatbotController.sendMessage(
         sender,
         "How can I help you today?",
@@ -80,7 +84,7 @@ router.post("/", async (req, res) => {
     }
 
     // ------------------------------
-    // FORWARD MESSAGE TO CONTROLLER
+    // PASS MESSAGE TO MAIN CONTROLLER
     // ------------------------------
     const updatedSession = await chatbotController.handleIncomingMessage(
       sender,
@@ -94,6 +98,7 @@ router.post("/", async (req, res) => {
     }
 
     res.sendStatus(200);
+
   } catch (err) {
     console.error("❌ Webhook Error:", err);
     res.sendStatus(500);
