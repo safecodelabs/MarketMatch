@@ -1,14 +1,14 @@
 // chatbotController.js
 const axios = require("axios");
-const { getSession, saveSession } = require("./utils/sessionStore");   // FIXED PATH
+const { getSession, saveSession } = require("./utils/sessionStore");
 const { getUserProfile, saveUserLanguage } = require("./database/firestore");
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
-// -------------------------------------------------------
-// 📤 Send WhatsApp Message
-// -------------------------------------------------------
+// =======================================================================
+// 📤 Send Text Message
+// =======================================================================
 async function sendMessage(to, text) {
   if (!text) return;
 
@@ -30,9 +30,9 @@ async function sendMessage(to, text) {
   }
 }
 
-// -------------------------------------------------------
+// =======================================================================
 // 📤 Send Language Buttons
-// -------------------------------------------------------
+// =======================================================================
 async function sendLanguageButtons(to) {
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
@@ -62,23 +62,36 @@ async function sendLanguageButtons(to) {
   }
 }
 
-// -------------------------------------------------------
-// 🧠 MAIN HANDLER
-// -------------------------------------------------------
-async function handleIncoming(sender, msg) {
+// =======================================================================
+// 🧠 MAIN BOT LOGIC
+// =======================================================================
+async function handleIncoming(sender, messageObj) {
   const session = (await getSession(sender)) || {};
   const user = await getUserProfile(sender);
 
-  const lang = user?.preferredLanguage || "en";
-  const message = msg.toLowerCase();
+  let userMessageText = "";
+  let buttonId = "";
 
-  // ---------------------------
-  // 1️⃣ NEW USER → SAY "HI"
-  // ---------------------------
-  if (!user && message === "hi") {
+  // ----------------------------------------------------
+  // 🔍 Detect message type
+  // ----------------------------------------------------
+  if (messageObj.type === "text") {
+    userMessageText = messageObj.text.body.toLowerCase();
+  }
+
+  if (messageObj.type === "interactive" && messageObj.interactive.button_reply) {
+    buttonId = messageObj.interactive.button_reply.id;
+  }
+
+  console.log("📥 USER INPUT:", { text: userMessageText, button: buttonId });
+
+  // ===================================================================
+  // 1️⃣ NEW USER - FIRST MESSAGE "hi"
+  // ===================================================================
+  if (!user && userMessageText === "hi") {
     await sendMessage(
       sender,
-      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Buying or selling properties\n• Renting houses or PG\n• Finding a cleaner or maid\n• Hiring a handyman, technician or electrician"
+      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Renting\n• Buying\n• Selling\n• PG rooms\n• House services\n\nLet's start by choosing a language."
     );
 
     await sendLanguageButtons(sender);
@@ -88,29 +101,26 @@ async function handleIncoming(sender, msg) {
     return session;
   }
 
-  // ---------------------------
-  // 2️⃣ RETURNING USER → "HI"
-  // ---------------------------
-  if (user && message === "hi") {
-    await sendMessage(
-      sender,
-      "Welcome back! 😊 How can I help you today?"
-    );
+  // ===================================================================
+  // 2️⃣ RETURNING USER - "hi"
+  // ===================================================================
+  if (user && userMessageText === "hi") {
+    await sendMessage(sender, `Welcome back! 😊 How can I help you today?`);
     return session;
   }
 
-  // ---------------------------
-  // 3️⃣ LANGUAGE SELECTION
-  // ---------------------------
-  if (session.awaitingLang && message.startsWith("lang_")) {
-    const langCode = message.replace("lang_", "");
+  // ===================================================================
+  // 3️⃣ USER PRESSED LANGUAGE BUTTON
+  // ===================================================================
+  if (session.awaitingLang && buttonId.startsWith("lang_")) {
+    const langCode = buttonId.replace("lang_", "");
 
     await saveUserLanguage(sender, langCode);
 
-    await sendMessage(sender, `Language updated successfully! 🎉`);
+    await sendMessage(sender, `🎉 Language saved successfully!`);
     await sendMessage(
       sender,
-      "How can I assist you today?\nTry:\n• 2BHK in Noida\n• Sell my house\n• I need a maid"
+      "How can I help you today?\nTry something like:\n• 2BHK in Noida\n• 1RK in Pune\n• Sell my house\n• Need a maid"
     );
 
     session.awaitingLang = false;
@@ -118,12 +128,12 @@ async function handleIncoming(sender, msg) {
     return session;
   }
 
-  // ---------------------------
+  // ===================================================================
   // 4️⃣ DEFAULT FALLBACK
-  // ---------------------------
+  // ===================================================================
   await sendMessage(
     sender,
-    "I'm ready! Tell me what you are looking for.\nExamples:\n• 2BHK in Noida\n• Sell my plot\n• 1RK in Pune\n• Need an electrician"
+    "I'm ready! 😊 Just tell me what you're looking for.\nExamples:\n• 2BHK in Noida\n• Sell my plot\n• I need a cleaner\n• PG in Gurgaon"
   );
 
   return session;
@@ -131,5 +141,6 @@ async function handleIncoming(sender, msg) {
 
 module.exports = {
   handleIncoming,
-  sendMessage
+  sendMessage,
+  sendLanguageButtons
 };
