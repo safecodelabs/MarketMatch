@@ -2,20 +2,21 @@
 const express = require("express");
 const router = express.Router();
 
-// ✅ Fixed paths for your structure
+// Correct paths according to your project structure
 const { handleIncomingMessage } = require("../src/bots/whatsappBot");
 const { getSession, saveSession } = require("../utils/sessionStore");
 
-// ------------------------------
-// MAIN WEBHOOK (POST)
-// ------------------------------
+/**
+ * MAIN WEBHOOK (POST)
+ */
 router.post("/", async (req, res) => {
   try {
     const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
 
-    if (!value || !value.messages) return res.sendStatus(200); // ignore non-message webhooks
+    // Ignore non-message webhooks
+    if (!value || !value.messages) return res.sendStatus(200);
 
     const phoneNumberId = value.metadata?.phone_number_id;
     const message = value.messages[0];
@@ -23,9 +24,6 @@ router.post("/", async (req, res) => {
 
     let text = "";
 
-    // ------------------------------
-    // EXTRACT TEXT FROM MESSAGE
-    // ------------------------------
     if (message.type === "text") {
       text = message.text.body.trim();
     } else if (message.type === "interactive") {
@@ -34,29 +32,28 @@ router.post("/", async (req, res) => {
       if (inter.list_reply) text = inter.list_reply.id || inter.list_reply.title;
     }
 
-    text = String(text).toLowerCase();
+    text = text.toLowerCase();
 
     // ------------------------------
-    // GET SESSION (new users will get undefined)
+    // GET SESSION (can be undefined for new users)
     // ------------------------------
-    let session = await getSession(sender);
-    if (!session) session = { step: "start", isInitialized: false, housingFlow: { step: "start", data: {} } };
+    let session = await getSession(sender) || {};
 
     // ------------------------------
     // PASS MESSAGE TO WHATSAPP BOT
     // ------------------------------
-    const updatedSession = await handleIncomingMessage(sender, text, session);
+    const updatedSession = await handleIncomingMessage(sender, text, {
+      ...session,
+      phoneNumberId,
+    });
 
-    // ------------------------------
-    // SAVE UPDATED SESSION
-    // ------------------------------
+    // Save updated session
     if (updatedSession) await saveSession(sender, updatedSession);
 
-    // Respond with 200 OK
-    res.sendStatus(200);
+    return res.sendStatus(200);
   } catch (err) {
     console.error("❌ Webhook Error:", err);
-    res.sendStatus(500);
+    return res.sendStatus(500);
   }
 });
 
