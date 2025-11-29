@@ -1,4 +1,3 @@
-// chatbotController.js
 const axios = require("axios");
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { getUserProfile, saveUserLanguage } = require("./database/firestore");
@@ -6,167 +5,164 @@ const { getUserProfile, saveUserLanguage } = require("./database/firestore");
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
+const API_URL = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+
 // =======================================================================
-// 📤 SEND TEXT
+// 📤 SEND TEXT MESSAGE
 // =======================================================================
 async function sendMessage(to, text) {
   if (!text) return;
-  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "text",
-    text: { body: text }
-  };
 
   try {
-    await axios.post(url, payload, {
-      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
-    });
+    await axios.post(
+      API_URL,
+      {
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body: text }
+      },
+      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+    );
   } catch (err) {
-    console.error("❌ WhatsApp send error:", err.response?.data || err);
+    console.error("❌ sendMessage error:", err.response?.data || err);
   }
 }
 
 // =======================================================================
-// 📤 SEND LANGUAGE LIST (5 LANGUAGES)
+// 📤 SEND LANGUAGE LIST MESSAGE (5 LANGUAGES)
 // =======================================================================
 async function sendLanguageList(to) {
-  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "interactive",
-    interactive: {
-      type: "list",
-      header: { type: "text", text: "Choose Language" },
-      body: { text: "Please select your preferred language:" },
-      action: {
-        button: "Select Language",
-        sections: [
-          {
-            title: "Languages",
-            rows: [
-              { id: "lang_en", title: "English" },
-              { id: "lang_hi", title: "हिन्दी" },
-              { id: "lang_ta", title: "தமிழ்" },
-              { id: "lang_gu", title: "ગુજરાતી" },
-              { id: "lang_kn", title: "ಕನ್ನಡ" }
+  try {
+    await axios.post(
+      API_URL,
+      {
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "list",
+          body: { text: "🌐 Please choose your preferred language:" },
+          footer: { text: "MarketMatch AI" },
+          action: {
+            button: "Select Language",
+            sections: [
+              {
+                title: "Available Languages",
+                rows: [
+                  { id: "lang_en", title: "English" },
+                  { id: "lang_hi", title: "हिंदी (Hindi)" },
+                  { id: "lang_ta", title: "தமிழ் (Tamil)" },
+                  { id: "lang_gu", title: "ગુજરાતી (Gujarati)" },
+                  { id: "lang_kn", title: "ಕನ್ನಡ (Kannada)" }
+                ]
+              }
             ]
           }
-        ]
-      }
-    }
-  };
-
-  try {
-    await axios.post(url, payload, {
-      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
-    });
+        }
+      },
+      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+    );
   } catch (err) {
-    console.error("❌ Language list send error:", err.response?.data || err);
+    console.error("❌ sendLanguageList error:", err.response?.data || err);
   }
 }
 
 // =======================================================================
-// 🧠 MAIN BOT LOGIC — MUST MATCH WEBHOOK NAME
+// 🧠 MAIN BOT LOGIC
 // =======================================================================
-async function handleIncomingMessage(sender, text, session) {
+async function handleIncoming(sender, messageObj) {
+  const session = (await getSession(sender)) || {};
   const user = await getUserProfile(sender);
-  text = text.toLowerCase();
 
+  let userText = "";
   let listId = "";
-  if (text.startsWith("lang_")) listId = text;
 
-  console.log("📥 USER INPUT:", { text, listId });
+  // Detect type
+  if (messageObj.type === "text") userText = messageObj.text.body.toLowerCase();
+  if (messageObj.type === "interactive" && messageObj.interactive.list_reply) {
+    listId = messageObj.interactive.list_reply.id;
+  }
 
-  // =====================================================================
-  // 1️⃣ FIRST TIME USER — SHOW INTRO + LANG LIST
-  // =====================================================================
-  if (!user && ["hi", "hello", "hey"].includes(text)) {
+  console.log("📥 USER INPUT:", { text: userText, listId });
+
+  // ===============================================================
+  // 1️⃣ BRAND NEW USER (no profile in database)
+  // ===============================================================
+  if (!user && !session.introduced) {
     await sendMessage(
       sender,
-      "Hello! 👋 I’m *MarketMatch AI*.\n\nI can help you with:\n• Renting homes\n• PG/Hostels\n• Buying or Selling\n• Cleaning & Home services\n\nBefore we begin, choose your preferred language:"
+      "👋 *Welcome to MarketMatch AI!*\n\nI’m your personal assistant for:\n🏠 Renting\n🏢 Buying\n💼 Selling\n👤 PG/Roommates\n🧹 House Services\n\nLet's begin by selecting your preferred language."
     );
 
     await sendLanguageList(sender);
 
-    session.awaitingLang = true;
+    session.introduced = true;
+    session.awaitingLanguage = true;
     await saveSession(sender, session);
-    return session;
+    return;
   }
 
-  // =====================================================================
-  // 2️⃣ RETURNING USER — JUST GREET
-  // =====================================================================
-  if (user && ["hi", "hello", "hey"].includes(text)) {
-    await sendMessage(sender, `Welcome back! 😊 How can I help you today?`);
-    return session;
+  // ===============================================================
+  // 2️⃣ AWAITING LANGUAGE (must choose before using bot)
+  // ===============================================================
+  if (session.awaitingLanguage) {
+    // CASE A: User selected language via LIST message
+    if (listId.startsWith("lang_")) {
+      const langCode = listId.replace("lang_", "");
+      await saveUserLanguage(sender, langCode);
+
+      await sendMessage(sender, "✅ Language saved successfully!");
+
+      session.awaitingLanguage = false;
+      await saveSession(sender, session);
+
+      await sendMessage(
+        sender,
+        "How can I help you today?\nExample:\n• 2BHK in Noida\n• Need a cleaner\n• PG in Bangalore"
+      );
+      return;
+    }
+
+    // CASE B: User typed language manually
+    const textToLang = {
+      english: "en",
+      hindi: "hi",
+      tamil: "ta",
+      gujarati: "gu",
+      kannada: "kn"
+    };
+
+    if (textToLang[userText]) {
+      await saveUserLanguage(sender, textToLang[userText]);
+
+      await sendMessage(sender, "✅ Language saved successfully!");
+
+      session.awaitingLanguage = false;
+      await saveSession(sender, session);
+      return;
+    }
+
+    // Otherwise → force language selection again
+    await sendMessage(sender, "Please choose a language to continue 👇");
+    await sendLanguageList(sender);
+    return;
   }
 
-  // =====================================================================
-  // 3️⃣ LANGUAGE SELECTED VIA LIST BUTTON
-  // =====================================================================
-  if (session.awaitingLang && listId.startsWith("lang_")) {
-    const langCode = listId.replace("lang_", "");
+  // ===============================================================
+  // 3️⃣ User already selected language — proceed with actual queries
+  // ===============================================================
 
-    await saveUserLanguage(sender, langCode);
-
-    await sendMessage(sender, `🎉 Language saved successfully!`);
-    await sendMessage(
-      sender,
-      "Tell me what you're looking for:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a cleaner\n• Sell my house"
-    );
-
-    session.awaitingLang = false;
-    await saveSession(sender, session);
-    return session;
-  }
-
-  // =====================================================================
-  // 4️⃣ IF USER TYPES LANGUAGE IN TEXT
-  // =====================================================================
-  const languageMap = {
-    english: "en",
-    hindi: "hi",
-    हिन्दी: "hi",
-    tamil: "ta",
-    தமிழ்: "ta",
-    gujarati: "gu",
-    ગુજરાતી: "gu",
-    kannada: "kn",
-    ಕನ್ನಡ: "kn"
-  };
-
-  if (session.awaitingLang && languageMap[text]) {
-    await saveUserLanguage(sender, languageMap[text]);
-
-    await sendMessage(sender, `🎉 Language saved successfully!`);
-    await sendMessage(
-      sender,
-      "Now tell me the requirement:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a maid\n• Sell my plot"
-    );
-
-    session.awaitingLang = false;
-    await saveSession(sender, session);
-    return session;
-  }
-
-  // =====================================================================
-  // 5️⃣ DEFAULT FALLBACK
-  // =====================================================================
   await sendMessage(
     sender,
-    "I'm ready! 😊 Just tell me what you're looking for.\nExample:\n• 2BHK in Noida\n• PG in Gurgaon\n• Sell my house"
+    "👍 I received your request. Soon this will connect to the AI engine.\n(You said: " + userText + ")"
   );
 
-  return session;
+  // Later: call classify() + housingFlow + listingSearch
 }
 
 module.exports = {
-  handleIncomingMessage,
+  handleIncoming,
   sendMessage,
   sendLanguageList
 };
