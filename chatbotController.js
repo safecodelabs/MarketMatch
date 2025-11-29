@@ -7,15 +7,15 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 const API_URL = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
-// =======================================================================
-// 📤 SEND TEXT MESSAGE
-// =======================================================================
-async function sendMessage(to, text) {
+// ===================================================================================
+// SEND TEXT MESSAGE
+// ===================================================================================
+async function sendMessage(to, text, phoneNumberId = PHONE_NUMBER_ID) {
   if (!text) return;
 
   try {
     await axios.post(
-      API_URL,
+      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
       {
         messaging_product: "whatsapp",
         to,
@@ -29,13 +29,13 @@ async function sendMessage(to, text) {
   }
 }
 
-// =======================================================================
-// 📤 SEND LANGUAGE LIST MESSAGE (5 LANGUAGES)
-// =======================================================================
-async function sendLanguageList(to) {
+// ===================================================================================
+// SEND LANGUAGE LIST (Interactive List)
+// ===================================================================================
+async function sendLanguageList(to, phoneNumberId = PHONE_NUMBER_ID) {
   try {
     await axios.post(
-      API_URL,
+      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
       {
         messaging_product: "whatsapp",
         to,
@@ -68,63 +68,38 @@ async function sendLanguageList(to) {
   }
 }
 
-// =======================================================================
-// 🧠 MAIN BOT LOGIC
-// =======================================================================
-async function handleIncoming(sender, messageObj) {
-  const session = (await getSession(sender)) || {};
+// ===================================================================================
+// MAIN: HANDLE INCOMING MESSAGE
+//  ⚠️ THIS MATCHES WEBHOOK FORMAT NOW
+// ===================================================================================
+async function handleIncomingMessage(sender, text, session, phoneNumberId) {
+  text = text?.toLowerCase() || "";
+
   const user = await getUserProfile(sender);
 
-  let userText = "";
-  let listId = "";
+  console.log("📥 Parsed Input:", text);
 
-  // Detect type
-  if (messageObj.type === "text") userText = messageObj.text.body.toLowerCase();
-  if (messageObj.type === "interactive" && messageObj.interactive.list_reply) {
-    listId = messageObj.interactive.list_reply.id;
-  }
-
-  console.log("📥 USER INPUT:", { text: userText, listId });
-
-  // ===============================================================
-  // 1️⃣ BRAND NEW USER (no profile in database)
-  // ===============================================================
+  // =======================================================
+  // 1️⃣ First time user
+  // =======================================================
   if (!user && !session.introduced) {
     await sendMessage(
       sender,
-      "👋 *Welcome to MarketMatch AI!*\n\nI’m your personal assistant for:\n🏠 Renting\n🏢 Buying\n💼 Selling\n👤 PG/Roommates\n🧹 House Services\n\nLet's begin by selecting your preferred language."
+      "👋 *Welcome to MarketMatch AI!*\n\nI’m your personal assistant for:\n🏠 Rentals\n🏢 Real Estate\n👤 PG / Flatmates\n🧹 Home Services\n\nLet's begin. Please pick a language."
     );
 
-    await sendLanguageList(sender);
+    await sendLanguageList(sender, phoneNumberId);
 
     session.introduced = true;
     session.awaitingLanguage = true;
     await saveSession(sender, session);
-    return;
+    return session;
   }
 
-  // ===============================================================
-  // 2️⃣ AWAITING LANGUAGE (must choose before using bot)
-  // ===============================================================
+  // =======================================================
+  // 2️⃣ User must pick language
+  // =======================================================
   if (session.awaitingLanguage) {
-    // CASE A: User selected language via LIST message
-    if (listId.startsWith("lang_")) {
-      const langCode = listId.replace("lang_", "");
-      await saveUserLanguage(sender, langCode);
-
-      await sendMessage(sender, "✅ Language saved successfully!");
-
-      session.awaitingLanguage = false;
-      await saveSession(sender, session);
-
-      await sendMessage(
-        sender,
-        "How can I help you today?\nExample:\n• 2BHK in Noida\n• Need a cleaner\n• PG in Bangalore"
-      );
-      return;
-    }
-
-    // CASE B: User typed language manually
     const textToLang = {
       english: "en",
       hindi: "hi",
@@ -133,36 +108,49 @@ async function handleIncoming(sender, messageObj) {
       kannada: "kn"
     };
 
-    if (textToLang[userText]) {
-      await saveUserLanguage(sender, textToLang[userText]);
+    // manual typed language
+    if (textToLang[text]) {
+      await saveUserLanguage(sender, textToLang[text]);
+      session.awaitingLanguage = false;
+      await saveSession(sender, session);
 
-      await sendMessage(sender, "✅ Language saved successfully!");
+      await sendMessage(sender, "✅ Language saved!");
+      await sendMessage(sender, "How can I help you today?");
+      return session;
+    }
+
+    // pressed interactive list
+    if (text.startsWith("lang_")) {
+      const lang = text.replace("lang_", "");
+      await saveUserLanguage(sender, lang);
 
       session.awaitingLanguage = false;
       await saveSession(sender, session);
-      return;
+
+      await sendMessage(sender, "✅ Language saved!");
+      await sendMessage(sender, "How can I help you today?");
+      return session;
     }
 
-    // Otherwise → force language selection again
     await sendMessage(sender, "Please choose a language to continue 👇");
-    await sendLanguageList(sender);
-    return;
+    await sendLanguageList(sender, phoneNumberId);
+    return session;
   }
 
-  // ===============================================================
-  // 3️⃣ User already selected language — proceed with actual queries
-  // ===============================================================
-
+  // =======================================================
+  // 3️⃣ User is active, language selected — now handle queries
+  // =======================================================
   await sendMessage(
     sender,
-    "👍 I received your request. Soon this will connect to the AI engine.\n(You said: " + userText + ")"
+    `👍 Received your request: "${text}".\nAI engine will process this soon.`
   );
 
-  // Later: call classify() + housingFlow + listingSearch
+  return session;
 }
 
+// ===================================================================================
 module.exports = {
-  handleIncoming,
   sendMessage,
-  sendLanguageList
+  sendLanguageList,
+  handleIncomingMessage
 };
