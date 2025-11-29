@@ -1,31 +1,16 @@
 // src/bots/whatsappBot.js
-const chatbotController = require('../../chatbotController');
+const { sendMessage, sendLanguageList, sendButtons } = require("../../chatbotController"); // <-- real functions
+const { db } = require('../../database/firestore');
+
 const path = require('path');
 
-// try to load your messageService; fallback to console stubs for local dev
-let sendMessage, sendButtons;
-try {
-  const ms = require(path.join(__dirname, '..', 'services', 'messageService'));
-  sendMessage = ms.sendMessage;
-  sendButtons = ms.sendButtons;
-} catch (e) {
-  sendMessage = async (to, text) => {
-    console.log(`✉️ [stub sendMessage] -> ${to}: ${text}`);
-    return true;
-  };
-  // sendButtons(to, text, buttons) -> expected to send interactive button payloads
-  sendButtons = async (to, text, buttons) => {
-    console.log(`🔘 [stub sendButtons] -> ${to}: ${text}`);
-    console.table(buttons);
-    return true;
-  };
-}
 
 const { getSession, saveSession, deleteSession } = require('../../utils/sessionStore');
 const { classify, askAI } = require('../ai/aiEngine');
 const { handleAIAction } = require('../flows/housingFlow');
 const { getUserProfile, saveUserLanguage, getUserListings, addListing } = require('../../database/firestore');
 const { getString } = require('../../utils/languageStrings');
+const chatbotController = require('../../chatbotController');
 
 // helper: localized text lookup then send
 async function sendTranslated(to, key, lang = 'en', extra = '') {
@@ -44,7 +29,7 @@ async function aiTranslate(text, targetLang = 'en') {
     if (!out) return text;
     return out.toString().trim();
   } catch (err) {
-    console.warn('aiTranslate fallback:', err?.message || err);
+    console.warn('AI translation failed, using original text:', err.message);
     return text;
   }
 }
@@ -55,6 +40,7 @@ function languageButtons(lang = 'en') {
     { id: 'lang_en', title: 'English' },
     { id: 'lang_hi', title: 'हिंदी' },
     { id: 'lang_ta', title: 'தமிழ்' },
+    { id: 'lang_mr', title: 'मराठी' },
     // you can remove/add languages easily here
   ];
 }
@@ -62,7 +48,7 @@ function languageButtons(lang = 'en') {
 // build main menu buttons
 function mainMenuButtons(lang = 'en') {
   return [
-    { id: '1', title: getString(lang, 'menu') ? 'View listings' : 'View listings' }, // label can be localized if desired
+    { id: '1', title: getString(lang, 'viewListings') || 'View listings' }, // label can be localized if desired
     { id: '2', title: 'Post listing' },
     { id: '3', title: 'Manage listings' },
     { id: '4', title: 'Change language' },
@@ -95,19 +81,23 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   const greetings = ["hi", "hello", "hey", "start"];
   const isNewUser = !session.isInitialized;
 
-  if (greetings.includes(lowerMsg)) {
-    if (isNewUser) {
-      // Mark session as initialized
-      session.isInitialized = true;
-      await saveSession(sender, session);
+if (greetings.includes(lowerMsg)) {
+  if (isNewUser) {
+    session.isInitialized = true;
+    session.step = "menu";
+    await saveSession(sender, session);
 
-      // First-time user → let chatbotController handle full intro
-      return await chatbotController.handleIncomingMessage(sender, "start", session, metadata);
-    }
-
-    // Existing user → skip intro, hand off to chatbotController
-    return await chatbotController.handleIncomingMessage(sender, msgBody, session, metadata);
+    await sendMessage(sender, await aiTranslate(getString(userLang, 'welcome') || "Welcome!", userLang));
+    await sendButtons(sender, getString(userLang, 'menu') || "Choose an option:", mainMenuButtons(userLang));
+    return session;
   }
+
+  // For returning users
+  await sendButtons(sender, getString(userLang, 'menu') || "Choose an option:", mainMenuButtons(userLang));
+  return session;
+}
+
+
 
   // ---------------------------
   // LANGUAGE SELECTION HANDLING
@@ -197,22 +187,14 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // ---------------------------
   if (/^del_/.test(lowerMsg)) {
     const id = msgBody.split('_')[1];
-    try {
-      // remove from firestore directly
-      if (require('../../database/firestore').db && require('../../database/firestore').db.collection) {
-        await require('../../database/firestore').db.collection('listings').doc(id).delete();
-      }
-      await sendMessage(sender, await aiTranslate('✅ Listing deleted.', userLang));
-      // refresh menu
-      session.step = 'menu';
-      await saveSession(sender, session);
-      await sendButtons(sender, getString(userLang, 'menu') || 'Choose an option:', mainMenuButtons(userLang));
-      return session;
-    } catch (err) {
-      console.error('delete error', err);
-      await sendMessage(sender, await aiTranslate('❌ Failed to delete listing.', userLang));
-      return session;
-    }
+try {
+    await db.collection('listings').doc(id).delete();
+    await sendMessage(sender, '✅ Listing deleted.');
+} catch (err) {
+    console.error('Delete error:', err);
+    await sendMessage(sender, '❌ Failed to delete listing.');
+}return session;
+
   }
 
   // ---------------------------
@@ -281,7 +263,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // ---------------------------
   // AWAITING SEARCH QUERY (user typed e.g. '2bhk in noida')
   // ---------------------------
-  if (session.step === 'awaiting_query' || /(\d+\s?bhk|bhk|flat|apartment|noida|delhi|mumbai|pune)/i.test(lowerMsg)) {
+  if (session.step === 'awaiting_query') {
     // Use the AI classify + housingFlow handler to run search + reply
     try {
       const ai = await classify(msgBody);
