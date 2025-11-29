@@ -7,11 +7,10 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 // =======================================================================
-// 📤 Send Text Message
+// 📤 SEND TEXT
 // =======================================================================
 async function sendMessage(to, text) {
   if (!text) return;
-
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
   const payload = {
@@ -31,9 +30,9 @@ async function sendMessage(to, text) {
 }
 
 // =======================================================================
-// 📤 Send Language Buttons
+// 📤 SEND LANGUAGE LIST (5 LANGUAGES)
 // =======================================================================
-async function sendLanguageButtons(to) {
+async function sendLanguageList(to) {
   const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
   const payload = {
@@ -41,13 +40,22 @@ async function sendLanguageButtons(to) {
     to,
     type: "interactive",
     interactive: {
-      type: "button",
-      body: { text: "Choose your preferred language:" },
+      type: "list",
+      header: { type: "text", text: "Choose Language" },
+      body: { text: "Please select your preferred language:" },
       action: {
-        buttons: [
-          { type: "reply", reply: { id: "lang_en", title: "English" } },
-          { type: "reply", reply: { id: "lang_hi", title: "हिंदी" } },
-          { type: "reply", reply: { id: "lang_ta", title: "தமிழ்" } }
+        button: "Select Language",
+        sections: [
+          {
+            title: "Languages",
+            rows: [
+              { id: "lang_en", title: "English" },
+              { id: "lang_hi", title: "हिन्दी" },
+              { id: "lang_ta", title: "தமிழ்" },
+              { id: "lang_gu", title: "ગુજરાતી" },
+              { id: "lang_kn", title: "ಕನ್ನಡ" }
+            ]
+          }
         ]
       }
     }
@@ -58,62 +66,58 @@ async function sendLanguageButtons(to) {
       headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
     });
   } catch (err) {
-    console.error("❌ WhatsApp button send error:", err.response?.data || err);
+    console.error("❌ Language list send error:", err.response?.data || err);
   }
 }
 
 // =======================================================================
-// 🧠 MAIN BOT LOGIC (THIS MUST MATCH WEBHOOK NAME)
+// 🧠 MAIN BOT LOGIC — MUST MATCH WEBHOOK NAME
 // =======================================================================
-async function handleIncomingMessage(sender, text, session, phoneId) {
+async function handleIncomingMessage(sender, text, session) {
   const user = await getUserProfile(sender);
+  text = text.toLowerCase();
 
-  const message = text.toLowerCase();
-  let buttonId = "";
+  let listId = "";
+  if (text.startsWith("lang_")) listId = text;
 
-  // Webhook may send button replies as text (id)
-  if (message.startsWith("lang_")) {
-    buttonId = message;
-  }
+  console.log("📥 USER INPUT:", { text, listId });
 
-  console.log("📥 USER INPUT:", { text: message, button: buttonId });
-
-  // ===================================================================
-  // 1️⃣ NEW USER FIRST MESSAGE
-  // ===================================================================
-  if (!user && ["hi", "hello", "hey", "start"].includes(message)) {
+  // =====================================================================
+  // 1️⃣ FIRST TIME USER — SHOW INTRO + LANG LIST
+  // =====================================================================
+  if (!user && ["hi", "hello", "hey"].includes(text)) {
     await sendMessage(
       sender,
-      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Renting\n• Buying\n• Selling\n• PG rooms\n• Cleaning & Home Services\n\nLet's begin by choosing a language."
+      "Hello! 👋 I’m *MarketMatch AI*.\n\nI can help you with:\n• Renting homes\n• PG/Hostels\n• Buying or Selling\n• Cleaning & Home services\n\nBefore we begin, choose your preferred language:"
     );
 
-    await sendLanguageButtons(sender);
+    await sendLanguageList(sender);
 
     session.awaitingLang = true;
     await saveSession(sender, session);
     return session;
   }
 
-  // ===================================================================
-  // 2️⃣ RETURNING USER - "hi"
-  // ===================================================================
-  if (user && ["hi", "hello", "hey", "start"].includes(message)) {
+  // =====================================================================
+  // 2️⃣ RETURNING USER — JUST GREET
+  // =====================================================================
+  if (user && ["hi", "hello", "hey"].includes(text)) {
     await sendMessage(sender, `Welcome back! 😊 How can I help you today?`);
     return session;
   }
 
-  // ===================================================================
-  // 3️⃣ LANGUAGE SELECTION
-  // ===================================================================
-  if (session.awaitingLang && buttonId.startsWith("lang_")) {
-    const langCode = buttonId.replace("lang_", "");
+  // =====================================================================
+  // 3️⃣ LANGUAGE SELECTED VIA LIST BUTTON
+  // =====================================================================
+  if (session.awaitingLang && listId.startsWith("lang_")) {
+    const langCode = listId.replace("lang_", "");
 
     await saveUserLanguage(sender, langCode);
 
     await sendMessage(sender, `🎉 Language saved successfully!`);
     await sendMessage(
       sender,
-      "How can I help you today?\nFor example:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a maid\n• Sell my house"
+      "Tell me what you're looking for:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a cleaner\n• Sell my house"
     );
 
     session.awaitingLang = false;
@@ -121,20 +125,48 @@ async function handleIncomingMessage(sender, text, session, phoneId) {
     return session;
   }
 
-  // ===================================================================
-  // 4️⃣ DEFAULT FALLBACK
-  // ===================================================================
+  // =====================================================================
+  // 4️⃣ IF USER TYPES LANGUAGE IN TEXT
+  // =====================================================================
+  const languageMap = {
+    english: "en",
+    hindi: "hi",
+    हिन्दी: "hi",
+    tamil: "ta",
+    தமிழ்: "ta",
+    gujarati: "gu",
+    ગુજરાતી: "gu",
+    kannada: "kn",
+    ಕನ್ನಡ: "kn"
+  };
+
+  if (session.awaitingLang && languageMap[text]) {
+    await saveUserLanguage(sender, languageMap[text]);
+
+    await sendMessage(sender, `🎉 Language saved successfully!`);
+    await sendMessage(
+      sender,
+      "Now tell me the requirement:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a maid\n• Sell my plot"
+    );
+
+    session.awaitingLang = false;
+    await saveSession(sender, session);
+    return session;
+  }
+
+  // =====================================================================
+  // 5️⃣ DEFAULT FALLBACK
+  // =====================================================================
   await sendMessage(
     sender,
-    "I'm ready! 😊 Just tell me what you're looking for.\nExamples:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a cleaner\n• Sell my plot"
+    "I'm ready! 😊 Just tell me what you're looking for.\nExample:\n• 2BHK in Noida\n• PG in Gurgaon\n• Sell my house"
   );
 
   return session;
 }
 
-// =======================================================================
 module.exports = {
-  handleIncomingMessage, // 🔥 Your webhook NEEDS THIS EXACT NAME
+  handleIncomingMessage,
   sendMessage,
-  sendLanguageButtons
+  sendLanguageList
 };
