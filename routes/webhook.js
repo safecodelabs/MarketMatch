@@ -1,7 +1,9 @@
+// routes/webhook.js
 const express = require("express");
 const router = express.Router();
 
-const chatbotController = require("../chatbotController");
+// ✅ Fixed paths for your structure
+const { handleIncomingMessage } = require("../src/bots/whatsappBot");
 const { getSession, saveSession } = require("../utils/sessionStore");
 
 // ------------------------------
@@ -20,6 +22,10 @@ router.post("/", async (req, res) => {
     const sender = message.from;
 
     let text = "";
+
+    // ------------------------------
+    // EXTRACT TEXT FROM MESSAGE
+    // ------------------------------
     if (message.type === "text") {
       text = message.text.body.trim();
     } else if (message.type === "interactive") {
@@ -27,27 +33,27 @@ router.post("/", async (req, res) => {
       if (inter.button_reply) text = inter.button_reply.id || inter.button_reply.title;
       if (inter.list_reply) text = inter.list_reply.id || inter.list_reply.title;
     }
-    text = text.toLowerCase();
+
+    text = String(text).toLowerCase();
 
     // ------------------------------
-    // GET SESSION (can be undefined for new users)
+    // GET SESSION (new users will get undefined)
     // ------------------------------
-    const session = await getSession(sender); // do NOT default to an object here
+    let session = await getSession(sender);
+    if (!session) session = { step: "start", isInitialized: false, housingFlow: { step: "start", data: {} } };
 
     // ------------------------------
-    // PASS MESSAGE TO MAIN CONTROLLER
+    // PASS MESSAGE TO WHATSAPP BOT
     // ------------------------------
-    const updatedSession = await chatbotController.handleIncomingMessage(
-      sender,
-      text,
-      session,
-      { phoneNumberId } // pass as metadata
-    );
+    const updatedSession = await handleIncomingMessage(sender, text, session);
 
+    // ------------------------------
+    // SAVE UPDATED SESSION
+    // ------------------------------
     if (updatedSession) await saveSession(sender, updatedSession);
 
+    // Respond with 200 OK
     res.sendStatus(200);
-
   } catch (err) {
     console.error("❌ Webhook Error:", err);
     res.sendStatus(500);

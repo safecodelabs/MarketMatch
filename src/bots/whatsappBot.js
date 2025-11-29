@@ -1,5 +1,5 @@
 // src/bots/whatsappBot.js
-const chatbotController = require('./chatbotController');
+const chatbotController = require('../../chatbotController');
 const path = require('path');
 
 // try to load your messageService; fallback to console stubs for local dev
@@ -21,11 +21,11 @@ try {
   };
 }
 
-const { getSession, saveSession, deleteSession } = require('../utils/sessionStore');
+const { getSession, saveSession, deleteSession } = require('../../utils/sessionStore');
 const { classify, askAI } = require('../ai/aiEngine');
 const { handleAIAction } = require('../flows/housingFlow');
 const { getUserProfile, saveUserLanguage, getUserListings, addListing } = require('../../database/firestore');
-const { getString } = require('../utils/languageStrings');
+const { getString } = require('../../utils/languageStrings');
 
 // helper: localized text lookup then send
 async function sendTranslated(to, key, lang = 'en', extra = '') {
