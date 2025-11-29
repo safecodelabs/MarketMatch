@@ -63,35 +63,28 @@ async function sendLanguageButtons(to) {
 }
 
 // =======================================================================
-// 🧠 MAIN BOT LOGIC
+// 🧠 MAIN BOT LOGIC (THIS MUST MATCH WEBHOOK NAME)
 // =======================================================================
-async function handleIncoming(sender, messageObj) {
-  const session = (await getSession(sender)) || {};
+async function handleIncomingMessage(sender, text, session, phoneId) {
   const user = await getUserProfile(sender);
 
-  let userMessageText = "";
+  const message = text.toLowerCase();
   let buttonId = "";
 
-  // ----------------------------------------------------
-  // 🔍 Detect message type
-  // ----------------------------------------------------
-  if (messageObj.type === "text") {
-    userMessageText = messageObj.text.body.toLowerCase();
+  // Webhook may send button replies as text (id)
+  if (message.startsWith("lang_")) {
+    buttonId = message;
   }
 
-  if (messageObj.type === "interactive" && messageObj.interactive.button_reply) {
-    buttonId = messageObj.interactive.button_reply.id;
-  }
-
-  console.log("📥 USER INPUT:", { text: userMessageText, button: buttonId });
+  console.log("📥 USER INPUT:", { text: message, button: buttonId });
 
   // ===================================================================
-  // 1️⃣ NEW USER - FIRST MESSAGE "hi"
+  // 1️⃣ NEW USER FIRST MESSAGE
   // ===================================================================
-  if (!user && userMessageText === "hi") {
+  if (!user && ["hi", "hello", "hey", "start"].includes(message)) {
     await sendMessage(
       sender,
-      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Renting\n• Buying\n• Selling\n• PG rooms\n• House services\n\nLet's start by choosing a language."
+      "Hello! 👋 I’m MarketMatch AI.\nI can help you with:\n• Renting\n• Buying\n• Selling\n• PG rooms\n• Cleaning & Home Services\n\nLet's begin by choosing a language."
     );
 
     await sendLanguageButtons(sender);
@@ -104,13 +97,13 @@ async function handleIncoming(sender, messageObj) {
   // ===================================================================
   // 2️⃣ RETURNING USER - "hi"
   // ===================================================================
-  if (user && userMessageText === "hi") {
+  if (user && ["hi", "hello", "hey", "start"].includes(message)) {
     await sendMessage(sender, `Welcome back! 😊 How can I help you today?`);
     return session;
   }
 
   // ===================================================================
-  // 3️⃣ USER PRESSED LANGUAGE BUTTON
+  // 3️⃣ LANGUAGE SELECTION
   // ===================================================================
   if (session.awaitingLang && buttonId.startsWith("lang_")) {
     const langCode = buttonId.replace("lang_", "");
@@ -120,7 +113,7 @@ async function handleIncoming(sender, messageObj) {
     await sendMessage(sender, `🎉 Language saved successfully!`);
     await sendMessage(
       sender,
-      "How can I help you today?\nTry something like:\n• 2BHK in Noida\n• 1RK in Pune\n• Sell my house\n• Need a maid"
+      "How can I help you today?\nFor example:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a maid\n• Sell my house"
     );
 
     session.awaitingLang = false;
@@ -133,14 +126,15 @@ async function handleIncoming(sender, messageObj) {
   // ===================================================================
   await sendMessage(
     sender,
-    "I'm ready! 😊 Just tell me what you're looking for.\nExamples:\n• 2BHK in Noida\n• Sell my plot\n• I need a cleaner\n• PG in Gurgaon"
+    "I'm ready! 😊 Just tell me what you're looking for.\nExamples:\n• 2BHK in Noida\n• PG in Gurgaon\n• Need a cleaner\n• Sell my plot"
   );
 
   return session;
 }
 
+// =======================================================================
 module.exports = {
-  handleIncoming,
+  handleIncomingMessage, // 🔥 Your webhook NEEDS THIS EXACT NAME
   sendMessage,
   sendLanguageButtons
 };
