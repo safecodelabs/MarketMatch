@@ -1,4 +1,5 @@
 // src/bots/whatsappBot.js
+const chatbotController = require('./chatbotController');
 const path = require('path');
 
 // try to load your messageService; fallback to console stubs for local dev
@@ -91,23 +92,21 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // ---------------------------
   // GREETINGS / ENTRY POINTS
   // ---------------------------
-  const greetings = ['hi', 'hello', 'hey', 'start'];
-  if (greetings.includes(lowerMsg) || session.step === 'start') {
-    // If user exists: welcome back and show menu
-    if (userProfile && userProfile.preferredLanguage) {
-      await sendMessage(sender, (await aiTranslate(`Welcome back! How can I help you today?`, userProfile.preferredLanguage)));
-      await sendButtons(sender, getString(userProfile.preferredLanguage, 'menu') || 'Choose an option:', mainMenuButtons(userProfile.preferredLanguage));
-      session.step = 'menu';
+  const greetings = ["hi", "hello", "hey", "start"];
+  const isNewUser = !session.isInitialized;
+
+  if (greetings.includes(lowerMsg)) {
+    if (isNewUser) {
+      // Mark session as initialized
+      session.isInitialized = true;
       await saveSession(sender, session);
-      return session;
+
+      // First-time user → let chatbotController handle full intro
+      return await chatbotController.handleIncomingMessage(sender, "start", session, metadata);
     }
 
-    // new user: ask language selection
-    await sendButtons(sender, getString('en', 'chooseLanguage') || 'Choose your preferred language:', languageButtons());
-    session.step = 'awaiting_language';
-    session.housingFlow.awaitingLangSelection = true;
-    await saveSession(sender, session);
-    return session;
+    // Existing user → skip intro, hand off to chatbotController
+    return await chatbotController.handleIncomingMessage(sender, msgBody, session, metadata);
   }
 
   // ---------------------------
@@ -117,7 +116,6 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   const langCandidates = ['english', 'हिंदी', 'தமிழ்', 'hi', 'ta', 'en', 'mr', 'मराठी'];
   const isLanguageTyped = langCandidates.some(c => lowerMsg.includes(c));
   if (session.housingFlow?.awaitingLangSelection || /^lang_/.test(lowerMsg) || isLanguageTyped) {
-    // if typed like 'lang_en' or 'english'
     let lang = 'en';
     if (/^lang_/.test(lowerMsg)) {
       lang = lowerMsg.split('_')[1] || 'en';
@@ -128,18 +126,12 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       else if (lowerMsg.includes('en') || lowerMsg.includes('english')) lang = 'en';
     }
 
-    // save language to users collection
-    try {
-      await saveUserLanguage(sender, lang);
-    } catch (err) {
-      console.warn('saveUserLanguage failed:', err?.message || err);
-    }
+    try { await saveUserLanguage(sender, lang); } catch (err) { console.warn('saveUserLanguage failed:', err?.message || err); }
 
     session.housingFlow = { step: 'start', data: {}, awaitingLangSelection: false };
     session.step = 'menu';
     await saveSession(sender, session);
 
-    // send confirmation and main menu in chosen language
     await sendMessage(sender, await aiTranslate(getString(lang, 'welcome') || 'Welcome!', lang));
     await sendButtons(sender, getString(lang, 'menu') || 'Choose an option:', mainMenuButtons(lang));
     return session;
