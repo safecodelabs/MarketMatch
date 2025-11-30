@@ -36,7 +36,7 @@ async function sendMessage(to, message) {
 }
 
 // -------------------------------------------------------------
-// 2) SEND INTERACTIVE BUTTONS (FIXED VERSION)
+// 2) SEND INTERACTIVE BUTTONS (1–3 buttons only)
 // -------------------------------------------------------------
 async function sendButtons(to, bodyText, buttons) {
   try {
@@ -86,29 +86,38 @@ async function sendButtons(to, bodyText, buttons) {
 }
 
 // -------------------------------------------------------------
-// 3) SEND LANGUAGE LIST (unchanged but formatted)
+// 3) SEND INTERACTIVE LIST (supports large menus)
 // -------------------------------------------------------------
-async function sendLanguageList(to) {
+async function sendList(to, headerText, bodyText, footerText, buttonText, sections) {
   try {
+    // Validation
+    if (!Array.isArray(sections) || sections.length < 1) {
+      throw new Error("sections must be a non-empty array.");
+    }
+
+    sections.forEach((sec) => {
+      if (!sec.title || !Array.isArray(sec.rows)) {
+        throw new Error("Each section must contain a title and rows[].");
+      }
+      if (sec.rows.length < 1 || sec.rows.length > 10) {
+        throw new Error(
+          `Each section must have 1–10 rows. Section: ${sec.title}`
+        );
+      }
+    });
+
     const payload = {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
       interactive: {
         type: "list",
-        header: { type: "text", text: "Choose Language" },
-        body: { text: "Select your preferred language" },
+        header: { type: "text", text: headerText },
+        body: { text: bodyText },
+        footer: footerText ? { text: footerText } : undefined,
         action: {
-          button: "Select",
-          sections: [
-            {
-              title: "Languages",
-              rows: [
-                { id: "lang_en", title: "English" },
-                { id: "lang_hi", title: "Hindi" },
-              ],
-            },
-          ],
+          button: buttonText || "Select",
+          sections,
         },
       },
     };
@@ -124,15 +133,15 @@ async function sendLanguageList(to) {
       }
     );
 
-    console.log("📤 Language list sent:", res.data);
+    console.log("📤 List menu sent:", res.data);
     return res.data;
   } catch (err) {
-    console.error("❌ sendLanguageList error:", err.response?.data || err);
+    console.error("❌ sendList error:", err.response?.data || err);
   }
 }
 
 module.exports = {
   sendMessage,
   sendButtons,
-  sendLanguageList,
+  sendList,
 };
