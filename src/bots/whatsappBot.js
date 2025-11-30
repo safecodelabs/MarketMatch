@@ -69,53 +69,43 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   const greetings = ["hi", "hello", "hey", "start"];
   const isNewUser = !session.isInitialized;
 
-  if (greetings.includes(lowerMsg)) {
-    if (isNewUser) {
-      session.isInitialized = true;
-      session.step = "menu";
-      await saveSession(sender, session);
+if (greetings.includes(lowerMsg)) {
+  const menuRows = [
+    { id: "view_listings", title: "View listings" },
+    { id: "post_listing", title: "Post listing" },
+    { id: "manage_listings", title: "Manage listings" },
+    { id: "change_language", title: "Change language" },
+  ];
 
-      await sendMessage(sender, await aiTranslate(getString(userLang, 'welcome') || "Welcome!", userLang));
-      await sendList(
-        sender,
-        "🏡 MarketMatch AI",
-        "Choose an option:",
-        "",
-        [
-          {
-            title: "Menu",
-            rows: [
-              { id: "view_listings", title: "View listings" },
-              { id: "post_listing", title: "Post listing" },
-              { id: "manage_listings", title: "Manage listings" },
-              { id: "change_language", title: "Change language" },
-            ]
-          }
-        ]
-      );
-      return session;
-    }
+  // For new users
+  if (isNewUser) {
+    session.isInitialized = true;
+    session.step = "menu";
+    await saveSession(sender, session);
 
-    // returning users
+    await sendMessage(sender, await aiTranslate(getString(userLang, 'welcome') || "Welcome!", userLang));
+
+    // Safe sendList
     await sendList(
       sender,
       "🏡 MarketMatch AI",
       "Choose an option:",
       "",
-      [
-        {
-          title: "Menu",
-          rows: [
-            { id: "view_listings", title: "View listings" },
-            { id: "post_listing", title: "Post listing" },
-            { id: "manage_listings", title: "Manage listings" },
-            { id: "change_language", title: "Change language" },
-          ]
-        }
-      ]
+      menuRows.length ? [{ title: "Menu", rows: menuRows }] : []
     );
     return session;
   }
+
+  // For returning users
+  await sendList(
+    sender,
+    "🏡 MarketMatch AI",
+    "Choose an option:",
+    "",
+    menuRows.length ? [{ title: "Menu", rows: menuRows }] : []
+  );
+  return session;
+}
 
   // ---------------------------
   // LANGUAGE SELECTION HANDLING
@@ -163,48 +153,49 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // -----------------------------------------
   // MAIN MENU HANDLERS (LIST MESSAGE IDs)
   // -----------------------------------------
-  if (lowerMsg === "view_listings") {
-    await sendMessage(sender, await aiTranslate("Sure — send me your search (e.g. `2BHK in Noida sector 56`) and I'll filter results for you.", userLang));
-    session.step = 'awaiting_query';
-    await saveSession(sender, session);
+if (lowerMsg === "view_listings") {
+  await sendMessage(sender, await aiTranslate("Sure — send me your search (e.g. `2BHK in Noida sector 56`) and I'll filter results for you.", userLang));
+  session.step = 'awaiting_query';
+  await saveSession(sender, session);
+  return session;
+}
+
+if (lowerMsg === "post_listing") {
+  const example = "Example: Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro";
+  await sendMessage(sender, await aiTranslate(`Please send the listing details in this format:\n${example}`, userLang));
+
+  session.step = 'awaiting_post_details';
+  session.pending = ['title', 'location', 'property_type', 'price', 'contact', 'description'];
+  await saveSession(sender, session);
+  return session;
+}
+
+if (lowerMsg === "manage_listings") {
+  const userListings = await getUserListings(sender);
+  if (!userListings || userListings.length === 0) {
+    await sendMessage(sender, await aiTranslate("You have no listings yet. Would you like to post one?", userLang));
     return session;
   }
 
-  if (lowerMsg === "post_listing") {
-    const example = "Example: Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro";
-    await sendMessage(sender, await aiTranslate(`Please send the listing details in this format:\n${example}`, userLang));
-    session.step = 'awaiting_post_details';
-    session.pending = ['title', 'location', 'property_type', 'price', 'contact', 'description'];
-    await saveSession(sender, session);
-    return session;
-  }
+  const preview = userListings
+    .slice(0, 8)
+    .map((l, i) => `${i + 1}. ${l.title || l.property_type} in ${l.location} — ${l.price || 'N/A'} (id:${l.id})`)
+    .join('\n\n');
 
-  if (lowerMsg === "manage_listings") {
-    const userListings = await getUserListings(sender);
-    if (!userListings || userListings.length === 0) {
-      await sendMessage(sender, await aiTranslate("You have no listings yet. Would you like to post one?", userLang));
-      return session;
-    }
+  await sendMessage(sender, await aiTranslate(`Your listings:\n\n${preview}`, userLang));
+  session.step = 'managing';
+  session.lastUserListings = userListings;
+  await saveSession(sender, session);
+  return session;
+}
 
-    const preview = userListings
-      .slice(0, 8)
-      .map((l, i) => `${i + 1}. ${l.title || l.property_type} in ${l.location} — ${l.price || 'N/A'} (id:${l.id})`)
-      .join('\n\n');
-
-    await sendMessage(sender, await aiTranslate(`Your listings:\n\n${preview}`, userLang));
-    session.step = 'managing';
-    session.lastUserListings = userListings;
-    await saveSession(sender, session);
-    return session;
-  }
-
-  if (lowerMsg === "change_language") {
-    await sendButtons(sender, getString(userLang, 'changeLanguage') || 'Please select your new language:', languageButtons(userLang));
-    session.housingFlow = { ...session.housingFlow, step: 'awaiting_language', awaitingLangSelection: true };
-    session.step = 'awaiting_language';
-    await saveSession(sender, session);
-    return session;
-  }
+if (lowerMsg === "change_language") {
+  await sendButtons(sender, getString(userLang, 'changeLanguage') || 'Please select your new language:', languageButtons(userLang));
+  session.housingFlow = { ...session.housingFlow, step: 'awaiting_language', awaitingLangSelection: true };
+  session.step = 'awaiting_language';
+  await saveSession(sender, session);
+  return session;
+}
 
   // ---------------------------
   // POST LISTING DETAILS
