@@ -7,27 +7,37 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 const API_URL = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
-// ===================================================================================
-// SEND TEXT MESSAGE
-// ===================================================================================
-async function sendMessage(to, text, phoneNumberId = PHONE_NUMBER_ID) {
-  if (!text) return;
-
+// =======================================================
+// SEND BUTTONS (Fix for missing function)
+// =======================================================
+async function sendButtons(to, text, buttons, phoneNumberId = PHONE_NUMBER_ID) {
   try {
     await axios.post(
       `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
       {
         messaging_product: "whatsapp",
         to,
-        type: "text",
-        text: { body: text }
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text },
+          action: {
+            buttons: buttons.map((b) => ({
+              type: "reply",
+              reply: { id: b.id, title: b.title }
+            }))
+          }
+        }
       },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+      {
+        headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
+      }
     );
   } catch (err) {
-    console.error("❌ sendMessage error:", err.response?.data || err);
+    console.error("❌ sendButtons error:", err.response?.data || err);
   }
 }
+
 
 // ===================================================================================
 // SEND LANGUAGE LIST (Interactive List)
@@ -152,5 +162,7 @@ async function handleIncomingMessage(sender, text, session, phoneNumberId) {
 module.exports = {
   sendMessage,
   sendLanguageList,
+  sendButtons,
   handleIncomingMessage
 };
+

@@ -1,5 +1,5 @@
 // src/bots/whatsappBot.js
-const { sendMessage, sendLanguageList, sendButtons } = require("../../chatbotController"); // <-- real functions
+const { sendMessage, sendButtons } = require("../../chatbotController");
 const { db } = require('../../database/firestore');
 
 const path = require('path');
