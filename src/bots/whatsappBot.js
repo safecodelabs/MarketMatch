@@ -9,13 +9,11 @@ const { handleAIAction } = require('../flows/housingFlow');
 const { getUserProfile, saveUserLanguage, getUserListings, addListing } = require('../../database/firestore');
 const { getString } = require('../../utils/languageStrings');
 
-// Helper: localized text lookup then send
-async function sendTranslated(to, key, lang = 'en', extra = '') {
-  const text = getString(lang || 'en', key) || key;
-  return sendMessage(to, extra ? `${text}\n${extra}` : text);
-}
+// ----------------------------
+// Helpers
+// ----------------------------
 
-// Helper: AI-based translation (fallback to original)
+// Simple AI translation helper
 async function aiTranslate(text, targetLang = 'en') {
   try {
     if (!askAI) return text;
@@ -28,16 +26,6 @@ async function aiTranslate(text, targetLang = 'en') {
   }
 }
 
-// Language selection buttons
-function languageButtons() {
-  return [
-    { id: 'lang_en', title: 'English' },
-    { id: 'lang_hi', title: 'हिंदी' },
-    { id: 'lang_ta', title: 'தமிழ்' },
-    { id: 'lang_mr', title: 'मराठी' },
-  ];
-}
-
 // Menu rows
 function menuRows() {
   return [
@@ -45,6 +33,16 @@ function menuRows() {
     { id: "post_listing", title: "Post listing" },
     { id: "manage_listings", title: "Manage listings" },
     { id: "change_language", title: "Change language" },
+  ];
+}
+
+// Language selection buttons
+function languageButtons() {
+  return [
+    { id: 'lang_en', title: 'English' },
+    { id: 'lang_hi', title: 'हिंदी' },
+    { id: 'lang_ta', title: 'தமிழ்' },
+    { id: 'lang_mr', title: 'मराठी' },
   ];
 }
 
@@ -57,12 +55,14 @@ async function safeSendList(to, title, body, footer = '') {
       rows: rows.length ? rows : [{ id: "empty", title: "No options available" }]
     }
   ];
+
+  // WhatsApp requires id/title in each row
   return sendList(to, title, body, footer, sections);
 }
 
-// -----------------------------------------------------
+// ----------------------------
 // MAIN HANDLER
-// -----------------------------------------------------
+// ----------------------------
 async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   if (!sender || !msgBody) return;
 
@@ -85,14 +85,25 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   const isNewUser = !session.isInitialized;
 
   // ---------------------------
-  // GREETINGS
+  // GREETINGS (New Users)
   // ---------------------------
   if (greetings.includes(lowerMsg)) {
-    session.isInitialized = true;
+    if (!session.isInitialized) {
+      session.isInitialized = true;
+      session.step = "menu";
+      await saveSession(sender, session);
+
+      // Send welcome + language selection
+      await sendMessage(sender, await aiTranslate(getString(userLang, 'welcome') || "Welcome to MarketMatch! 🌟", userLang));
+      await sendButtons(sender, "Please select your preferred language:", languageButtons());
+      session.housingFlow.awaitingLangSelection = true;
+      await saveSession(sender, session);
+      return session;
+    }
+
+    // Returning user
     session.step = "menu";
     await saveSession(sender, session);
-
-    await sendMessage(sender, await aiTranslate(getString(userLang, 'welcome') || "Welcome!", userLang));
     await safeSendList(sender, "🏡 MarketMatch AI", "Choose an option:");
     return session;
   }
@@ -126,7 +137,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // MAIN MENU HANDLERS
   // ---------------------------
   if (lowerMsg === "view_listings") {
-    await sendMessage(sender, await aiTranslate("Sure — send me your search (e.g. `2BHK in Noida sector 56`) and I'll filter results for you.", userLang));
+    await sendMessage(sender, await aiTranslate("Send me your search query (e.g. `2BHK in Noida sector 56`) and I'll filter results.", userLang));
     session.step = 'awaiting_query';
     await saveSession(sender, session);
     return session;
@@ -135,7 +146,6 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   if (lowerMsg === "post_listing") {
     const example = "Example: Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro";
     await sendMessage(sender, await aiTranslate(`Please send the listing details in this format:\n${example}`, userLang));
-
     session.step = 'awaiting_post_details';
     session.pending = ['title', 'location', 'property_type', 'price', 'contact', 'description'];
     await saveSession(sender, session);
@@ -197,7 +207,6 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       await sendMessage(sender, await aiTranslate('❌ Failed to post listing (server error).', userLang));
     }
 
-    // return to menu
     session.step = 'menu';
     session.pending = [];
     session.data = {};
