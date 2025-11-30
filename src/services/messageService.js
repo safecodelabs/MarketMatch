@@ -90,7 +90,10 @@ async function sendButtons(to, bodyText, buttons) {
 // -------------------------------------------------------------
 async function sendList(to, headerText, bodyText, footerText, buttonText, sections) {
   try {
-    // Ensure sections is a non-empty array
+    // Ensure buttonText is a string
+    buttonText = typeof buttonText === "string" && buttonText.trim() ? buttonText : "Select";
+
+    // Ensure sections is a valid non-empty array
     if (!Array.isArray(sections) || sections.length === 0) {
       sections = [
         {
@@ -100,12 +103,17 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
       ];
     }
 
-    // Ensure every section has at least 1 row
-    sections = sections.map((sec) => ({
-      title: sec.title || "Menu",
-      rows: Array.isArray(sec.rows) && sec.rows.length
-        ? sec.rows
-        : [{ id: "default", title: "No options available" }],
+    // Ensure each section has title and at least 1 row
+    sections = sections.map((sec, idx) => ({
+      title: sec.title || `Section ${idx + 1}`,
+      rows:
+        Array.isArray(sec.rows) && sec.rows.length
+          ? sec.rows.map((row, rIdx) => ({
+              id: row.id || `row_${idx + 1}_${rIdx + 1}`,
+              title: row.title || `Option ${rIdx + 1}`,
+              description: row.description,
+            }))
+          : [{ id: `row_${idx + 1}_1`, title: "No options available" }],
     }));
 
     const payload = {
@@ -118,7 +126,7 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
         body: { text: bodyText || "Please choose an option" },
         footer: footerText ? { text: footerText } : undefined,
         action: {
-          button: buttonText || "Select",
+          button: buttonText,
           sections,
         },
       },
@@ -141,6 +149,7 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
     console.error("❌ sendList error:", err.response?.data || err);
   }
 }
+
 
 module.exports = {
   sendMessage,
