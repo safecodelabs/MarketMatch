@@ -2,9 +2,8 @@
 const express = require("express");
 const router = express.Router();
 
-// Correct paths according to your project structure
+// Correct import (your bot handles everything)
 const { handleIncomingMessage } = require("../src/bots/whatsappBot");
-const { getSession, saveSession } = require("../utils/sessionStore");
 
 /**
  * MAIN WEBHOOK (POST)
@@ -15,7 +14,7 @@ router.post("/", async (req, res) => {
     const change = entry?.changes?.[0];
     const value = change?.value;
 
-    // Ignore non-message webhooks
+    // Ignore non-message events
     if (!value || !value.messages) return res.sendStatus(200);
 
     const phoneNumberId = value.metadata?.phone_number_id;
@@ -24,9 +23,13 @@ router.post("/", async (req, res) => {
 
     let text = "";
 
+    // Extract Text
     if (message.type === "text") {
       text = message.text.body.trim();
-    } else if (message.type === "interactive") {
+    }
+
+    // Interactive buttons or list replies
+    if (message.type === "interactive") {
       const inter = message.interactive;
       if (inter.button_reply) text = inter.button_reply.id || inter.button_reply.title;
       if (inter.list_reply) text = inter.list_reply.id || inter.list_reply.title;
@@ -35,20 +38,13 @@ router.post("/", async (req, res) => {
     text = text.toLowerCase();
 
     // ------------------------------
-    // GET SESSION (can be undefined for new users)
+    // Pass message to WhatsApp Bot
     // ------------------------------
-    let session = await getSession(sender) || {};
-
-    // ------------------------------
-    // PASS MESSAGE TO WHATSAPP BOT
-    // ------------------------------
-    const updatedSession = await handleIncomingMessage(sender, text, {
-      ...session,
+    await handleIncomingMessage({
+      sender,
+      text,
       phoneNumberId,
     });
-
-    // Save updated session
-    if (updatedSession) await saveSession(sender, updatedSession);
 
     return res.sendStatus(200);
   } catch (err) {

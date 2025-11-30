@@ -30,9 +30,9 @@ app.get("/webhook", (req, res) => {
 // 3) WHATSAPP WEBHOOK MESSAGE HANDLER (POST)
 //    ⚠️ MUST USE RAW BODY — NOT express.json()
 // ---------------------------------------------------------
-app.post(
+app.use(
   "/webhook",
-  express.raw({ type: "application/json" }), // <-- very important
+  express.raw({ type: "application/json" }),
   webhookRoute
 );
 
