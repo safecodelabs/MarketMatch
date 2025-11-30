@@ -1,8 +1,6 @@
 // src/bots/whatsappBot.js
 
-const { sendMessage, sendButtons, sendList } = require("../services/messageService");
-const { db } = require('../../database/firestore');
-
+const { sendMessage, sendList } = require("../services/messageService");
 const { getSession, saveSession } = require('../../utils/sessionStore');
 const { classify, askAI } = require('../ai/aiEngine');
 const { handleAIAction } = require('../flows/housingFlow');
@@ -12,8 +10,6 @@ const { getString } = require('../../utils/languageStrings');
 // ----------------------------
 // Helpers
 // ----------------------------
-
-// Simple AI translation helper
 async function aiTranslate(text, targetLang = 'en') {
   try {
     if (!askAI) return text;
@@ -26,7 +22,6 @@ async function aiTranslate(text, targetLang = 'en') {
   }
 }
 
-// Menu rows
 function menuRows() {
   return [
     { id: "view_listings", title: "View listings" },
@@ -36,8 +31,7 @@ function menuRows() {
   ];
 }
 
-// Language selection buttons
-function languageButtons() {
+function languageRows() {
   return [
     { id: 'lang_en', title: 'English' },
     { id: 'lang_hi', title: 'हिंदी' },
@@ -46,17 +40,15 @@ function languageButtons() {
   ];
 }
 
-// Safe sendList wrapper
+async function sendLanguageList(to) {
+  return sendList(to, "🌐 Please select your language", "Choose your preferred language:", "MarketMatch AI", [
+    { title: "Languages", rows: languageRows() }
+  ]);
+}
+
 async function safeSendList(to, title, body, footer = '') {
   const rows = menuRows();
-  const sections = [
-    {
-      title: "Menu",
-      rows: rows.length ? rows : [{ id: "empty", title: "No options available" }]
-    }
-  ];
-
-  // WhatsApp requires id/title in each row
+  const sections = [{ title: "Menu", rows: rows.length ? rows : [{ id: "empty", title: "No options available" }] }];
   return sendList(to, title, body, footer, sections);
 }
 
@@ -75,46 +67,31 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   }
 
   // Load session
-  let session = (await getSession(sender)) || { step: 'start', housingFlow: { step: 'start', data: {} }, isInitialized: false };
-  session.housingFlow = session.housingFlow || { step: 'start', data: {} };
+  let session = (await getSession(sender)) || { step: 'start', housingFlow: {}, isInitialized: false };
+  session.housingFlow = session.housingFlow || {};
 
   const userProfile = await getUserProfile(sender);
   const userLang = userProfile?.preferredLanguage || 'en';
 
   const greetings = ["hi", "hello", "hey", "start"];
-  const isNewUser = !session.isInitialized;
 
   // ---------------------------
-  // GREETINGS (New Users)
+  // NEW USER → intro + language selection
   // ---------------------------
-  if (greetings.includes(lowerMsg)) {
-    if (!session.isInitialized) {
-      session.isInitialized = true;
-      session.step = "menu";
-      await saveSession(sender, session);
-
-      // Send welcome + language selection
-      await sendMessage(sender, await aiTranslate(getString(userLang, 'welcome') || "Welcome to MarketMatch! 🌟", userLang));
-      await sendButtons(sender, "Please select your preferred language:", languageButtons());
-      session.housingFlow.awaitingLangSelection = true;
-      await saveSession(sender, session);
-      return session;
-    }
-
-    // Returning user
-    session.step = "menu";
+  if (!session.isInitialized) {
+    session.isInitialized = true;
+    session.housingFlow.awaitingLangSelection = true;
     await saveSession(sender, session);
-    await safeSendList(sender, "🏡 MarketMatch AI", "Choose an option:");
+
+    await sendMessage(sender, await aiTranslate(getString(userLang, 'welcome') || "Welcome to MarketMatch! 🌟", userLang));
+    await sendLanguageList(sender);
     return session;
   }
 
   // ---------------------------
   // LANGUAGE SELECTION
   // ---------------------------
-  const langCandidates = ['english', 'हिंदी', 'தமிழ்', 'hi', 'ta', 'en', 'mr', 'मराठी'];
-  const isLanguageTyped = langCandidates.some(c => lowerMsg.includes(c));
-
-  if (session.housingFlow?.awaitingLangSelection || /^lang_/.test(lowerMsg) || isLanguageTyped) {
+  if (session.housingFlow.awaitingLangSelection || /^lang_/.test(lowerMsg)) {
     let lang = 'en';
     if (/^lang_/.test(lowerMsg)) lang = lowerMsg.split('_')[1] || 'en';
     else if (lowerMsg.includes('hi') || lowerMsg.includes('हिंदी')) lang = 'hi';
@@ -122,7 +99,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
     else if (lowerMsg.includes('mr') || lowerMsg.includes('मराठी')) lang = 'mr';
     else if (lowerMsg.includes('en') || lowerMsg.includes('english')) lang = 'en';
 
-    try { await saveUserLanguage(sender, lang); } catch (err) { console.warn('saveUserLanguage failed:', err?.message); }
+    await saveUserLanguage(sender, lang);
 
     session.housingFlow.awaitingLangSelection = false;
     session.step = 'menu';
@@ -172,90 +149,17 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   }
 
   if (lowerMsg === "change_language") {
-    await sendButtons(sender, getString(userLang, 'changeLanguage') || 'Please select your new language:', languageButtons());
     session.housingFlow.awaitingLangSelection = true;
     session.step = 'awaiting_language';
     await saveSession(sender, session);
+    await sendLanguageList(sender);
     return session;
-  }
-
-  // ---------------------------
-  // POST LISTING DETAILS
-  // ---------------------------
-  if (session.step === 'awaiting_post_details') {
-    const parts = msgBody.split(',').map(p => p.trim()).filter(Boolean);
-    const pending = Array.isArray(session.pending) ? session.pending.slice() : ['title', 'location', 'property_type', 'price', 'contact', 'description'];
-    const data = {};
-    for (let i = 0; i < parts.length && i < pending.length; i++) data[pending[i]] = parts[i];
-
-    const missingFields = pending.filter(k => !data[k]);
-    if (missingFields.length > 0) {
-      await sendMessage(sender, await aiTranslate(`Still missing: ${missingFields.join(', ')}. Please provide them separated by commas.`, userLang));
-      session.pending = missingFields;
-      session.data = { ...(session.data || {}), ...data };
-      await saveSession(sender, session);
-      return session;
-    }
-
-    const toSave = { ...data, userId: sender, timestamp: Date.now() };
-    try {
-      const res = await addListing(toSave);
-      if (res?.success) await sendMessage(sender, await aiTranslate('✅ Your property has been posted successfully!', userLang));
-      else await sendMessage(sender, await aiTranslate(`❌ Failed to post listing: ${res?.error || 'unknown error'}`, userLang));
-    } catch (err) {
-      console.error('addListing error', err);
-      await sendMessage(sender, await aiTranslate('❌ Failed to post listing (server error).', userLang));
-    }
-
-    session.step = 'menu';
-    session.pending = [];
-    session.data = {};
-    await saveSession(sender, session);
-    await safeSendList(sender, "🏡 MarketMatch AI", "Choose an option:");
-    return session;
-  }
-
-  // ---------------------------
-  // AWAITING SEARCH QUERY
-  // ---------------------------
-  if (session.step === 'awaiting_query') {
-    try {
-      const ai = await classify(msgBody);
-      const { nextSession, reply, buttons, mustSaveLanguage } = await handleAIAction({
-        sender,
-        message: msgBody,
-        aiResult: ai,
-        session: session.housingFlow,
-        userLang: userProfile?.preferredLanguage || ai.language || 'en'
-      });
-
-      if (mustSaveLanguage) await saveUserLanguage(sender, mustSaveLanguage);
-
-      if (buttons?.length) await sendButtons(sender, reply || getString(userLang, 'chooseOption') || 'Choose an option:', buttons);
-      else if (reply) {
-        const out = (userProfile?.preferredLanguage && userProfile.preferredLanguage !== 'en')
-          ? await aiTranslate(reply, userProfile.preferredLanguage)
-          : reply;
-        await sendMessage(sender, out);
-      } else await sendTranslated(sender, 'fallback', userLang);
-
-      const newFullSession = { ...session, housingFlow: nextSession };
-      if (nextSession?.step) newFullSession.step = nextSession.step;
-      await saveSession(sender, newFullSession);
-      return newFullSession;
-    } catch (err) {
-      console.error('Search AI flow error:', err);
-      await sendTranslated(sender, 'fallback', userLang);
-      return session;
-    }
   }
 
   // ---------------------------
   // FALLBACK
   // ---------------------------
   await sendMessage(sender, await aiTranslate("I didn't quite get that. Choose an option or type 'hi' to restart.", userLang));
-  session.step = 'menu';
-  await saveSession(sender, session);
   await safeSendList(sender, "🏡 MarketMatch AI", "Choose an option:");
   return session;
 }
