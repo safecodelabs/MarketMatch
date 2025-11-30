@@ -2,7 +2,19 @@
 const express = require("express");
 const router = express.Router();
 
-// Correct import (your bot handles everything)
+// Fix: WhatsApp sometimes sends raw buffer -> convert to JSON
+router.use((req, res, next) => {
+  if (req.is("application/json") && Buffer.isBuffer(req.body)) {
+    try {
+      req.body = JSON.parse(req.body.toString());
+    } catch (err) {
+      console.error("❌ JSON Parse Error:", err);
+    }
+  }
+  next();
+});
+
+// Import bot
 const { handleIncomingMessage } = require("../src/bots/whatsappBot");
 
 /**
@@ -14,7 +26,6 @@ router.post("/", async (req, res) => {
     const change = entry?.changes?.[0];
     const value = change?.value;
 
-    // Ignore non-message events
     if (!value || !value.messages) return res.sendStatus(200);
 
     const phoneNumberId = value.metadata?.phone_number_id;
@@ -23,12 +34,10 @@ router.post("/", async (req, res) => {
 
     let text = "";
 
-    // Extract Text
     if (message.type === "text") {
       text = message.text.body.trim();
     }
 
-    // Interactive buttons or list replies
     if (message.type === "interactive") {
       const inter = message.interactive;
       if (inter.button_reply) text = inter.button_reply.id || inter.button_reply.title;
@@ -37,9 +46,6 @@ router.post("/", async (req, res) => {
 
     text = text.toLowerCase();
 
-    // ------------------------------
-    // Pass message to WhatsApp Bot
-    // ------------------------------
     await handleIncomingMessage({
       sender,
       text,
