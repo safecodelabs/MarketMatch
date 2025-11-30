@@ -14,7 +14,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// Import bot
+// Import bot handler (path matches your structure)
 const { handleIncomingMessage } = require("../src/bots/whatsappBot");
 
 /**
@@ -22,11 +22,18 @@ const { handleIncomingMessage } = require("../src/bots/whatsappBot");
  */
 router.post("/", async (req, res) => {
   try {
+    // Helpful debug — keeps Railway logs populated
+    console.log("📩 Webhook raw body:", JSON.stringify(req.body?.entry?.[0] || req.body).slice(0, 1500));
+
     const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
 
-    if (!value || !value.messages) return res.sendStatus(200);
+    // Ignore non-message webhooks
+    if (!value || !value.messages) {
+      console.log("🔎 Not a message webhook — ignoring.");
+      return res.sendStatus(200);
+    }
 
     const phoneNumberId = value.metadata?.phone_number_id;
     const message = value.messages[0];
@@ -36,21 +43,21 @@ router.post("/", async (req, res) => {
 
     if (message.type === "text") {
       text = message.text.body.trim();
-    }
-
-    if (message.type === "interactive") {
+    } else if (message.type === "interactive") {
       const inter = message.interactive;
       if (inter.button_reply) text = inter.button_reply.id || inter.button_reply.title;
       if (inter.list_reply) text = inter.list_reply.id || inter.list_reply.title;
     }
 
-    text = text.toLowerCase();
+    text = (text || "").toLowerCase();
 
-    await handleIncomingMessage({
-      sender,
-      text,
-      phoneNumberId,
-    });
+    console.log(`💬 incoming from=${sender} phoneNumberId=${phoneNumberId} text="${text}"`);
+
+    // --- IMPORTANT: call signature must match the bot's handler
+    const updatedSession = await handleIncomingMessage(sender, text, { phoneNumberId });
+
+    // saveSession is done inside handler in many flows, but you can persist here if needed
+    // if (updatedSession) await saveSession(sender, updatedSession);
 
     return res.sendStatus(200);
   } catch (err) {
