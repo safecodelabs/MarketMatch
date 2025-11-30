@@ -1,82 +1,53 @@
 const axios = require("axios");
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { getUserProfile, saveUserLanguage } = require("./database/firestore");
+const { sendMessage, sendButtons, sendLanguageList } = require('./src/services/messageService');
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 const API_URL = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
 
-// =======================================================
-// SEND BUTTONS (Fix for missing function)
-// =======================================================
-async function sendButtons(to, text, buttons, phoneNumberId = PHONE_NUMBER_ID) {
-  try {
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to,
-        type: "interactive",
-        interactive: {
-          type: "button",
-          body: { text },
-          action: {
-            buttons: buttons.map((b) => ({
-              type: "reply",
-              reply: { id: b.id, title: b.title }
-            }))
-          }
-        }
-      },
-      {
-        headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` }
-      }
-    );
-  } catch (err) {
-    console.error("❌ sendButtons error:", err.response?.data || err);
-  }
-}
 
 
-// ===================================================================================
-// SEND LANGUAGE LIST (Interactive List)
-// ===================================================================================
-async function sendLanguageList(to, phoneNumberId = PHONE_NUMBER_ID) {
-  try {
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to,
-        type: "interactive",
-        interactive: {
-          type: "list",
-          body: { text: "🌐 Please choose your preferred language:" },
-          footer: { text: "MarketMatch AI" },
-          action: {
-            button: "Select Language",
-            sections: [
-              {
-                title: "Available Languages",
-                rows: [
-                  { id: "lang_en", title: "English" },
-                  { id: "lang_hi", title: "हिंदी (Hindi)" },
-                  { id: "lang_ta", title: "தமிழ் (Tamil)" },
-                  { id: "lang_gu", title: "ગુજરાતી (Gujarati)" },
-                  { id: "lang_kn", title: "ಕನ್ನಡ (Kannada)" }
-                ]
-              }
-            ]
-          }
-        }
-      },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
-    );
-  } catch (err) {
-    console.error("❌ sendLanguageList error:", err.response?.data || err);
-  }
-}
+// // ===================================================================================
+// // SEND LANGUAGE LIST (Interactive List)
+// // ===================================================================================
+// async function sendLanguageList(to, phoneNumberId = PHONE_NUMBER_ID) {
+//   try {
+//     await axios.post(
+//       `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+//       {
+//         messaging_product: "whatsapp",
+//         to,
+//         type: "interactive",
+//         interactive: {
+//           type: "list",
+//           body: { text: "🌐 Please choose your preferred language:" },
+//           footer: { text: "MarketMatch AI" },
+//           action: {
+//             button: "Select Language",
+//             sections: [
+//               {
+//                 title: "Available Languages",
+//                 rows: [
+//                   { id: "lang_en", title: "English" },
+//                   { id: "lang_hi", title: "हिंदी (Hindi)" },
+//                   { id: "lang_ta", title: "தமிழ் (Tamil)" },
+//                   { id: "lang_gu", title: "ગુજરાતી (Gujarati)" },
+//                   { id: "lang_kn", title: "ಕನ್ನಡ (Kannada)" }
+//                 ]
+//               }
+//             ]
+//           }
+//         }
+//       },
+//       { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+//     );
+//   } catch (err) {
+//     console.error("❌ sendLanguageList error:", err.response?.data || err);
+//   }
+// }
 
 // ===================================================================================
 // MAIN: HANDLE INCOMING MESSAGE
@@ -160,8 +131,6 @@ async function handleIncomingMessage(sender, text, session, phoneNumberId) {
 
 // ===================================================================================
 module.exports = {
-  sendLanguageList,
-  sendButtons,
   handleIncomingMessage
 };
 
