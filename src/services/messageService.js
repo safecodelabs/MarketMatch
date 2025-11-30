@@ -42,7 +42,7 @@ async function sendButtons(to, bodyText, buttons) {
   try {
     if (!Array.isArray(buttons) || buttons.length < 1 || buttons.length > 3) {
       throw new Error(
-        `Buttons array must have 1–3 items. Received: ${buttons.length}`
+        `Buttons array must have 1–3 items. Received: ${buttons?.length || 0}`
       );
     }
 
@@ -90,21 +90,23 @@ async function sendButtons(to, bodyText, buttons) {
 // -------------------------------------------------------------
 async function sendList(to, headerText, bodyText, footerText, buttonText, sections) {
   try {
-    // Validation
-    if (!Array.isArray(sections) || sections.length < 1) {
-      throw new Error("sections must be a non-empty array.");
+    // Ensure sections is a non-empty array
+    if (!Array.isArray(sections) || sections.length === 0) {
+      sections = [
+        {
+          title: "Menu",
+          rows: [{ id: "default", title: "No options available" }],
+        },
+      ];
     }
 
-    sections.forEach((sec) => {
-      if (!sec.title || !Array.isArray(sec.rows)) {
-        throw new Error("Each section must contain a title and rows[].");
-      }
-      if (sec.rows.length < 1 || sec.rows.length > 10) {
-        throw new Error(
-          `Each section must have 1–10 rows. Section: ${sec.title}`
-        );
-      }
-    });
+    // Ensure every section has at least 1 row
+    sections = sections.map((sec) => ({
+      title: sec.title || "Menu",
+      rows: Array.isArray(sec.rows) && sec.rows.length
+        ? sec.rows
+        : [{ id: "default", title: "No options available" }],
+    }));
 
     const payload = {
       messaging_product: "whatsapp",
@@ -112,8 +114,8 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
       type: "interactive",
       interactive: {
         type: "list",
-        header: { type: "text", text: headerText },
-        body: { text: bodyText },
+        header: { type: "text", text: headerText || "Menu" },
+        body: { text: bodyText || "Please choose an option" },
         footer: footerText ? { text: footerText } : undefined,
         action: {
           button: buttonText || "Select",
