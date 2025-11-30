@@ -160,7 +160,6 @@ async function handleIncomingMessage(sender, text, session, phoneNumberId) {
 
 // ===================================================================================
 module.exports = {
-  sendMessage,
   sendLanguageList,
   sendButtons,
   handleIncomingMessage
