@@ -62,20 +62,27 @@ async function sendMainMenu(sender) {
 // FETCH AND SHOW 3 LISTINGS + FOLLOW-UP PROMPT
 // =======================================================
 async function handleShowListings(sender) {
-  const allListings = await getAllListings(); // Fetch all listings
-  const totalCount = allListings?.length || 0;
+  const allListings = await getAllListings(); // fetch all listings
+  if (!allListings || allListings.length === 0) {
+    await sendMessage(sender, "No listings available at the moment.");
+    return;
+  }
 
-  const preview = (allListings || [])
-    .slice(0, 3)
-    .map(
-      (l, i) =>
-        `${i + 1}. ${l.title || "Listing"} — ${l.location || "N/A"} — ${l.price || "N/A"}`
-    )
+  const topListings = allListings.slice(0, 3); // get top 3 listings
+  const formatted = topListings
+    .map((l, i) => {
+      return `${i + 1}. ${l.title || "Listing"}\n` +
+             `Location: ${l.location || "N/A"}\n` +
+             `Price: ${l.price || "N/A"}\n` +
+             `Contact: ${l.contact || "N/A"}`;
+    })
     .join("\n\n");
 
-  let msg = `🏡 Here are some listings:\n\n${preview || "No listings available."}\n\n`;
-  msg += `📊 Total listings in database: ${totalCount}\n\n`;
-  msg += `Kindly help me with the location and type of property you are looking for (e.g., 2BHK flats in Noida sector 56).`;
+  const totalCount = allListings.length;
+
+  const msg = `🏡 Here are some listings:\n\n${formatted}\n\n` +
+              `📊 Total listings in database: ${totalCount}\n\n` +
+              `Kindly help me with the location and type of property you are looking for (e.g., 2BHK flats in Noida sector 56).`;
 
   await sendMessage(sender, msg);
 }
