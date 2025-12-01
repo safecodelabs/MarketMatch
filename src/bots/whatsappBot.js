@@ -94,7 +94,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
 
     await sendMessage(
       sender,
-      "👋 Welcome to *MarketMatch AI*!\n\nYour personal assistant for:\n🏠 Rentals\n👥 Flatmates\n🏢 Real Estate\n🧹 Home Services\n\nPlease select your preferred language."
+      "MarketMatch AI is a smart, WhatsApp-native marketplace designed to help communities buy, sell, and access reliable local services.\nMarketMatch AI एक स्मार्ट, व्हाट्सऐप-आधारित मार्केटप्लेस है, जो आपको खरीदने, बेचने और भरोसेमंद स्थानीय सेवाएँ पाने में मदद करता है।"
     );
 
     await sendLanguageSelection(sender);
