@@ -71,10 +71,12 @@ async function handleShowListings(sender) {
   const topListings = allListings.slice(0, 3); // get top 3 listings
   const formatted = topListings
     .map((l, i) => {
-      return `${i + 1}. ${l.title || "Listing"}\n` +
-             `   Location: ${l.location || "N/A"}\n` +
-             `   Price   : ${l.price || "N/A"}\n` +
-             `   Contact : ${l.contact || "N/A"}`;
+      return ( 
+        `${i + 1}. ${l.title || "Listing"}\n` +
+        `   Location: ${l.location || "N/A"}\n` +
+        `   Price   : ${l.price || "N/A"}\n` +
+        `   Contact : ${l.contact || "N/A"}`
+      );
     })
     .join("\n\n");
 

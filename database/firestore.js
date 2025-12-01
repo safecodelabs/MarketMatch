@@ -18,19 +18,19 @@ if (!admin.apps.length) {
   }
 }
 
-const db = admin.firestore ? admin.firestore() : {
-  collection: () => ({ doc: () => ({ get: async () => ({ exists: false, data: () => ({}) }) }) })
-};
+const db = admin.firestore();
 
-const listingsRef = db.collection ? db.collection("listings") : null;
-const usersRef = db.collection ? db.collection("users") : null;
+const listingsRef = db.collection("listings");
+const usersRef = db.collection("users");
 
-// Add a new listing
+// -----------------------------------------------
+// ADD NEW LISTING
+// -----------------------------------------------
 async function addListing(listingData) {
   try {
     const payload = {
       ...listingData,
-      timestamp: admin.firestore ? admin.firestore.Timestamp.now() : Date.now()
+      timestamp: admin.firestore.Timestamp.now(),   // Always store timestamp
     };
     const docRef = await listingsRef.add(payload);
     return { success: true, id: docRef.id };
@@ -40,29 +40,43 @@ async function addListing(listingData) {
   }
 }
 
-// Fetch all listings (for everyone)
-async function getAllListings(limit = 3) {
+// -----------------------------------------------
+// FIXED: FETCH ALL LISTINGS (NO LIMIT)
+// Smart ordering: use timestamp OR createdAt
+// -----------------------------------------------
+async function getAllListings() {
   try {
-    const snapshot = await db
-      .collection("listings")
-      .orderBy("timestamp", "desc") // make sure you store timestamp when adding
-      .limit(limit)
-      .get();
-
+    const snapshot = await listingsRef.get();
     if (snapshot.empty) return [];
 
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    let items = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    // Sort manually in JS because some listings may have timestamp, some createdAt
+    items.sort((a, b) => {
+      const t1 = a.timestamp?.seconds || a.createdAt?.seconds || 0;
+      const t2 = b.timestamp?.seconds || b.createdAt?.seconds || 0;
+      return t2 - t1; // descending
+    });
+
+    return items;
   } catch (err) {
     console.error("🔥 Error fetching all listings:", err);
     return [];
   }
 }
 
-
-// Fetch listings posted by a specific user
+// -----------------------------------------------
+// FETCH USER-SPECIFIC LISTINGS
+// -----------------------------------------------
 async function getUserListings(userId) {
   try {
-    const snapshot = await listingsRef.where("owner", "==", userId).orderBy("timestamp", "desc").get();
+    const snapshot = await listingsRef
+      .where("owner", "==", userId)
+      .get();
+
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
     console.error("🔥 Error fetching user listings:", err);
@@ -70,7 +84,9 @@ async function getUserListings(userId) {
   }
 }
 
-// Fetch user profile
+// -----------------------------------------------
+// USER PROFILE
+// -----------------------------------------------
 async function getUserProfile(userId) {
   try {
     const doc = await usersRef.doc(userId).get();
@@ -81,7 +97,9 @@ async function getUserProfile(userId) {
   }
 }
 
-// Save user's preferred language
+// -----------------------------------------------
+// SAVE USER LANGUAGE
+// -----------------------------------------------
 async function saveUserLanguage(userId, lang) {
   try {
     await usersRef.doc(userId).set({ preferredLanguage: lang }, { merge: true });
@@ -92,14 +110,16 @@ async function saveUserLanguage(userId, lang) {
   }
 }
 
-// Fetch top 3 listings + total count
+// -----------------------------------------------
+// FETCH TOP 3 LISTINGS + TOTAL COUNT
+// -----------------------------------------------
 async function getTopListings() {
   try {
-    const snapshot = await listingsRef.orderBy("timestamp", "desc").limit(3).get();
-    const listings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const totalSnapshot = await listingsRef.get();
-    const totalCount = totalSnapshot.size;
-    return { listings, totalCount };
+    const all = await getAllListings();
+    return {
+      listings: all.slice(0, 3),
+      totalCount: all.length
+    };
   } catch (err) {
     console.error("🔥 Error fetching top listings:", err);
     return { listings: [], totalCount: 0 };
