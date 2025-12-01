@@ -51,14 +51,10 @@ async function getAllListings(limit = 200) {
   }
 }
 
-async function getUserListings(userId) {
-  try {
-    const snapshot = await listingsRef.where ? listingsRef.where("userId", "==", userId).orderBy("timestamp", "desc").get() : { docs: [] };
-    return snapshot.docs ? snapshot.docs.map(d => ({ id: d.id, ...d.data() })) : [];
-  } catch (err) {
-    console.error("🔥 Error fetching user listings:", err);
-    return [];
-  }
+async function getAllListings() {
+  const snapshot = await db.collection("listings").get();
+  if (snapshot.empty) return [];
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
 async function getUserProfile(userId) {

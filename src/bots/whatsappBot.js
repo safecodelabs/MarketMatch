@@ -175,10 +175,26 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // 📌 5️⃣ MENU ACTIONS
   // =======================================================
   switch (msgBody) {
-    case "view_listings":
-      await handleShowListings(sender);
-      session.step = "awaiting_query"; // now waiting for user to provide their query
-      break;
+case "view_listings":
+  const allListings = await getAllListings(); // fetch all listings
+  if (!allListings || allListings.length === 0) {
+    await sendMessage(sender, "No listings available at the moment.");
+  } else {
+    const preview = allListings
+      .slice(0, 8)
+      .map(
+        (l, i) =>
+          `${i + 1}. ${l.title || "Listing"} — ${l.location} — ${
+            l.price || "N/A"
+          }`
+      )
+      .join("\n\n");
+
+    await sendMessage(sender, `Available listings:\n\n${preview}`);
+  }
+  session.step = "menu";
+  break;
+
 
     case "post_listing":
       await sendMessage(
