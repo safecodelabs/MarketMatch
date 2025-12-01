@@ -62,7 +62,7 @@ async function sendMainMenu(sender) {
 // FETCH AND SHOW 3 LISTINGS + FOLLOW-UP PROMPT
 // =======================================================
 async function handleShowListings(sender) {
-  const allListings = await getAllListings(); // fetch all listings
+  const allListings = await getAllListings(3); // fetch all listings
   if (!allListings || allListings.length === 0) {
     await sendMessage(sender, "No listings available at the moment.");
     return;
@@ -72,9 +72,9 @@ async function handleShowListings(sender) {
   const formatted = topListings
     .map((l, i) => {
       return `${i + 1}. ${l.title || "Listing"}\n` +
-             `Location: ${l.location || "N/A"}\n` +
-             `Price: ${l.price || "N/A"}\n` +
-             `Contact: ${l.contact || "N/A"}`;
+             `   Location: ${l.location || "N/A"}\n` +
+             `   Price   : ${l.price || "N/A"}\n` +
+             `   Contact : ${l.contact || "N/A"}`;
     })
     .join("\n\n");
 

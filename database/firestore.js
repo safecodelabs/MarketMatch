@@ -41,15 +41,23 @@ async function addListing(listingData) {
 }
 
 // Fetch all listings (for everyone)
-async function getAllListings(limit = 200) {
+async function getAllListings(limit = 3) {
   try {
-    const snapshot = await listingsRef.orderBy("timestamp", "desc").limit(limit).get();
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    const snapshot = await db
+      .collection("listings")
+      .orderBy("timestamp", "desc") // make sure you store timestamp when adding
+      .limit(limit)
+      .get();
+
+    if (snapshot.empty) return [];
+
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   } catch (err) {
     console.error("🔥 Error fetching all listings:", err);
     return [];
   }
 }
+
 
 // Fetch listings posted by a specific user
 async function getUserListings(userId) {
