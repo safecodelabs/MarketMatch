@@ -4,6 +4,8 @@ const axios = require("axios");
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
+const API_URL = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+
 // -------------------------------------------------------------
 // 1) SEND NORMAL TEXT MESSAGE
 // -------------------------------------------------------------
@@ -16,16 +18,12 @@ async function sendMessage(to, message) {
       text: { body: message },
     };
 
-    const res = await axios.post(
-      `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const res = await axios.post(API_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
 
     console.log("📤 Text sent:", res.data);
     return res.data;
@@ -60,23 +58,17 @@ async function sendButtons(to, bodyText, buttons) {
       type: "interactive",
       interactive: {
         type: "button",
-        body: { text: bodyText || "Choose an option" },
-        action: {
-          buttons: formattedButtons,
-        },
+        body: { text: bodyText || "Choose an option:" },
+        action: { buttons: formattedButtons },
       },
     };
 
-    const res = await axios.post(
-      `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const res = await axios.post(API_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
 
     console.log("📤 Buttons sent:", res.data);
     return res.data;
@@ -87,17 +79,17 @@ async function sendButtons(to, bodyText, buttons) {
 }
 
 // -------------------------------------------------------------
-// 3) SEND INTERACTIVE LIST (supports large menus)
-// Signature:
-//   sendList(to, headerText, bodyText, footerText, buttonText, sectionsArray)
-// sectionsArray: [{ title: 'Section title', rows: [{ id, title, description? }, ...] }, ...]
+// 3) SEND INTERACTIVE LIST (corrected WhatsApp menu format)
 // -------------------------------------------------------------
-async function sendList(to, headerText, bodyText, footerText, buttonText, sections) {
+async function sendList(to, headerText, bodyText, buttonText, sections) {
   try {
-    // Ensure buttonText is a string
-    buttonText = typeof buttonText === "string" && buttonText.trim() ? buttonText : "Select";
+    // Ensure valid button text
+    buttonText =
+      typeof buttonText === "string" && buttonText.trim()
+        ? buttonText
+        : "Select";
 
-    // If sections is not a valid array, create a default section with a single "No options" row
+    // Fallback if sections missing
     if (!Array.isArray(sections) || sections.length === 0) {
       sections = [
         {
@@ -107,21 +99,20 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
       ];
     }
 
-    // Map/normalize sections and rows so WhatsApp receives valid ids/titles
-    sections = sections.map((sec, sIdx) => {
-      const safeRows = Array.isArray(sec.rows) && sec.rows.length
-        ? sec.rows.map((r, rIdx) => ({
-            id: String(r.id || `row_${sIdx + 1}_${rIdx + 1}`),
-            title: String(r.title || `Option ${rIdx + 1}`).slice(0, 24),
-            description: r.description ? String(r.description).slice(0, 72) : undefined,
-          }))
-        : [{ id: `row_${sIdx + 1}_1`, title: "No options available" }];
-
-      return {
-        title: sec.title || `Section ${sIdx + 1}`,
-        rows: safeRows,
-      };
-    });
+    // Normalize sections for WhatsApp
+    const safeSections = sections.map((sec, sIdx) => ({
+      title: sec.title || `Section ${sIdx + 1}`,
+      rows:
+        Array.isArray(sec.rows) && sec.rows.length
+          ? sec.rows.map((r, rIdx) => ({
+              id: String(r.id || `row_${sIdx}_${rIdx}`),
+              title: String(r.title || `Option ${rIdx + 1}`).slice(0, 24),
+              description: r.description
+                ? String(r.description).slice(0, 72)
+                : undefined,
+            }))
+          : [{ id: `row_${sIdx}_1`, title: "No options available" }],
+    }));
 
     const payload = {
       messaging_product: "whatsapp",
@@ -130,25 +121,26 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
       interactive: {
         type: "list",
         header: { type: "text", text: headerText || "Menu" },
-        body: { text: bodyText || "Please choose an option" },
-        footer: footerText ? { text: footerText } : undefined,
+        body: { text: bodyText || "Choose an option below" },
+        footer: { text: "MarketMatch AI" },
         action: {
           button: buttonText,
-          sections,
+          sections: safeSections, // ← REQUIRED for menu to show rows
         },
       },
     };
 
-    const res = await axios.post(
-      `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
+    console.log(
+      "📤 Sending List Menu:",
+      JSON.stringify(payload, null, 2)
     );
+
+    const res = await axios.post(API_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
 
     console.log("📤 List menu sent:", res.data);
     return res.data;
