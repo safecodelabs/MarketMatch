@@ -1,156 +1,183 @@
-const axios = require("axios");
+// chatbotcontroller.js
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { getUserProfile, saveUserLanguage } = require("./database/firestore");
+const { sendMessage, sendList } = require("./src/services/messageService");
 
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
+const LANG_ROWS = [
+  { id: "lang_en", title: "English" },
+  { id: "lang_hi", title: "हिंदी (Hindi)" },
+  { id: "lang_ta", title: "தமிழ் (Tamil)" },
+  { id: "lang_gu", title: "ગુજરાતી (Gujarati)" },
+  { id: "lang_kn", title: "ಕನ್ನಡ (Kannada)" },
+];
 
-// =======================================================
-// SEND LANGUAGE LIST (Interactive List)
-// =======================================================
-async function sendLanguageList(to) {
-  const rows = [
-    { id: "lang_en", title: "English" },
-    { id: "lang_hi", title: "हिंदी (Hindi)" },
-    { id: "lang_ta", title: "தமிழ் (Tamil)" },
-    { id: "lang_gu", title: "ગુજરાતી (Gujarati)" },
-    { id: "lang_kn", title: "ಕನ್ನಡ (Kannada)" }
-  ];
+const MENU_ROWS = [
+  { id: "view_listings", title: "View listings" },
+  { id: "post_listing", title: "Post listing" },
+  { id: "manage_listings", title: "Manage listings" },
+  { id: "change_language", title: "Change language" },
+];
 
-  try {
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to,
-        type: "interactive",
-        interactive: {
-          type: "list",
-          body: { text: "🌐 Please choose your preferred language:" },
-          footer: { text: "MarketMatch AI" },
-          action: { button: "Select Language", sections: [{ title: "Available Languages", rows }] }
-        }
-      },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
-    );
-  } catch (err) {
-    console.error("❌ sendLanguageList error:", err.response?.data || err);
-  }
+async function sendLanguageListViaService(to) {
+  const sections = [{ title: "Available languages", rows: LANG_ROWS }];
+  // sendList(to, headerText, bodyText, footerText, buttonText, sections)
+  return sendList(
+    to,
+    "🌐 Select your preferred language",
+    "Choose one option from below:",
+    "MarketMatch AI",
+    "Select Language",
+    sections
+  );
 }
 
-// =======================================================
-// SEND MAIN MENU (Interactive List)
-// =======================================================
-async function sendListMenu(to) {
-  const rows = [
-    { id: "view_listings", title: "View listings" },
-    { id: "post_listing", title: "Post listing" },
-    { id: "manage_listings", title: "Manage listings" },
-    { id: "change_language", title: "Change language" }
-  ];
-
-  try {
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to,
-        type: "interactive",
-        interactive: {
-          type: "list",
-          body: { text: "🏡 MarketMatch AI — Choose an option:" },
-          footer: { text: "MarketMatch AI" },
-          action: { button: "Select an option", sections: [{ title: "Menu", rows }] }
-        }
-      },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
-    );
-  } catch (err) {
-    console.error("❌ sendListMenu error:", err.response?.data || err);
-  }
+async function sendMainMenuViaService(to) {
+  const sections = [{ title: "Menu", rows: MENU_ROWS }];
+  return sendList(
+    to,
+    "🏡 MarketMatch AI",
+    "Choose an option:",
+    "MarketMatch AI",
+    "Select an option",
+    sections
+  );
 }
 
-// =======================================================
-// MAIN HANDLER
-// =======================================================
-async function handleIncomingMessage(sender, text, session) {
-  text = (text || "").toLowerCase();
+function parseLangFromText(text) {
+  if (!text) return null;
+  const lower = text.toLowerCase().trim();
+  if (lower.startsWith("lang_")) return lower.split("lang_")[1];
+  // manual typed options
+  if (lower.includes("english")) return "en";
+  if (lower.includes("hindi") || lower === "hi") return "hi";
+  if (lower.includes("tamil") || lower === "ta") return "ta";
+  if (lower.includes("gujarati") || lower === "gu") return "gu";
+  if (lower.includes("kannada") || lower === "kn") return "kn";
+  return null;
+}
 
-  // Load user profile
+// main entry used by webhook
+// args:
+//  - sender (phone number like '919xxxxxxxxx')
+//  - text (raw text or interactive id like 'lang_en')
+//  - metadata (optional - interactive object from webhook)
+//  // NOTE: this controller expects getSession/saveSession to be used by caller; but it can also fetch inside.
+async function handleIncomingMessage(sender, text = "", metadata = {}) {
+  if (!sender) return;
+
+  // prefer interactive payload id if present
+  if (metadata?.interactive?.type === "list_reply") {
+    text = metadata.interactive.list_reply.id || text;
+  }
+
+  // normalize
+  const msg = String(text || "").trim();
+  const lower = msg.toLowerCase();
+
+  // fetch session & user profile
+  let session = (await getSession(sender)) || { step: "start", housingFlow: { step: "start", data: {} }, isInitialized: false };
+  session.housingFlow = session.housingFlow || { step: "start", data: {} };
+
   const user = await getUserProfile(sender);
 
-  // Ensure session object exists
-  session = session || {};
-  
-  // =======================================================
-  // 1️⃣ New user: intro + language selection
-  // =======================================================
-  if (!user && !session.introduced) {
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: sender,
-        type: "text",
-        text: { body: "👋 *Welcome to MarketMatch AI!*\n\nI’m your personal assistant for:\n🏠 Rentals\n🏢 Real Estate\n👤 PG / Flatmates\n🧹 Home Services\n\nLet's begin by choosing your preferred language." }
-      },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+  const greetings = ["hi", "hello", "hey", "start"];
+  const isGreeting = greetings.includes(lower);
+  const isNewUser = !user && !session.isInitialized;
+
+  // 1) New user: intro + language list
+  if (isGreeting && isNewUser) {
+    await sendMessage(
+      sender,
+      "👋 *Welcome to MarketMatch AI!* \n\nI’m your personal assistant for:\n🏠 Rentals\n🏢 Real Estate\n👤 PG / Flatmates\n🧹 Home Services\n\nLet's begin by choosing your preferred language."
     );
 
-    await sendLanguageList(sender);
+    // send interactive language list via messageService
+    await sendLanguageListViaService(sender);
 
-    session.introduced = true;
-    session.awaitingLanguage = true;
+    // mark session
+    session.isInitialized = true;
+    session.housingFlow.awaitingLangSelection = true;
+    session.step = "awaiting_language";
     await saveSession(sender, session);
     return session;
   }
 
-  // =======================================================
-  // 2️⃣ User must pick language
-  // =======================================================
-  if (session.awaitingLanguage) {
-    const textToLang = { english: "en", hindi: "hi", tamil: "ta", gujarati: "gu", kannada: "kn" };
+  // 2) Existing user greeting -> show main menu immediately
+  if (isGreeting && !isNewUser) {
+    session.step = "menu";
+    await saveSession(sender, session);
+    await sendMainMenuViaService(sender);
+    return session;
+  }
 
-    let lang = null;
-    if (text.startsWith("lang_")) lang = text.replace("lang_", "");
-    else if (textToLang[text]) lang = textToLang[text];
+  // 3) If awaiting language selection (either interactive or typed)
+  if (session.housingFlow?.awaitingLangSelection) {
+    const parsed = parseLangFromText(msg);
+    if (parsed) {
+      try {
+        await saveUserLanguage(sender, parsed);
+      } catch (err) {
+        console.warn("saveUserLanguage failed:", err?.message || err);
+      }
 
-    if (lang) {
-      await saveUserLanguage(sender, lang);
-      session.awaitingLanguage = false;
+      session.housingFlow.awaitingLangSelection = false;
+      session.step = "menu";
       await saveSession(sender, session);
 
-      // Send main menu after language selection
-      await sendListMenu(sender);
+      // show main menu after language selection
+      await sendMainMenuViaService(sender);
+      return session;
+    } else {
+      // user didn't select valid option — re-send list
+      await sendMessage(sender, "Please select a language to continue 👇");
+      await sendLanguageListViaService(sender);
       return session;
     }
-
-    // If input not valid, ask again
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: sender,
-        type: "text",
-        text: { body: "Please select a language to continue 👇" }
-      },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
-    );
-    await sendLanguageList(sender);
-    return session;
   }
 
-  // =======================================================
-  // 3️⃣ Returning user or active session: show main menu
-  // =======================================================
-  if (!session.awaitingLanguage) {
-    await sendListMenu(sender);
-    return session;
+  // 4) Default: if session not expecting anything, show main menu or handle commands
+  // If user sends an explicit menu command (list reply ids are like 'view_listings' etc.)
+  const cmd = lower;
+
+  switch (cmd) {
+    case "view_listings":
+      await sendMessage(sender, "Send me your search query (e.g. `2BHK in Noida sector 56`) and I'll filter results.");
+      session.step = "awaiting_query";
+      break;
+
+    case "post_listing":
+      await sendMessage(sender, "Please send the listing details in this format:\nExample: Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro");
+      session.step = "awaiting_post_details";
+      session.pending = ["title", "location", "property_type", "price", "contact", "description"];
+      break;
+
+    case "manage_listings":
+      // the heavy lifting about fetching listings should be in your bot file
+      // this controller only triggers the listing display flow
+      await sendMessage(sender, "Fetching your listings...");
+      // your bot layer should call getUserListings etc and then respond
+      session.step = "managing";
+      break;
+
+    case "change_language":
+      session.housingFlow.awaitingLangSelection = true;
+      session.step = "awaiting_language";
+      await saveSession(sender, session);
+      await sendLanguageListViaService(sender);
+      break;
+
+    default:
+      // show menu if unknown
+      await sendMessage(sender, "I didn't understand that. Choose an option or type 'hi' to restart.");
+      await sendMainMenuViaService(sender);
+      session.step = "menu";
+      break;
   }
 
+  await saveSession(sender, session);
   return session;
 }
 
 module.exports = {
-  handleIncomingMessage
+  handleIncomingMessage,
 };

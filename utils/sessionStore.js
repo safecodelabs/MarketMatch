@@ -1,7 +1,7 @@
 // src/utils/sessionStore.js
-// Debug-friendly session store that uses Firestore (path fixed)
+// Debug-friendly session store that uses Firestore
 
-const { db } = require('../database/firestore'); // <-- FIXED path (was ../database/firestore)
+const { db } = require('../database/firestore'); // use db exported from your firestore init
 
 const collection = db && db.collection ? db.collection('sessions') : null;
 
@@ -9,18 +9,19 @@ async function getSession(userId) {
   if (!userId) return null;
   if (!collection) {
     console.warn('⚠️ getSession: Firestore collection unavailable (db not initialized)');
-    return { step: 'start', housingFlow: { step: 'start', data: {} } };
+    return { step: 'start', housingFlow: { step: 'start', data: {} }, isInitialized: false };
   }
 
   try {
     const doc = await collection.doc(userId).get();
-    if (!doc.exists) return { step: 'start', housingFlow: { step: 'start', data: {} } };
+    if (!doc.exists) return { step: 'start', housingFlow: { step: 'start', data: {} }, isInitialized: false };
     const data = doc.data() || {};
     if (!data.housingFlow) data.housingFlow = { step: 'start', data: {} };
+    if (typeof data.isInitialized === 'undefined') data.isInitialized = false;
     return data;
   } catch (err) {
     console.error('❌ getSession error:', err?.message || err);
-    return { step: 'start', housingFlow: { step: 'start', data: {} } };
+    return { step: 'start', housingFlow: { step: 'start', data: {} }, isInitialized: false };
   }
 }
 

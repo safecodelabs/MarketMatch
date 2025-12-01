@@ -1,5 +1,4 @@
 // src/services/messageService.js
-
 const axios = require("axios");
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
@@ -32,6 +31,7 @@ async function sendMessage(to, message) {
     return res.data;
   } catch (err) {
     console.error("❌ sendMessage error:", err.response?.data || err);
+    return null;
   }
 }
 
@@ -50,7 +50,7 @@ async function sendButtons(to, bodyText, buttons) {
       type: "reply",
       reply: {
         id: btn.id || `btn_${idx + 1}`,
-        title: btn.title,
+        title: String(btn.title || `Button ${idx + 1}`).slice(0, 20),
       },
     }));
 
@@ -60,7 +60,7 @@ async function sendButtons(to, bodyText, buttons) {
       type: "interactive",
       interactive: {
         type: "button",
-        body: { text: bodyText },
+        body: { text: bodyText || "Choose an option" },
         action: {
           buttons: formattedButtons,
         },
@@ -82,18 +82,22 @@ async function sendButtons(to, bodyText, buttons) {
     return res.data;
   } catch (err) {
     console.error("❌ sendButtons error:", err.response?.data || err);
+    return null;
   }
 }
 
 // -------------------------------------------------------------
 // 3) SEND INTERACTIVE LIST (supports large menus)
+// Signature:
+//   sendList(to, headerText, bodyText, footerText, buttonText, sectionsArray)
+// sectionsArray: [{ title: 'Section title', rows: [{ id, title, description? }, ...] }, ...]
 // -------------------------------------------------------------
 async function sendList(to, headerText, bodyText, footerText, buttonText, sections) {
   try {
     // Ensure buttonText is a string
     buttonText = typeof buttonText === "string" && buttonText.trim() ? buttonText : "Select";
 
-    // Ensure sections is a valid non-empty array
+    // If sections is not a valid array, create a default section with a single "No options" row
     if (!Array.isArray(sections) || sections.length === 0) {
       sections = [
         {
@@ -103,18 +107,21 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
       ];
     }
 
-    // Ensure each section has title and at least 1 row
-    sections = sections.map((sec, idx) => ({
-      title: sec.title || `Section ${idx + 1}`,
-      rows:
-        Array.isArray(sec.rows) && sec.rows.length
-          ? sec.rows.map((row, rIdx) => ({
-              id: row.id || `row_${idx + 1}_${rIdx + 1}`,
-              title: row.title || `Option ${rIdx + 1}`,
-              description: row.description,
-            }))
-          : [{ id: `row_${idx + 1}_1`, title: "No options available" }],
-    }));
+    // Map/normalize sections and rows so WhatsApp receives valid ids/titles
+    sections = sections.map((sec, sIdx) => {
+      const safeRows = Array.isArray(sec.rows) && sec.rows.length
+        ? sec.rows.map((r, rIdx) => ({
+            id: String(r.id || `row_${sIdx + 1}_${rIdx + 1}`),
+            title: String(r.title || `Option ${rIdx + 1}`).slice(0, 24),
+            description: r.description ? String(r.description).slice(0, 72) : undefined,
+          }))
+        : [{ id: `row_${sIdx + 1}_1`, title: "No options available" }];
+
+      return {
+        title: sec.title || `Section ${sIdx + 1}`,
+        rows: safeRows,
+      };
+    });
 
     const payload = {
       messaging_product: "whatsapp",
@@ -147,9 +154,9 @@ async function sendList(to, headerText, bodyText, footerText, buttonText, sectio
     return res.data;
   } catch (err) {
     console.error("❌ sendList error:", err.response?.data || err);
+    return null;
   }
 }
-
 
 module.exports = {
   sendMessage,
