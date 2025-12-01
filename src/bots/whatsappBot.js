@@ -1,13 +1,17 @@
 // =======================================================
-// src/bots/whatsappBot.js (PATCHED FINAL VERSION)
+// src/bots/whatsappBot.js (FINAL PATCHED VERSION)
 // =======================================================
 
 const { sendMessage, sendList } = require("../services/messageService");
 const { getSession, saveSession } = require("../../utils/sessionStore");
 const {
+  db,
+  addListing,
+  getAllListings,
+  getUserListings,
   getUserProfile,
   saveUserLanguage,
-  getUserListings,
+  getTopListings
 } = require("../../database/firestore");
 
 const { classify, askAI } = require("../ai/aiEngine");
@@ -58,13 +62,14 @@ async function sendMainMenu(sender) {
 // FETCH AND SHOW 3 LISTINGS + FOLLOW-UP PROMPT
 // =======================================================
 async function handleShowListings(sender) {
-  const allListings = await getUserListings(sender); // fetch all listings for the user
+  const allListings = await getAllListings(); // Fetch all listings
   const totalCount = allListings?.length || 0;
+
   const preview = (allListings || [])
     .slice(0, 3)
     .map(
       (l, i) =>
-        `${i + 1}. ${l.title || "Listing"} — ${l.location} — ${l.price || "N/A"}`
+        `${i + 1}. ${l.title || "Listing"} — ${l.location || "N/A"} — ${l.price || "N/A"}`
     )
     .join("\n\n");
 
@@ -161,7 +166,6 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // 📌 4️⃣ IF USER IS AWAITING SEARCH QUERY
   // =======================================================
   if (session.step === "awaiting_query") {
-    // User responded with location/type info
     const query = msgBody;
     await sendMessage(sender, `You searched for: *${query}*`);
     // TODO: integrate AI search/filter later
@@ -175,26 +179,10 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   // 📌 5️⃣ MENU ACTIONS
   // =======================================================
   switch (msgBody) {
-case "view_listings":
-  const allListings = await getAllListings(); // fetch all listings
-  if (!allListings || allListings.length === 0) {
-    await sendMessage(sender, "No listings available at the moment.");
-  } else {
-    const preview = allListings
-      .slice(0, 8)
-      .map(
-        (l, i) =>
-          `${i + 1}. ${l.title || "Listing"} — ${l.location} — ${
-            l.price || "N/A"
-          }`
-      )
-      .join("\n\n");
-
-    await sendMessage(sender, `Available listings:\n\n${preview}`);
-  }
-  session.step = "menu";
-  break;
-
+    case "view_listings":
+      await handleShowListings(sender);
+      session.step = "menu";
+      break;
 
     case "post_listing":
       await sendMessage(
@@ -213,12 +201,13 @@ case "view_listings":
           .slice(0, 8)
           .map(
             (l, i) =>
-              `${i + 1}. ${l.title || "Listing"} — ${l.location} — ${l.price || "N/A"}`
+              `${i + 1}. ${l.title || "Listing"} — ${l.location || "N/A"} — ${l.price || "N/A"}`
           )
           .join("\n\n");
 
         await sendMessage(sender, `Your listings:\n\n${preview}`);
       }
+      session.step = "menu";
       break;
 
     case "change_language":
