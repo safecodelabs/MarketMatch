@@ -2,7 +2,7 @@
 const admin = require("firebase-admin");
 const path = require("path");
 
-// init admin SDK
+// Initialize Firebase Admin SDK
 if (!admin.apps.length) {
   let serviceAccount;
   try {
@@ -15,7 +15,6 @@ if (!admin.apps.length) {
     console.log("✅ Firestore initialized:", serviceAccount.project_id || "local");
   } catch (err) {
     console.error("❌ Firestore initialization failed:", err.message || err);
-    // Do not throw to allow local dev without credentials — other calls will fail explicitly.
   }
 }
 
@@ -25,8 +24,8 @@ const db = admin.firestore ? admin.firestore() : {
 
 const listingsRef = db.collection ? db.collection("listings") : null;
 const usersRef = db.collection ? db.collection("users") : null;
-const sessionsRef = db.collection ? db.collection("sessions") : null;
 
+// Add a new listing
 async function addListing(listingData) {
   try {
     const payload = {
@@ -41,22 +40,29 @@ async function addListing(listingData) {
   }
 }
 
+// Fetch all listings (for everyone)
 async function getAllListings(limit = 200) {
   try {
-    const snapshot = await listingsRef.orderBy ? listingsRef.orderBy("timestamp", "desc").limit(limit).get() : { docs: [] };
-    return snapshot.docs ? snapshot.docs.map(d => ({ id: d.id, ...d.data() })) : [];
+    const snapshot = await listingsRef.orderBy("timestamp", "desc").limit(limit).get();
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
     console.error("🔥 Error fetching all listings:", err);
     return [];
   }
 }
 
-async function getAllListings() {
-  const snapshot = await db.collection("listings").get();
-  if (snapshot.empty) return [];
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+// Fetch listings posted by a specific user
+async function getUserListings(userId) {
+  try {
+    const snapshot = await listingsRef.where("owner", "==", userId).orderBy("timestamp", "desc").get();
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.error("🔥 Error fetching user listings:", err);
+    return [];
+  }
 }
 
+// Fetch user profile
 async function getUserProfile(userId) {
   try {
     const doc = await usersRef.doc(userId).get();
@@ -67,6 +73,7 @@ async function getUserProfile(userId) {
   }
 }
 
+// Save user's preferred language
 async function saveUserLanguage(userId, lang) {
   try {
     await usersRef.doc(userId).set({ preferredLanguage: lang }, { merge: true });
@@ -79,24 +86,17 @@ async function saveUserLanguage(userId, lang) {
 
 // Fetch top 3 listings + total count
 async function getTopListings() {
-  const ref = db.collection("listings");
-  const snapshot = await ref.orderBy("createdAt", "desc").limit(3).get();
-
-  const listings = snapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data()
-  }));
-
-  const totalSnapshot = await ref.get();
-  const totalCount = totalSnapshot.size;
-
-  return { listings, totalCount };
+  try {
+    const snapshot = await listingsRef.orderBy("timestamp", "desc").limit(3).get();
+    const listings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const totalSnapshot = await listingsRef.get();
+    const totalCount = totalSnapshot.size;
+    return { listings, totalCount };
+  } catch (err) {
+    console.error("🔥 Error fetching top listings:", err);
+    return { listings: [], totalCount: 0 };
+  }
 }
-
-module.exports = {
-  ...module.exports,
-  getTopListings
-};
 
 module.exports = {
   db,
@@ -104,5 +104,6 @@ module.exports = {
   getAllListings,
   getUserListings,
   getUserProfile,
-  saveUserLanguage
+  saveUserLanguage,
+  getTopListings
 };
