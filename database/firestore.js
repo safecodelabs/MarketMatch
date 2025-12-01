@@ -81,6 +81,27 @@ async function saveUserLanguage(userId, lang) {
   }
 }
 
+// Fetch top 3 listings + total count
+async function getTopListings() {
+  const ref = db.collection("listings");
+  const snapshot = await ref.orderBy("createdAt", "desc").limit(3).get();
+
+  const listings = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  }));
+
+  const totalSnapshot = await ref.get();
+  const totalCount = totalSnapshot.size;
+
+  return { listings, totalCount };
+}
+
+module.exports = {
+  ...module.exports,
+  getTopListings
+};
+
 module.exports = {
   db,
   addListing,

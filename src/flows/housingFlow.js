@@ -154,6 +154,12 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
     return { nextSession, reply, buttons: null };
   }
 
+  // --- Added this block for menu-selection mapping ---
+  if (session?.selected === "show_listings" || message === "show_listings") {
+    return handleShowListings({ sender, session });
+  }
+  // ----------------------------------------------------
+
   // Default menu fallback
   const nextSession = { ...session, step: 'start' };
   return {
