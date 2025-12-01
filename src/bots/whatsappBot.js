@@ -75,7 +75,7 @@ async function handleShowListings(sender) {
         `${i + 1}. ${l.title || "Listing"}\n` +
         `   Location: ${l.location || "N/A"}\n` +
         `   Price   : ${l.price || "Undisclosed"}\n` +
-        `   Contact : ${l.contact || "N/A"}` +
+        `   Contact : ${l.contact || "N/A"}\n` +
         `   Description : ${l.description || "N/A"}`
       );
     })

@@ -54,7 +54,7 @@ router.post("/", async (req, res) => {
     console.log(`💬 incoming from=${sender} phoneNumberId=${phoneNumberId} text="${text}"`);
 
     // --- IMPORTANT: call signature must match the bot's handler
-    const updatedSession = await handleIncomingMessage(sender, text, { phoneNumberId });
+    const updatedSession = await handleIncomingMessage(sender, text, message);
 
     // saveSession is done inside handler in many flows, but you can persist here if needed
     // if (updatedSession) await saveSession(sender, updatedSession);

@@ -1,0 +1,60 @@
+{
+  "type": "form",
+  "title": "Post Your Listing",
+  "body": "Fill details to publish your listing.",
+  "fields": [
+    {
+      "type": "text",
+      "name": "title",
+      "label": "Title",
+      "required": true,
+      "placeholder": "e.g., 1BHK for Rent"
+    },
+    {
+      "type": "select",
+      "name": "listingType",
+      "label": "Listing Type",
+      "required": true,
+      "options": [
+        { "label": "Rent", "value": "rent" },
+        { "label": "Sale", "value": "sale" }
+      ]
+    },
+    {
+      "type": "select",
+      "name": "bhk",
+      "label": "Bedrooms",
+      "required": true,
+      "options": [
+        { "label": "1 BHK", "value": "1bhk" },
+        { "label": "2 BHK", "value": "2bhk" },
+        { "label": "3 BHK", "value": "3bhk" },
+        { "label": "Studio", "value": "studio" }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "location",
+      "label": "Location",
+      "required": true,
+      "placeholder": "e.g., Noida Sector 62"
+    },
+    {
+      "type": "number",
+      "name": "price",
+      "label": "Price",
+      "required": true,
+      "placeholder": "e.g., 15000"
+    },
+    {
+      "type": "text",
+      "name": "contact",
+      "label": "Contact Number",
+      "required": true,
+      "placeholder": "Your mobile number"
+    }
+  ],
+  "submit_button": {
+    "label": "Submit Listing"
+  }
+}

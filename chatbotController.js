@@ -1,17 +1,51 @@
-// chatbotcontroller.js
+// ========================================
+// IMPORTS
+// ========================================
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { 
   getUserProfile, 
   saveUserLanguage,
-  getTopListings            // ✅ ADDED
+  getTopListings
 } = require("./database/firestore");
 
 const { sendMessage, sendList } = require("./src/services/messageService");
+const { db } = require("./database/firestore");   // <-- required for flow submission
 
 
-// ===========================
+
+// ========================================
+// FLOW SUBMISSION HANDLER
+// ========================================
+async function handleFlowSubmission(metadata, sender) {
+  if (
+    metadata?.type === "interactive" &&
+    metadata?.interactive?.type === "flow_submission"
+  ) {
+    const data = metadata.interactive.data;
+
+    await db.collection("listings").add({
+      user: sender,
+      title: data.title,
+      type: data.listingType,
+      bhk: data.bhk,
+      location: data.location,
+      price: data.price,
+      contact: data.contact,
+      createdAt: Date.now()
+    });
+
+    await sendMessage(sender, "🎉 Your listing has been posted successfully!");
+    return true; // stop further processing
+  }
+
+  return false;
+}
+
+
+
+// ========================================
 // LIST MESSAGE DATA
-// ===========================
+// ========================================
 const LANG_ROWS = [
   { id: "lang_en", title: "English" },
   { id: "lang_hi", title: "हिंदी (Hindi)" },
@@ -28,9 +62,10 @@ const MENU_ROWS = [
 ];
 
 
-// ===========================
+
+// ========================================
 // SEND LIST HELPERS
-// ===========================
+// ========================================
 async function sendLanguageListViaService(to) {
   const sections = [{ title: "Available languages", rows: LANG_ROWS }];
   return sendList(
@@ -56,9 +91,10 @@ async function sendMainMenuViaService(to) {
 }
 
 
-// ===========================
+
+// ========================================
 // PARSE LANGUAGE TYPED INPUT
-// ===========================
+// ========================================
 function parseLangFromText(text) {
   if (!text) return null;
   const lower = text.toLowerCase().trim();
@@ -75,9 +111,10 @@ function parseLangFromText(text) {
 }
 
 
-// ===========================
-// NEW FEATURE: SHOW TOP LISTINGS
-// ===========================
+
+// ========================================
+// SHOW TOP LISTINGS
+// ========================================
 async function handleShowListings(sender) {
   try {
     const { listings, totalCount } = await getTopListings();
@@ -86,7 +123,6 @@ async function handleShowListings(sender) {
       return sendMessage(sender, "No listings available right now.");
     }
 
-    // Format listings
     let txt = "🏘️ *Top Listings*\n\n";
     listings.forEach((l, i) => {
       txt += `*${i + 1}. ${l.title || "Untitled"}*\n`;
@@ -115,13 +151,21 @@ async function handleShowListings(sender) {
 
 
 
-// ===========================
+// ========================================
 // MAIN CONTROLLER
-// ===========================
+// ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}) {
   if (!sender) return;
 
-  // prefer interactive reply
+  // ===========================
+  // 0) PRIORITY: CHECK FLOW SUBMISSION
+  // ===========================
+  const flowHandled = await handleFlowSubmission(metadata, sender);
+  if (flowHandled) return; // stop further logic, flow form already handled
+
+
+
+  // prefer list_reply id for menu selection
   if (metadata?.interactive?.type === "list_reply") {
     text = metadata.interactive.list_reply.id || text;
   }
@@ -129,6 +173,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   const msg = String(text || "").trim();
   const lower = msg.toLowerCase();
 
+  // session
   let session = (await getSession(sender)) || { 
     step: "start",
     housingFlow: { step: "start", data: {} },
@@ -140,6 +185,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   const greetings = ["hi", "hello", "hey", "start"];
   const isGreeting = greetings.includes(lower);
   const isNewUser = !user && !session.isInitialized;
+
 
 
   // ===========================
@@ -161,6 +207,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   }
 
 
+
   // ===========================
   // 2) EXISTING USER GREETING
   // ===========================
@@ -172,8 +219,9 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   }
 
 
+
   // ===========================
-  // 3) LANGUAGE SELECTION LOGIC
+  // 3) LANGUAGE SELECTION
   // ===========================
   if (session.housingFlow?.awaitingLangSelection) {
     const parsed = parseLangFromText(msg);
@@ -199,12 +247,12 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   }
 
 
+
   // ===========================
   // 4) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
-      // NOW SHOWS LISTINGS IMMEDIATELY
       await handleShowListings(sender);
       session.step = "awaiting_query";
       break;
@@ -241,6 +289,9 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   return session;
 }
 
+
+
+// ========================================
 module.exports = {
   handleIncomingMessage,
 };
