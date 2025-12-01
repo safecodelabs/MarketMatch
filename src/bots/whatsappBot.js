@@ -1,5 +1,5 @@
 // =======================================================
-// src/bots/whatsappBot.js (FINAL CLEAN VERSION)
+// src/bots/whatsappBot.js (PATCHED FINAL VERSION)
 // =======================================================
 
 const { sendMessage, sendList } = require("../services/messageService");
@@ -8,11 +8,9 @@ const {
   getUserProfile,
   saveUserLanguage,
   getUserListings,
-  addListing,
 } = require("../../database/firestore");
 
 const { classify, askAI } = require("../ai/aiEngine");
-const { getString } = require("../../utils/languageStrings");
 
 // =======================================================
 // HELPERS
@@ -57,6 +55,27 @@ async function sendMainMenu(sender) {
 }
 
 // =======================================================
+// FETCH AND SHOW 3 LISTINGS + FOLLOW-UP PROMPT
+// =======================================================
+async function handleShowListings(sender) {
+  const allListings = await getUserListings(sender); // fetch all listings for the user
+  const totalCount = allListings?.length || 0;
+  const preview = (allListings || [])
+    .slice(0, 3)
+    .map(
+      (l, i) =>
+        `${i + 1}. ${l.title || "Listing"} — ${l.location} — ${l.price || "N/A"}`
+    )
+    .join("\n\n");
+
+  let msg = `🏡 Here are some listings:\n\n${preview || "No listings available."}\n\n`;
+  msg += `📊 Total listings in database: ${totalCount}\n\n`;
+  msg += `Kindly help me with the location and type of property you are looking for (e.g., 2BHK flats in Noida sector 56).`;
+
+  await sendMessage(sender, msg);
+}
+
+// =======================================================
 // MAIN HANDLER
 // =======================================================
 
@@ -80,7 +99,6 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
     };
 
   const userProfile = await getUserProfile(sender);
-  const userLang = userProfile?.preferredLanguage || "en";
 
   const greetings = ["hi", "hello", "hey", "start"];
   const isGreeting = greetings.includes(msgBody);
@@ -94,7 +112,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
 
     await sendMessage(
       sender,
-      "MarketMatch AI is a smart, WhatsApp-native marketplace designed to help communities buy, sell, and access reliable local services.\n\nMarketMatch AI एक स्मार्ट, व्हाट्सऐप-आधारित मार्केटप्लेस है, जो आपको खरीदने, बेचने और भरोसेमंद स्थानीय सेवाएँ पाने में मदद करता है।"
+      "🤖 MarketMatch AI is a smart, WhatsApp-native marketplace designed to help communities buy, sell, and access reliable local services."
     );
 
     await sendLanguageSelection(sender);
@@ -140,15 +158,26 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   }
 
   // =======================================================
-  // 📌 4️⃣ MENU ACTIONS
+  // 📌 4️⃣ IF USER IS AWAITING SEARCH QUERY
+  // =======================================================
+  if (session.step === "awaiting_query") {
+    // User responded with location/type info
+    const query = msgBody;
+    await sendMessage(sender, `You searched for: *${query}*`);
+    // TODO: integrate AI search/filter later
+    session.step = "menu";
+    await saveSession(sender);
+    await sendMainMenu(sender);
+    return;
+  }
+
+  // =======================================================
+  // 📌 5️⃣ MENU ACTIONS
   // =======================================================
   switch (msgBody) {
     case "view_listings":
-      await sendMessage(
-        sender,
-        "Send your search query.\nExample: *2BHK in Noida sector 56*."
-      );
-      session.step = "awaiting_query";
+      await handleShowListings(sender);
+      session.step = "awaiting_query"; // now waiting for user to provide their query
       break;
 
     case "post_listing":
@@ -168,9 +197,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
           .slice(0, 8)
           .map(
             (l, i) =>
-              `${i + 1}. ${l.title || "Listing"} — ${l.location} — ${
-                l.price || "N/A"
-              }`
+              `${i + 1}. ${l.title || "Listing"} — ${l.location} — ${l.price || "N/A"}`
           )
           .join("\n\n");
 
