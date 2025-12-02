@@ -1,75 +1,116 @@
 // =======================================================
-// ✅ PATCHED FILE: routes/webhook.js
+// ✅ FULLY PATCHED FILE: routes/webhook.js
 // =======================================================
 const express = require("express");
 const router = express.Router();
 
-// Import bot handler (path matches your structure)
+// Import bot handler
 const { handleIncomingMessage } = require("../src/bots/whatsappBot");
 
-// Fix: WhatsApp sometimes sends raw buffer -> convert to JSON
+// Fix: Sometimes WhatsApp sends raw buffer instead of JSON
 router.use((req, res, next) => {
-  if (req.is("application/json") && Buffer.isBuffer(req.body)) {
-    try {
-      req.body = JSON.parse(req.body.toString());
-    } catch (err) {
-      console.error("❌ JSON Parse Error:", err);
-    }
-  }
-  next();
+  if (req.is("application/json") && Buffer.isBuffer(req.body)) {
+    try {
+      req.body = JSON.parse(req.body.toString());
+    } catch (err) {
+      console.error("❌ JSON Parse Error:", err);
+    }
+  }
+  next();
 });
 
-/**
- * MAIN WEBHOOK (POST)
- */
+// =======================================================
+// 🚀 MAIN WEBHOOK HANDLER (POST)
+// =======================================================
 router.post("/", async (req, res) => {
-  try {
-    // Helpful debug — keeps logs populated
-    console.log("📩 Webhook raw body:", JSON.stringify(req.body?.entry?.[0] || req.body).slice(0, 1500));
+  try {
+    // Log for debugging
+    console.log(
+      "📩 Webhook Body:",
+      JSON.stringify(req.body?.entry?.[0] || req.body).slice(0, 1800)
+    );
 
-    const entry = req.body?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
+    const entry = req.body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
 
-    // Ignore non-message webhooks
-    if (!value || !value.messages || value.messages.length === 0) {
-      console.log("🔎 Not a message webhook — ignoring.");
-      return res.sendStatus(200);
-    }
-
-    const phoneNumberId = value.metadata?.phone_number_id;
-    const message = value.messages[0];
-    const sender = message.from;
-
-    let text = "";
-
-    if (message.type === "text") {
-      text = message.text.body.trim();
-    } else if (message.type === "interactive") {
-      // We extract the ID here for logging purposes
-      const inter = message.interactive;
-      if (inter.button_reply) text = inter.button_reply.id || inter.button_reply.title;
-      else if (inter.list_reply) text = inter.list_reply.id || inter.list_reply.title;
-    } else if (message.type === "unsupported") {
-        console.log("⚠️ Received unsupported message type. Ignoring.");
-        return res.sendStatus(200);
+    // Skip typing indicators, delivery receipts, etc.
+    if (!value || !value.messages || value.messages.length === 0) {
+      console.log("ℹ️ Not a message webhook — ignored.");
+      return res.sendStatus(200);
     }
 
-    text = (text || "").toLowerCase();
+    const message = value.messages[0];
+    const sender = message.from;
+    const phoneNumberId = value.metadata?.phone_number_id;
 
-    console.log(`💬 incoming from=${sender} phoneNumberId=${phoneNumberId} text="${text}"`);
+    let extractedText = ""; // what we pass to the bot
 
-    // --- IMPORTANT: Pass the full 'message' object as metadata
-    // The bot handler now uses this metadata to accurately extract 
-    // button IDs, regardless of how we parse 'text' above.
-    await handleIncomingMessage(sender, text, message);
+    // =======================================================
+    // 📝 NORMAL TEXT MESSAGE
+    // =======================================================
+    if (message.type === "text") {
+      extractedText = message.text.body.trim();
+    }
 
-    // Return 200 OK immediately
-    return res.sendStatus(200);
-  } catch (err) {
-    console.error("❌ Webhook Error:", err);
-    return res.sendStatus(500);
-  }
+    // =======================================================
+    // 🎛 INTERACTIVE MESSAGE (buttons, list)
+    // =======================================================
+    else if (message.type === "interactive") {
+      const interactive = message.interactive;
+
+      // button press
+      if (interactive.button_reply) {
+        extractedText =
+          interactive.button_reply.id || interactive.button_reply.title;
+      }
+
+      // list selection
+      else if (interactive.list_reply) {
+        extractedText =
+          interactive.list_reply.id || interactive.list_reply.title;
+      }
+    }
+
+    // =======================================================
+    // 🧱 FLOW / FORM SUBMISSION (WhatsApp Flows)
+    // =======================================================
+    else if (message.type === "button") {
+      // Some flow callbacks come here
+      extractedText = message.button.payload || "";
+    }
+
+    else if (message.type === "interactive_response") {
+      // Newer meta format
+      extractedText = message.interactive_response.id || "";
+    }
+
+    // =======================================================
+    // ❌ UNSUPPORTED MESSAGE TYPE (images, docs, etc.)
+    // =======================================================
+    else {
+      console.log("⚠️ Unsupported message type:", message.type);
+      return res.sendStatus(200);
+    }
+
+    // Normalize
+    extractedText = (extractedText || "").toLowerCase();
+
+    console.log(
+      `💬 Incoming | from=${sender} | bot-number=${phoneNumberId} | text="${extractedText}"`
+    );
+
+    // =======================================================
+    // 🔥 PASS TO BOT WITH FULL RAW MESSAGE
+    // =======================================================
+    await handleIncomingMessage(sender, extractedText, message);
+
+    // We ALWAYS respond 200 immediately
+    return res.sendStatus(200);
+  } catch (err) {
+    console.error("❌ Webhook Handler Error:", err);
+    return res.sendStatus(500);
+  }
 });
 
 module.exports = router;
