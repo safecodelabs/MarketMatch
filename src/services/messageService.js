@@ -50,45 +50,40 @@ async function sendMessage(to, messageOrPayload) {
 // -------------------------------------------------------------
 // 2) SEND INTERACTIVE BUTTONS (1–3 buttons only)
 // -------------------------------------------------------------
-async function sendButtons(to, bodyText, buttons) {
+async function sendListingCard(to, listing, index = 0, total = 1) {
   try {
-    // ⚠️ New validation: Ensure body text is not empty
-    if (!bodyText || typeof bodyText !== 'string' || bodyText.trim().length === 0) {
-        throw new Error('Interactive body text is required and cannot be empty.');
-    }
-    
-    if (!Array.isArray(buttons) || buttons.length < 1 || buttons.length > 3) {
-      throw new Error(
-        `Buttons array must have 1–3 items. Received: ${buttons?.length || 0}`
-      );
-    }
+    // ⚠️ CRITICAL FIX: Ensure listing has a usable ID. Use 'unknown' if missing.
+    const listingId = String(listing.id || 'unknown').slice(0, 50);
 
-    const formattedButtons = buttons.map((btn, idx) => ({
-      type: "reply",
-      reply: {
-        id: btn.id || `btn_${idx + 1}`,
-        title: String(btn.title || `Button ${idx + 1}`).slice(0, 20),
+    const bodyText =
+      `🏡 ${listing.title || "Property"}\n` +
+      `💰 Price: ${listing.price ? `₹${listing.price}` : 'N/A'}\n` +
+      `📍 ${listing.location || "Location N/A"}\n` +
+      `📏 ${listing.area || listing.size || "Area N/A"}\n` +
+      `🛋 ${listing.furnishing || "N/A"}\n\n` +
+      `(${index + 1} of ${total})`;
+
+
+    const buttons = [
+      {
+        id: `view_${listingId}`, // Use the guaranteed string ID
+        title: "View Details",
       },
-    }));
-
-    const payload = {
-      messaging_product: "whatsapp",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "button",
-        // Use the provided bodyText (now guaranteed non-empty)
-        body: { text: bodyText }, 
-        action: { buttons: formattedButtons },
+      {
+        id: `save_${listingId}`, // Use the guaranteed string ID
+        title: "Save ❤️",
       },
-    };
+      {
+        id: `next_listing`,
+        title: "Next ➡",
+      },
+    ];
 
-    // Use generic sendMessage for sending the payload
-    return await sendMessage(to, payload);
+    // Use sendButtons utility
+    return await sendButtons(to, bodyText, buttons);
   } catch (err) {
-    // Log the failure to diagnose why it returned null
-    console.error("❌ sendButtons failure:", err.message, "Recipient:", to);
-    return null; // Returns null, causing outer function to treat it as a missed message
+    console.error("❌ sendListingCard error:", err);
+    return null;
   }
 }
 
