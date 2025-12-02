@@ -1,5 +1,6 @@
 const axios = require("axios");
 
+// Note: These variables must be available in the environment where this code runs.
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
@@ -203,7 +204,6 @@ async function sendListingCard(to, listing, index = 0, total = 1) {
             `📍 ${location}\n` +
             `📏 ${area}\n` +
             `🛋 ${furnishing}\n\n` +
-            // Fixed redundant text:
             `Listing ${index + 1} of ${total}\n\n` +
             `*To view details, reply with: view ${listingId}*\n` + 
             `*To see the next listing, reply with: next*`;
@@ -254,10 +254,12 @@ async function sendSimpleText(to, text) {
 }
 
 
-export {
-    sendText,
-    sendList,
-    sendListingCard,
-    sendSimpleText,
-    // Note: sendButtons is not exported as it's an internal utility
+// -------------------------------------------------------------
+// 7) EXPORTS (FIXED: Using CommonJS Syntax)
+// -------------------------------------------------------------
+module.exports = {
+    sendText,
+    sendList,
+    sendListingCard,
+    sendSimpleText,
 };
