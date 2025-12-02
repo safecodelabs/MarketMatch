@@ -1,4 +1,3 @@
-// Import the core housing flow logic (complex flows)
 const housingFlow = require("../flows/housingFlow"); 
 const { startOrContinue } = require("../flows/housingFlow");
 const { generateFollowUpQuestion } = require("../ai/aiEngine");
@@ -15,27 +14,36 @@ const {
 // -----------------------------------------------------------
 // MAIN COMMAND HANDLER
 // -----------------------------------------------------------
+/**
+ * Processes a command received from a user, potentially modifying the session state.
+ * @param {string} cmd - The normalized command string (e.g., 'view_123', 'menu').
+ * @param {object} session - The current user session object.
+ * @param {string} userId - The unique identifier for the user.
+ * @param {string} language - The user's preferred language code.
+ * @param {object} payload - The original message payload (unused in this version).
+ * @returns {object} An object containing the reply message (if any) and the updated session.
+ */
 async function handle(cmd, session = {}, userId, language = "en", payload = {}) {
 
   // ============================
-  // DYNAMIC PREFIX COMMANDS
+  // DYNAMIC PREFIX COMMANDS (e.g., from interactive buttons)
   // ============================
 
   // VIEW_xxxxxxxxx
-  if (cmd.startsWith("VIEW_")) {
-    const id = cmd.replace("VIEW_", "");
+  if (cmd.startsWith("view_")) {
+    const id = cmd.replace("view_", ""); // Command is already lowercased by parseCommand
     await handleViewDetailsAction(userId, id);
     return { reply: null, nextSession: session };
   }
 
   // SAVE_xxxxxxxxx
-  if (cmd.startsWith("SAVE_")) {
-    const id = cmd.replace("SAVE_", "");
+  if (cmd.startsWith("save_")) {
+    const id = cmd.replace("save_", ""); // Command is already lowercased by parseCommand
     await handleSaveListingAction(userId, id);
     return { reply: null, nextSession: session };
   }
 
-  // DELETE_xxxxxxxxx (complex flow)
+  // DELETE_xxxxxxxxx (complex flow) - These remain UPPERCASE for router consistency
   if (cmd.startsWith("DELETE_")) {
     const id = cmd.replace("DELETE_", "");
     const flowResult = await housingFlow.handleDeleteListing({
@@ -49,7 +57,7 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
     };
   }
 
-  // MANAGE_xxxxxxxxx (complex flow)
+  // MANAGE_xxxxxxxxx (complex flow) - These remain UPPERCASE for router consistency
   if (cmd.startsWith("MANAGE_")) {
     const id = cmd.replace("MANAGE_", "");
     const flowResult = await housingFlow.handleManageSelection({
@@ -64,11 +72,10 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
   }
 
   // NEXT LISTING
-  if (cmd === "NEXT_LISTING" || cmd === "next_listing") {
-    await handleNextListingAction(userId);
+  if (cmd === "next_listing") {
+    await handleNextListingAction(userId, session);
     return { reply: null, nextSession: session };
   }
-
 
 
   // ---------------------------------------------------------
@@ -84,6 +91,8 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
         userLang: language
       });
 
+      // The reply might be the first listing card, which is handled internally by housingFlow, 
+      // but if there's a simple text reply (e.g., "No listings found"), it's returned here.
       return {
         reply: listingResult.reply
           ? { type: "text", text: { body: listingResult.reply } }
@@ -201,6 +210,12 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
 // -----------------------------------------------------------
 // PARSE COMMAND
 // -----------------------------------------------------------
+/**
+ * Parses raw incoming text into a normalized command string.
+ * This function also handles interactive button/list replies.
+ * @param {string} text - The raw text or button ID.
+ * @returns {string | null} The normalized command, or null if no command is detected.
+ */
 function parseCommand(text) {
   if (!text || !text.trim()) return null;
   const t = text.trim().toLowerCase();
@@ -209,15 +224,23 @@ function parseCommand(text) {
   if (t === "restart") return "restart";
 
   // Dynamic prefix detection
-  if (t.startsWith("view_")) return t.toUpperCase();
-  if (t.startsWith("save_")) return t.toUpperCase();
+  // Dynamic button commands (from interactive buttons, IDs are lowercased)
+  if (t.startsWith("view_")) return t;
+  if (t.startsWith("save_")) return t;
+
+  // manage/delete use text menu, keep uppercase for distinction in router logic
+  // These are typically commands coming from list items, which we assume are already normalized
+  // but we enforce the prefix check here.
   if (t.startsWith("manage_")) return t.toUpperCase();
   if (t.startsWith("delete_")) return t.toUpperCase();
 
-  if (t === "next_listing") return "NEXT_LISTING";
+  // next listing
+  if (t === "next_listing") return "next_listing";
+
   if (t === "listings" || t === "show listings" || t === "show_listings")
     return "listings";
 
+  // NLP command triggers
   if (/^post[:\s]/i.test(t)) return "post_command";
   if (t === "buy") return "buy";
   if (t === "sell") return "sell";

@@ -46,7 +46,6 @@ async function sendMessage(to, messageOrPayload) {
 
     // Log the configuration error (e.g., if URL/Headers failed)
     if (err.config) {
-      // FIX: Changed JSON.config?.url to err.config?.url
       console.error("❌ AXIOS CONFIG ERROR:", err.config?.url); 
     }
 
@@ -70,7 +69,7 @@ async function sendText(to, text) {
 }
 
 // -------------------------------------------------------------
-// 3) SEND INTERACTIVE BUTTONS (1–3 buttons only) - (DEPRECATED FOR LISTING CARDS)
+// 3) SEND INTERACTIVE BUTTONS (1–3 buttons only) - The foundation for dynamic cards
 // -------------------------------------------------------------
 async function sendButtons(to, bodyText, buttons, headerText) {
   try {
@@ -199,83 +198,42 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 
 
 // -------------------------------------------------------------
-// 5) SEND LISTING CARD (Using Interactive List)
+// 5) SEND LISTING CARD (FIXED: Uses Quick Reply Buttons for dynamic card display)
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, index = 0, total = 1) {
   try {
-    // 1. Data Cleaning and Safety Checks
-    if (!listing || typeof listing !== 'object' || Array.isArray(listing)) {
-      console.error(`❌ sendListingCard: Invalid listing object passed. Type: ${typeof listing}`);
+    if (!listing || typeof listing !== "object") {
+      console.error("❌ sendListingCard: Invalid listing object:", listing);
       return null;
     }
 
-    const listingId = String(listing.id || 'unknown').slice(0, 50);
-    
-    // Safety limits are applied directly to variables used in the payload
-    const title = String(listing.title || "Property Listing").slice(0, 60); // Header max 60 chars
-    const price = listing.price ? `₹${String(listing.price).replace(/[^\d,\.]/g, '')}` : 'N/A';
-    const location = String(listing.location || "Location N/A").slice(0, 100);
-    const area = String(listing.area || listing.size || "Area N/A").slice(0, 50);
-    const furnishing = String(listing.furnishing || "N/A").slice(0, 50);
+    const listingId = String(listing.id || "unknown").slice(0, 50);
 
-    // 2. Build the List Card Payload
-    const payload = {
-      messaging_product: "whatsapp",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "list",
-        // Header: Max 60 chars
-        header: {
-          type: "text",
-          text: `🏡 ${title}` 
-        },
-        // Body: Max 1024 chars (Using multiple lines for the "card preview")
-        body: {
-          text:
-            `*${title}*\n` + // Re-using title for visual separation
-            `💰 Price: ${price}\n` +
-            `📍 Location: ${location}\n` +
-            `📏 Area: ${area}\n` +
-            `🛋 Furnishing: ${furnishing}` 
-        },
-        // Footer: Max 60 chars
-        footer: {
-          text: `Listing ${index + 1} of ${total}. Choose an action below:` 
-        },
-        action: {
-          // Button that opens the list menu (Max 20 chars)
-          button: "Choose Action", 
-          sections: [
-            {
-              title: "Options", // Section title, Max 24 chars
-              rows: [
-                {
-                  id: `view_${listingId}`, // ID max 256
-                  title: "View Details", // Row title max 24 chars
-                  description: "See full property photos and info" // Row description max 72 chars
-                },
-                {
-                  id: `next_listing`, // ID max 256
-                  title: "Next Listing",
-                  description: "Skip and view the next property"
-                },
-                {
-                  id: `save_${listingId}`, // ID max 256
-                  title: "Save Listing",
-                  description: "Add this property to your saved list ❤️"
-                }
-              ]
-            }
-          ]
-        }
-      }
-    };
+    // 1. Build the rich text body content (Header text is passed separately to sendButtons)
+    const price = listing.price ? `₹${String(listing.price).replace(/[^\d]/g, '')}` : "N/A";
+    const title = String(listing.title || listing.property_type || "Property").slice(0, 60);
 
-    // 3. Send the message using the generic handler
-    return await sendMessage(to, payload);
+    const bodyText = 
+      `🏠 *${title}* • ${price}\n` +
+      `📍 ${listing.location || 'Location unavailable'}\n` +
+      `🛏 ${listing.bedrooms || 'N/A'} | 🚿 ${listing.bathrooms || 'N/A'}\n` +
+      `📏 ${listing.area || 'N/A'} sq.ft\n\n` +
+      `_Listing ${index + 1} of ${total}_\n\n` +
+      `What would you like to do?`;
+
+    // 2. Define the quick reply buttons
+    const buttons = [
+      { id: `view_${listingId}`, title: "View Details" }, // Note: Renamed from 'View' to 'View Details' for clarity
+      // Use the static ID your router expects for the next action, as it's session-aware
+      { id: "next_listing", title: "Next Listing" }, 
+      { id: `save_${listingId}`, title: "Save Listing" } // Note: Renamed from 'Save ❤️' to 'Save Listing' for button length
+    ];
+
+    // 3. Use the robust sendButtons function to dispatch the Interactive Button message
+    // We use the listing title as the header text.
+    return await sendButtons(to, bodyText, buttons, title);
   } catch (err) {
-    console.error("❌ sendListingCard (List) error:", err.message, "Listing Index:", index);
+    console.error("❌ sendListingCard error:", err.message);
     return null;
   }
 }
