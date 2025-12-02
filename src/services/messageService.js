@@ -38,11 +38,13 @@ async function sendMessage(to, messageOrPayload) {
       },
     });
 
-    const messageId = res.data.messages?.[0]?.id || 'N/A';
+const messageId = res.data.messages?.[0]?.id || 'N/A';
     console.log(`📤 ${logType} sent (ID: ${messageId}):`, res.data); 
     return res.data;
   } catch (err) {
-    console.error("❌ sendMessage error:", err.response?.data || err);
+    // ⚠️ CRITICAL DIAGNOSTIC: Log the full error JSON to capture API rejection details.
+    const errorDetails = err.response?.data || err.message || err;
+    console.error("❌ sendMessage API ERROR:", JSON.stringify(errorDetails, null, 2));
     return null;
   }
 }
