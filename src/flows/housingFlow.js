@@ -391,7 +391,7 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
   }
 
   // NEW MENU MAPPING ADDED
-  if (message === "show_listings" || session?.selected === "show_listings") {
+if (message === "show_listings" || message === "view_listings" || session?.selected === "show_listings") {
     return handleShowListings({ sender, session, userLang });
   }
 
@@ -405,7 +405,7 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
 3) Manage listings
 4) Change language`,
     buttons: [
-      { id: 'show_listings', title: 'View listings' },
+      { id: 'show_listings', title: 'View listings' }, // Uses ID: show_listings
       { id: 'post_listing', title: 'Post listing' },
       { id: 'manage_listings', title: 'Manage listings' },
       { id: '4', title: 'Change language' }
