@@ -189,6 +189,13 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, index = 0, total = 1) {
     try {
+        // --- ADDED: Input validation for the listing object ---
+        if (!listing || typeof listing !== 'object' || Array.isArray(listing)) {
+            console.error(`❌ sendListingCard: Invalid listing object passed. Type: ${typeof listing}`);
+            // Return null, forcing the calling flow to handle the error or skip this entry
+            return null; 
+        }
+
         // 1. Data Cleaning and Safety Checks
         const listingId = String(listing.id || 'unknown').slice(0, 50);
         const title = String(listing.title || "Property").slice(0, 100);
