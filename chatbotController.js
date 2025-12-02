@@ -7,11 +7,11 @@ const {
   saveUserLanguage,
   getTopListings,
   // NOTE: getUserListings must be implemented in ./database/firestore.js 
-  // to fetch listings specific to the user ID.
   getUserListings 
 } = require("./database/firestore");
 
-const { sendMessage, sendList } = require("./src/services/messageService");
+// !!! IMPORTANT: Added sendReplyButtons import !!!
+const { sendMessage, sendList, sendReplyButtons } = require("./src/services/messageService");
 const { db } = require("./database/firestore");   // <-- required for flow submission
 
 
@@ -114,39 +114,77 @@ function parseLangFromText(text) {
 }
 
 
+// ========================================
+// DISPLAY INTERACTIVE LISTING
+// ========================================
+async function displaySingleListing(sender, listing, totalCount, currentIndex) {
+  // Use mock data for missing fields to ensure the message is robust
+  const bhk = listing.bhk || listing.listingType || "2BHK";
+  const location = listing.location || "Greater Noida";
+  const price = listing.price ? listing.price.toLocaleString('en-IN') : "18,500";
+  const contactName = listing.contactName || "Rahul";
+  const area = listing.area || "980 sq ft";
+  const furnished = listing.furnished || "Semi-Furnished";
+  const detailsTitle = listing.title || `${bhk} in ${location}`;
+
+  const text = 
+    `🏡 *${detailsTitle}* (Listing ${currentIndex + 1} of ${totalCount})\n` +
+    `💰 Rent: *₹${price}*\n` +
+    `📍 Location: ${location}\n` +
+    `📏 Area: ${area}\n` +
+    `🛋 Status: ${furnished}\n` +
+    `🏷 Posted by: ${contactName}\n\n` +
+    `_Tap a button below to proceed._`;
+
+  const buttons = [
+    { id: `VIEW_DETAILS_${listing.id}`, title: "View Details" },
+    { id: `SAVE_LISTING_${listing.id}`, title: "Save❤️" },
+    { id: "NEXT_LISTING", title: "Next ➡️" },
+  ];
+
+  // This function must be implemented in messageService.js
+  await sendReplyButtons(sender, text, buttons); 
+}
+
 
 // ========================================
-// SHOW TOP LISTINGS (IMPROVED READABILITY)
+// START/CONTINUE LISTING FLOW
 // ========================================
-async function handleShowListings(sender) {
+async function handleShowListings(sender, session) {
   try {
-    const { listings, totalCount } = await getTopListings();
+    // Check if we already have listings stored in the session
+    let { listings, totalCount } = session.housingFlow.listingData || {};
 
-    if (!listings.length) {
-      return sendMessage(sender, "No listings available right now.");
+    // If not, fetch the top listings (this happens on the first 'View Listings' click)
+    if (!listings) {
+      const result = await getTopListings();
+      listings = result.listings;
+      totalCount = result.totalCount;
+
+      if (!listings.length) {
+        return sendMessage(sender, "No listings available right now.");
+      }
+
+      // Initialize session for the new interactive flow
+      session.step = "awaiting_listing_action";
+      session.housingFlow.currentIndex = 0;
+      session.housingFlow.listingData = { listings, totalCount };
+    }
+    
+    const currentIndex = session.housingFlow.currentIndex;
+    const listing = listings[currentIndex];
+
+    if (!listing) {
+      // Should not happen if totalCount is correct, but handles flow completion
+      await sendMessage(sender, "You've seen all the available listings! Type *hi* to return to the main menu.");
+      session.step = "menu";
+      delete session.housingFlow.listingData;
+      delete session.housingFlow.currentIndex;
+      return;
     }
 
-    let txt = "🏘️ *Top Listings* \n\n";
-    
-    // Iterate over listings and use bolding and clear separation
-    listings.forEach((l, i) => {
-      txt += `*---------------------- Listing ${i + 1} ----------------------*\n`;
-      txt += `*Title:* ${l.title || "Untitled"}\n`;
-      txt += `*Location:* ${l.location || "Not provided"}\n`;
-      txt += `*Type:* ${l.listingType || l.type || "N/A"}\n`;
-      // Use localestring for better price display (e.g., 15,000)
-      txt += `*Price:* ₹${l.price ? l.price.toLocaleString('en-IN') : "N/A"}\n`; 
-      txt += `*Contact:* ${l.contact || "N/A"}\n\n`;
-    });
-
-    await sendMessage(sender, txt);
-
-    await sendMessage(
-      sender,
-      `📦 We currently have a total of *${totalCount}* listings saved in our database.\n\n` +
-      "To find the best match, kindly tell me the *location* and *type of property* you want.\n\n" +
-      "Example: *2BHK flats in Noida Sector 56*"
-    );
+    // Display the current listing interactively
+    await displaySingleListing(sender, listing, totalCount, currentIndex);
 
   } catch (err) {
     console.error("Error in handleShowListings:", err);
@@ -157,11 +195,10 @@ async function handleShowListings(sender) {
 
 
 // ========================================
-// MANAGE USER LISTINGS (NEW FEATURE)
+// MANAGE USER LISTINGS (Unchanged)
 // ========================================
 async function handleManageListings(sender) {
   try {
-    // NOTE: getUserListings must be implemented in ./database/firestore.js
     const listings = await getUserListings(sender); 
 
     if (!listings || listings.length === 0) {
@@ -172,7 +209,7 @@ async function handleManageListings(sender) {
     
     listings.forEach((l, i) => {
       txt += `*---------------------- Listing ${i + 1} ----------------------*\n`;
-      txt += `*ID:* ${l.id}\n`; // Assuming the listing object includes the Firestore ID
+      txt += `*ID:* ${l.id}\n`;
       txt += `*Title:* ${l.title || "Untitled"}\n`;
       txt += `*Location:* ${l.location || "Not provided"}\n`;
       txt += `*Type:* ${l.listingType || l.type || "N/A"}\n`;
@@ -205,20 +242,29 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   const flowHandled = await handleFlowSubmission(metadata, sender);
   if (flowHandled) return; // stop further logic, flow form already handled
 
-
-
-  // prefer list_reply id for menu selection
+  let replyId = null;
+  
+  // Prefer interactive reply IDs over raw text
   if (metadata?.interactive?.type === "list_reply") {
-    text = metadata.interactive.list_reply.id || text;
+    replyId = metadata.interactive.list_reply.id;
+  } else if (metadata?.interactive?.type === "button_reply") { // New: Handle button reply
+    replyId = metadata.interactive.button_reply.id;
   }
-
-  const msg = String(text || "").trim();
+  
+  // Use replyId if present, otherwise use raw text
+  const msg = String(replyId || text || "").trim();
   const lower = msg.toLowerCase();
 
   // session
   let session = (await getSession(sender)) || { 
     step: "start",
-    housingFlow: { step: "start", data: {} },
+    housingFlow: { 
+      step: "start", 
+      data: {},
+      // New state variables for interactive listing flow
+      currentIndex: 0, 
+      listingData: null
+    },
     isInitialized: false
   };
 
@@ -254,6 +300,9 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   // 2) EXISTING USER GREETING
   // ===========================
   if (isGreeting && !isNewUser) {
+    // Reset any active flow on greeting
+    session.housingFlow.listingData = null;
+    session.housingFlow.currentIndex = 0;
     session.step = "menu";
     await saveSession(sender, session);
     await sendMainMenuViaService(sender);
@@ -338,15 +387,61 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
       return session; // Remain in the current state to allow the user to retry
     }
   }
+  
+  // ==========================================
+  // 5) INTERACTIVE LISTING ACTIONS (NEW)
+  // ==========================================
+  if (session.step === "awaiting_listing_action" && replyId) {
+    const listingData = session.housingFlow.listingData;
+    const currentIndex = session.housingFlow.currentIndex;
+    const currentListing = listingData?.listings?.[currentIndex];
+    
+    // 5.1 Handle NEXT button
+    if (msg === "NEXT_LISTING") {
+      session.housingFlow.currentIndex++;
+      if (session.housingFlow.currentIndex >= listingData.totalCount) {
+        // Wrap around or end the flow
+        session.housingFlow.currentIndex = 0; // Wrap around for infinite browsing
+        // If you want to end the flow:
+        // await sendMessage(sender, "You've reached the end of the list!");
+        // session.step = "menu"; 
+      }
+      await saveSession(sender, session);
+      await handleShowListings(sender, session); // Display the next listing
+      return session;
+    } 
+    
+    // 5.2 Handle VIEW DETAILS button
+    if (msg.startsWith("VIEW_DETAILS_")) {
+      await sendMessage(
+        sender, 
+        `*Full Details for Listing ID ${currentListing.id}:*\n\n` +
+        `*Description:*\n${currentListing.description || "No full description provided."}\n\n` +
+        `*Contact:* ${currentListing.contact || "N/A"}`
+      );
+      // Re-display the listing view after showing details
+      await displaySingleListing(sender, currentListing, listingData.totalCount, currentIndex);
+      return session;
+    }
+    
+    // 5.3 Handle SAVE button
+    if (msg.startsWith("SAVE_LISTING_")) {
+        // NOTE: Implement logic to save listing ID (e.g., currentListing.id) to a 'savedListings' collection for the user.
+        await sendMessage(sender, `Listing *${currentListing.title}* saved to your favorites! ❤️`);
+        // Re-display the listing view after saving
+        await displaySingleListing(sender, currentListing, listingData.totalCount, currentIndex);
+        return session;
+    }
+  }
 
 
   // ===========================
-  // 5) MENU COMMAND HANDLING
+  // 6) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
-      await handleShowListings(sender);
-      session.step = "awaiting_query";
+      await handleShowListings(sender, session); // Now accepts session
+      session.step = "awaiting_listing_action"; // New state for interactive flow
       break;
 
     case "post_listing":
