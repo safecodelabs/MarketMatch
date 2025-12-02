@@ -255,9 +255,10 @@ async function sendSimpleText(to, text) {
 
 
 // -------------------------------------------------------------
-// 7) EXPORTS (FIXED: Using CommonJS Syntax)
+// 7) EXPORTS (FIXED: Added sendMessage to satisfy dependency)
 // -------------------------------------------------------------
 module.exports = {
+    sendMessage, // EXPORTED TO FIX ERROR IN housingFlow.js
     sendText,
     sendList,
     sendListingCard,
