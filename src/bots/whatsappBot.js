@@ -1,8 +1,9 @@
 // =======================================================
-// src/bots/whatsappBot.js (CLEAN + FINAL PATCHED VERSION)
+// ✅ PATCHED FILE: src/bots/whatsappBot.js
 // =======================================================
 
-const { sendMessage, sendList } = require("../services/messageService");
+// ❌ FIX 1: Import entire module to resolve 'sendList is not a function' TypeError
+const messageService = require("../services/messageService"); 
 const { getSession, saveSession } = require("../../utils/sessionStore");
 
 // ⭐ Import housing flow handlers
@@ -13,7 +14,7 @@ const {
   handleSaveListing
 } = require("../flows/housingFlow");
 
-// ⭐ Import AI + classification (not used, but kept for completeness)
+// ⭐ Import AI + classification (kept for completeness)
 const { classify, askAI } = require("../ai/aiEngine");
 
 // Database helpers
@@ -27,7 +28,7 @@ const {
 } = require("../../database/firestore");
 
 // =======================================================
-// HELPERS (No changes needed)
+// HELPERS (Updated to use messageService properties)
 // =======================================================
 
 function menuRows() {
@@ -49,7 +50,8 @@ function languageRows() {
 }
 
 async function sendLanguageSelection(sender) {
-  return sendList(
+  // ✅ FIX 1: Use messageService.sendList
+  return messageService.sendList( 
     sender,
     "🌐 Select your language",
     "Choose one option:",
@@ -59,7 +61,8 @@ async function sendLanguageSelection(sender) {
 }
 
 async function sendMainMenu(sender) {
-  return sendList(
+  // ✅ FIX 1: Use messageService.sendList
+  return messageService.sendList(
     sender,
     "🏡 MarketMatch AI",
     "Choose an option:",
@@ -95,7 +98,6 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       isInitialized: false,
       awaitingLang: false,
       housingFlow: { data: {} },
-      // Initialize lastResults and listingIndex for interactive card flow
       lastResults: [], 
       listingIndex: 0
     };
@@ -107,33 +109,36 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
 
   // -------------------------------
   // 🅰️ INTERACTIVE CARD BUTTONS (High Priority)
-  // These handlers send the message and return immediately.
   // -------------------------------
   if (msgBody.startsWith("view_")) {
     const listingId = msgBody.replace("view_", "");
+    // NOTE: handleViewDetails uses the generic sendMessage for text reply, which is correct.
     const result = await handleViewDetails({ sender, listingId, session });
     await saveSession(sender, result.nextSession);
-    return; // ✅ CRITICAL: Return immediately.
+    return; 
   }
 
   if (msgBody.startsWith("save_")) {
     const listingId = msgBody.replace("save_", "");
+    // NOTE: handleSaveListing uses the generic sendMessage for text reply, which is correct.
     const result = await handleSaveListing({ sender, listingId, session });
     await saveSession(sender, result.nextSession);
-    return; // ✅ CRITICAL: Return immediately.
+    return; 
   }
-
-  if (msgBody === "next_listing") {
+  
+  // Fix case mismatch issue in button IDs from housingFlow.js
+  if (msgBody === "next_listing" || msgBody === "NEXT_LISTING") { 
     const result = await handleNextListing({ sender, session });
     await saveSession(sender, result.nextSession);
-    return; // ✅ CRITICAL: Return immediately.
+    return; 
   }
   
   // -------------------------------
   // 1️⃣ NEW USER → WELCOME + LANGUAGE
   // -------------------------------
   if (isGreeting && isNewUser) {
-    await sendMessage(
+    // ✅ FIX 1: Use messageService.sendMessage
+    await messageService.sendMessage( 
       sender,
       "🤖 MarketMatch AI helps you find rental properties, services & more in your area."
     );
@@ -179,24 +184,26 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       const listResult = await handleShowListings({ sender, session, userLang: userProfile.language || 'en' }); 
       session = listResult.nextSession; 
       
-      // ✅ FIX: Save session and RETURN to prevent falling through.
+      // Save session and return immediately.
       await saveSession(sender, session);
       return; 
 
     case "post_listing":
-      await sendMessage(
+      // ✅ FIX 1: Use messageService.sendMessage
+      await messageService.sendMessage( 
         sender,
         "Send your listing in this format:\n\nRahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro"
       );
       session.step = "awaiting_post_details";
-      // Falls through to the final save, but returns immediately after.
-      break; 
+      await saveSession(sender, session); 
+      return; 
 
     case "manage_listings":
       const list = await getUserListings(sender);
 
       if (!list || list.length === 0) {
-        await sendMessage(sender, "You have no listings yet.");
+        // ✅ FIX 1: Use messageService.sendMessage
+        await messageService.sendMessage(sender, "You have no listings yet."); 
       } else {
         const preview = list
           .map(
@@ -204,39 +211,26 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
               `${i + 1}. ${l.title || "Listing"} — ${l.location || "N/A"} — ₹${l.price}`
           )
           .join("\n\n");
-
-        await sendMessage(sender, `Your listings:\n\n${preview}`);
+        // ✅ FIX 1: Use messageService.sendMessage
+        await messageService.sendMessage(sender, `Your listings:\n\n${preview}`); 
       }
 
       session.step = "menu";
-      // Falls through to the final save, but returns immediately after.
-      break; 
+      await saveSession(sender, session); 
+      return sendMainMenu(sender); 
 
     case "change_language":
       session.awaitingLang = true;
       await saveSession(sender, session);
-      return sendLanguageSelection(sender); // Returns the list message directly
+      return sendLanguageSelection(sender); 
 
     default:
-        // 5️⃣ FIX: Handle the default case by sending the error and the menu, then RETURN.
-        await sendMessage(sender, "I didn't understand that. Please choose an option.");
-        // No need to save session here, it's done below.
-        break; // Fall through to the final block to save session and send menu
+        // 5️⃣ Fallback: Send message, save session, and send menu immediately.
+        // ✅ FIX 1: Use messageService.sendMessage
+        await messageService.sendMessage(sender, "I didn't understand that. Please choose an option."); 
+        await saveSession(sender, session); 
+        return sendMainMenu(sender); 
   }
-
-  // -------------------------------------------------------------------------
-  // FINAL EXIT LOGIC: For cases that used 'break'
-  // -------------------------------------------------------------------------
-  await saveSession(sender, session);
-  
-  // The final action is to send the menu IF we were not waiting for post details.
-  // post_listing and manage_listings are handled correctly here.
-  if (session.step !== "awaiting_post_details") {
-      // This will send the main menu for 'manage_listings' and the 'default' case.
-      return sendMainMenu(sender);
-  }
-  
-  return; // Default silent return for 'post_listing' when awaiting details.
 }
 
 module.exports = {

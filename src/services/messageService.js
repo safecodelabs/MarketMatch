@@ -1,228 +1,190 @@
 // =======================================================
-// src/bots/whatsappBot.js (CLEAN + FINAL PATCHED VERSION)
+// ✅ PATCHED FILE: src/services/messageService.js
 // =======================================================
+const axios = require("axios");
 
-const { sendMessage, sendList } = require("../services/messageService");
-const { getSession, saveSession } = require("../../utils/sessionStore");
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
-// ⭐ Import housing flow handlers
-const {
-  handleShowListings,
-  handleNextListing,
-  handleViewDetails,
-  handleSaveListing
-} = require("../flows/housingFlow");
+const API_URL = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
 
-// ⭐ Import AI + classification (not used, but kept for completeness)
-const { classify, askAI } = require("../ai/aiEngine");
+// -------------------------------------------------------------
+// 1) SEND NORMAL TEXT MESSAGE (OR RAW PAYLOAD)
+// -------------------------------------------------------------
+// ✅ FIX 3: Update sendMessage to optionally accept a raw payload
+async function sendMessage(to, messageOrPayload) {
+  try {
+    let payload;
+    let logType;
 
-// Database helpers
-const {
-  db,
-  addListing,
-  getAllListings,
-  getUserListings,
-  getUserProfile,
-  saveUserLanguage
-} = require("../../database/firestore");
+    // If the input is an object, assume it's a raw payload (e.g., interactive card)
+    if (typeof messageOrPayload === 'object' && messageOrPayload !== null) {
+        payload = messageOrPayload;
+        logType = payload.type === 'interactive' ? 'Interactive Card' : 'Raw Message';
+    } else {
+        // Otherwise, construct a standard text message payload
+        payload = {
+            messaging_product: "whatsapp",
+            to,
+            type: "text",
+            text: { body: String(messageOrPayload) },
+        };
+        logType = 'Text';
+    }
 
-// =======================================================
-// HELPERS (No changes needed)
-// =======================================================
+    const res = await axios.post(API_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-function menuRows() {
-  return [
-    { id: "view_listings", title: "View listings" },
-    { id: "post_listing", title: "Post listing" },
-    { id: "manage_listings", title: "Manage listings" },
-    { id: "change_language", title: "Change Language" },
-  ];
-}
-
-function languageRows() {
-  return [
-    { id: "lang_en", title: "English" },
-    { id: "lang_hi", title: "हिंदी" },
-    { id: "lang_ta", title: "தமிழ்" },
-    { id: "lang_mr", title: "मराठी" },
-  ];
-}
-
-async function sendLanguageSelection(sender) {
-  return sendList(
-    sender,
-    "🌐 Select your language",
-    "Choose one option:",
-    "Select",
-    [{ title: "Languages", rows: languageRows() }]
-  );
-}
-
-async function sendMainMenu(sender) {
-  return sendList(
-    sender,
-    "🏡 MarketMatch AI",
-    "Choose an option:",
-    "Menu",
-    [{ title: "Main Menu", rows: menuRows() }]
-  );
-}
-
-
-// =======================================================
-// MAIN HANDLER
-// =======================================================
-
-async function handleIncomingMessage(sender, msgBody, metadata = {}) {
-  if (!sender) return;
-
-  // 1. DETECT MESSAGE BODY / BUTTON ID
-  let buttonId = null;
-
-  if (metadata?.interactive?.type === "list_reply") {
-    msgBody = metadata.interactive.list_reply.id.toLowerCase();
-  } else if (metadata?.interactive?.type === "button_reply") {
-    buttonId = metadata.interactive.button_reply.id.toLowerCase();
-    msgBody = buttonId; // Use buttonId for command checks below
-  } else {
-    msgBody = msgBody?.toString().trim().toLowerCase();
+    // Update logging to reflect the actual message type
+    const messageId = res.data.messages?.[0]?.id || 'N/A';
+    console.log(`📤 ${logType} sent (ID: ${messageId}):`, res.data); 
+    return res.data;
+  } catch (err) {
+    console.error("❌ sendMessage error:", err.response?.data || err);
+    return null;
   }
+}
 
-  // 2. Detect SESSION
-  let session =
-    (await getSession(sender)) || {
-      step: "start",
-      isInitialized: false,
-      awaitingLang: false,
-      housingFlow: { data: {} },
-      // Initialize lastResults and listingIndex for interactive card flow
-      lastResults: [], 
-      listingIndex: 0
+// -------------------------------------------------------------
+// 2) SEND INTERACTIVE BUTTONS (1–3 buttons only)
+// -------------------------------------------------------------
+async function sendButtons(to, bodyText, buttons) {
+  try {
+    if (!Array.isArray(buttons) || buttons.length < 1 || buttons.length > 3) {
+      throw new Error(
+        `Buttons array must have 1–3 items. Received: ${buttons?.length || 0}`
+      );
+    }
+
+    const formattedButtons = buttons.map((btn, idx) => ({
+      type: "reply",
+      reply: {
+        id: btn.id || `btn_${idx + 1}`,
+        title: String(btn.title || `Button ${idx + 1}`).slice(0, 20),
+      },
+    }));
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: bodyText || "Choose an option:" },
+        action: { buttons: formattedButtons },
+      },
     };
 
-  const userProfile = await getUserProfile(sender);
-  const greetings = ["hi", "hello", "hey", "start"];
-  const isGreeting = greetings.includes(msgBody);
-  const isNewUser = !session.isInitialized;
-
-  // -------------------------------
-  // 🅰️ INTERACTIVE CARD BUTTONS (High Priority)
-  // -------------------------------
-  if (msgBody.startsWith("view_")) {
-    const listingId = msgBody.replace("view_", "");
-    const result = await handleViewDetails({ sender, listingId, session });
-    await saveSession(sender, result.nextSession);
-    return; // ✅ Exit after action
+    // Use generic sendMessage for sending the payload
+    return await sendMessage(to, payload);
+  } catch (err) {
+    console.error("❌ sendButtons error:", err.response?.data || err);
+    return null;
   }
+}
 
-  if (msgBody.startsWith("save_")) {
-    const listingId = msgBody.replace("save_", "");
-    const result = await handleSaveListing({ sender, listingId, session });
-    await saveSession(sender, result.nextSession);
-    return; // ✅ Exit after action
+// -------------------------------------------------------------
+// 3) SEND INTERACTIVE LIST (WhatsApp menu)
+// -------------------------------------------------------------
+async function sendList(to, headerText, bodyText, buttonText, sections) {
+  try {
+    buttonText =
+      typeof buttonText === "string" && buttonText.trim()
+        ? buttonText
+        : "Select";
+
+    if (!Array.isArray(sections) || sections.length === 0) {
+      sections = [
+        {
+          title: "Menu",
+          rows: [{ id: "default", title: "No options available" }],
+        },
+      ];
+    }
+
+    const safeSections = sections.map((sec, sIdx) => ({
+      title: sec.title || `Section ${sIdx + 1}`,
+      rows:
+        Array.isArray(sec.rows) && sec.rows.length
+          ? sec.rows.map((r, rIdx) => ({
+              id: String(r.id || `row_${sIdx}_${rIdx}`).slice(0, 256), // Ensure ID is safe length
+              title: String(r.title || `Option ${rIdx + 1}`).slice(0, 24),
+              description: r.description
+                ? String(r.description).slice(0, 72)
+                : undefined,
+            }))
+          : [{ id: `row_${sIdx}_1`, title: "No options available" }],
+    }));
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        header: { type: "text", text: headerText || "Menu" },
+        body: { text: bodyText || "Choose an option below" },
+        footer: { text: "MarketMatch AI" },
+        action: {
+          button: buttonText,
+          sections: safeSections,
+        },
+      },
+    };
+
+    // Use generic sendMessage for sending the payload
+    return await sendMessage(to, payload);
+  } catch (err) {
+    console.error("❌ sendList error:", err.response?.data || err);
+    return null;
   }
+}
 
-  if (msgBody === "next_listing") {
-    const result = await handleNextListing({ sender, session });
-    await saveSession(sender, result.nextSession);
-    return; // ✅ Exit after action
-  }
-  
-  // -------------------------------
-  // 1️⃣ NEW USER → WELCOME + LANGUAGE
-  // -------------------------------
-  if (isGreeting && isNewUser) {
-    await sendMessage(
-      sender,
-      "🤖 MarketMatch AI helps you find rental properties, services & more in your area."
-    );
+// -------------------------------------------------------------
+// 🚀 SEND LISTING CARD (Utility that uses sendButtons)
+// -------------------------------------------------------------
+// We need this function accessible in housingFlow.js
+async function sendListingCard(to, listing, index = 0, total = 1) {
+  try {
+    const bodyText =
+      `🏡 ${listing.title || "Property"}\n` +
+      `💰 Price: ${listing.price ? `₹${listing.price}` : 'N/A'}\n` +
+      `📍 ${listing.location || "Location N/A"}\n` +
+      `📏 ${listing.area || listing.size || "Area N/A"}\n` +
+      `🛋 ${listing.furnishing || "N/A"}\n\n` +
+      `(${index + 1} of ${total})`;
 
-    session.isInitialized = true;
-    session.awaitingLang = true;
-    await saveSession(sender, session);
 
-    return sendLanguageSelection(sender);
-  }
+    const buttons = [
+      {
+        id: `view_${listing.id}`,
+        title: "View Details",
+      },
+      {
+        id: `save_${listing.id}`,
+        title: "Save ❤️",
+      },
+      {
+        id: `next_listing`,
+        title: "Next ➡",
+      },
+    ];
 
-  // -------------------------------
-  // 2️⃣ RETURNING USER → MAIN MENU
-  // -------------------------------
-  if (isGreeting && !isNewUser) {
-    session.step = "menu";
-    await saveSession(sender, session);
-    return sendMainMenu(sender);
-  }
-
-  // -------------------------------
-  // 3️⃣ LANGUAGE SELECTION
-  // -------------------------------
-  if (session.awaitingLang || msgBody.startsWith("lang_")) {
-    let lang = "en";
-    if (msgBody.startsWith("lang_")) lang = msgBody.split("_")[1];
-
-    await saveUserLanguage(sender, lang);
-
-    session.awaitingLang = false;
-    session.step = "menu";
-    await saveSession(sender, session);
-
-    return sendMainMenu(sender);
-  }
-
-  // -------------------------------
-  // 4️⃣ MENU ACTIONS & OTHER COMMANDS
-  // -------------------------------
-  switch (msgBody) {
-    case "view_listings":
-      // The flow sends the card and returns the next session state
-      const listResult = await handleShowListings({ sender, session, userLang: userProfile.language || 'en' }); 
-      session = listResult.nextSession; 
-      
-      await saveSession(sender, session);
-      return; // ✅ Exit after card send
-
-    case "post_listing":
-      await sendMessage(
-        sender,
-        "Send your listing in this format:\n\nRahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro"
-      );
-      session.step = "awaiting_post_details";
-      await saveSession(sender, session); // Save session
-      return; // ✅ Exit immediately to await input
-
-    case "manage_listings":
-      const list = await getUserListings(sender);
-
-      if (!list || list.length === 0) {
-        await sendMessage(sender, "You have no listings yet.");
-      } else {
-        const preview = list
-          .map(
-            (l, i) =>
-              `${i + 1}. ${l.title || "Listing"} — ${l.location || "N/A"} — ₹${l.price}`
-          )
-          .join("\n\n");
-
-        await sendMessage(sender, `Your listings:\n\n${preview}`);
-      }
-
-      session.step = "menu";
-      await saveSession(sender, session); // Save session
-      return sendMainMenu(sender); // ✅ Send menu and exit
-
-    case "change_language":
-      session.awaitingLang = true;
-      await saveSession(sender, session);
-      return sendLanguageSelection(sender); // Returns the list message directly
-
-    default:
-        // 5️⃣ Fallback: Send message, save session, and send menu immediately.
-        await sendMessage(sender, "I didn't understand that. Please choose an option.");
-        await saveSession(sender, session); 
-        return sendMainMenu(sender); // ✅ Send menu and exit
+    // Use sendButtons utility
+    return await sendButtons(to, bodyText, buttons);
+  } catch (err) {
+    console.error("❌ sendListingCard error:", err);
+    return null;
   }
 }
 
 module.exports = {
-  handleIncomingMessage,
+  sendMessage,
+  sendButtons,
+  sendList,
+  sendListingCard, // Export the listing card utility
 };
