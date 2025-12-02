@@ -97,40 +97,80 @@ async function handleSaveListing({ sender, listingId, session = {} }) {
 /**
  * handleShowListings — shows latest listings directly (as a card slider)
  */
-async function handleShowListings({ sender, session = {}, userLang = "en" }) {
-  try {
-    const all = await getAllListings(50);
+async function handleShowListings(sender, session, text) {
+    // ⚠️ CRITICAL INITIALIZATION FIX
+    let listingIndex = session.listingIndex || 0; 
+    let listings = [];
 
-    if (!all || all.length === 0) {
-      return {
-        nextSession: { ...session, step: "no_listings" },
-        reply: userLang === "hi"
-          ? "कोई लिस्टिंग उपलब्ध नहीं है।"
-          : "No listings are available at the moment.",
-        buttons: null
-      };
-    }
+    try {
+        // 1. Fetch Listings
+        listings = await db.getLatestListings();
+        console.log(`[DB] Fetched ${listings.length} listings successfully.`);
 
-    // Show top 8 latest listings
-    const latest = all.slice(0, 8);
+        if (!listings || listings.length === 0) {
+            // No listings found scenario
+            return { 
+                nextSession: { ...session, lastAction: 'menu' }, 
+                reply: "Sorry, I couldn't find any listings right now. Try searching later.", 
+            };
+        }
 
-    // initialize session pagination state
-    const nextSession = { ...session, step: "show_listings", lastResults: latest, listingIndex: 0 };
+        // 2. Check current listing index validity
+        if (listingIndex >= listings.length) {
+            listingIndex = 0; // Reset to the first listing if we ran out
+        }
 
-    // send the first card
-    // ✅ Correct call signature: (sender, listing, index, total)
-    await sendListingCard(sender, latest[0], nextSession.listingIndex, latest.length);
+        // CRASH POINT AVOIDED: Safely access the current listing object
+        const listing = listings[listingIndex];
 
-    // reply is null because we sent an interactive message already
-    return { nextSession, reply: null, buttons: null };
-  } catch (err) {
-    console.error("handleShowListings error:", err);
-    return {
-      nextSession: session,
-      reply: "❌ Failed to load listings. Please try again later.",
-      buttons: null
-    };
-  }
+        // Ensure the listing object itself is valid (should always be true if listings[i] is defined)
+        if (!listing) {
+            console.error("❌ CRASH AVOIDED: Listing object is undefined at index", listingIndex);
+            // Fallback to the first listing or an error message
+            listingIndex = 0;
+            const fallbackListing = listings[0];
+            
+            // If even the first listing is bad, return error
+            if (!fallbackListing) {
+                return { 
+                    nextSession: { ...session, lastAction: 'menu' }, 
+                    reply: "Error processing listing data. Please try again.", 
+                };
+            }
+        }
+        
+        // 3. Send the Interactive Listing Card
+        const response = await messageService.sendListingCard(
+            sender,
+            listing, // Pass the safely accessed listing object
+            listingIndex,
+            listings.length
+        );
+
+        if (!response) {
+            // Fallback if the interactive card sending failed (API rejection/null return)
+            return { 
+                nextSession: { ...session, lastAction: 'menu' }, 
+                reply: "I found listings, but I couldn't display them. Please try again or type 'menu'.",
+            };
+        }
+
+        // 4. Update session for next/previous actions
+        const nextSession = {
+            ...session,
+            lastAction: 'showing_listing',
+            listingIndex: listingIndex,
+            currentListings: listings.map(l => l.id), // Store IDs if needed for persistence
+        };
+
+        return { nextSession, reply: null, buttons: null };
+    } catch (error) {
+        console.error("🔥 Unhandled error in handleShowListings:", error.stack || error);
+        return { 
+            nextSession: { ...session, lastAction: 'menu' }, 
+            reply: "An unexpected error occurred while fetching listings. Please try again.",
+        };
+    }
 }
 
 /**
