@@ -159,29 +159,33 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 }
 
 // -------------------------------------------------------------
-// 4) SEND LISTING CARD (Utility that uses sendButtons) - (FIXED ID SAFETY)
+// 4) SEND LISTING CARD (Utility that uses sendButtons) - (FINAL FIX: BODY LENGTH)
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, index = 0, total = 1) {
   try {
-    // ⚠️ CRITICAL FIX: Ensure listing has a usable ID. Use 'unknown' if missing.
+    // 1. Ensure listing has a usable ID (from previous fix)
     const listingId = String(listing.id || 'unknown').slice(0, 50);
-
-    const bodyText =
-      `🏡 ${listing.title || "Property"}\n` +
+    
+    // 2. Build bodyText with safe string lengths for dynamic fields
+    const rawBodyText =
+      `🏡 ${String(listing.title || "Property").slice(0, 100)}\n` +
       `💰 Price: ${listing.price ? `₹${listing.price}` : 'N/A'}\n` +
-      `📍 ${listing.location || "Location N/A"}\n` +
-      `📏 ${listing.area || listing.size || "Area N/A"}\n` +
-      `🛋 ${listing.furnishing || "N/A"}\n\n` +
+      `📍 ${String(listing.location || "Location N/A").slice(0, 100)}\n` +
+      `📏 ${String(listing.area || listing.size || "Area N/A").slice(0, 50)}\n` +
+      `🛋 ${String(listing.furnishing || "N/A").slice(0, 50)}\n\n` +
       `(${index + 1} of ${total})`;
-
+    
+    // 3. CRITICAL: Truncate the final body text to ensure it's under the 1024 limit
+    // We'll use a safer limit like 950 just in case.
+    const bodyText = rawBodyText.slice(0, 950);
 
     const buttons = [
       {
-        id: `view_${listingId}`, // Use the guaranteed string ID
+        id: `view_${listingId}`,
         title: "View Details",
       },
       {
-        id: `save_${listingId}`, // Use the guaranteed string ID
+        id: `save_${listingId}`,
         title: "Save ❤️",
       },
       {
@@ -190,7 +194,7 @@ async function sendListingCard(to, listing, index = 0, total = 1) {
       },
     ];
 
-    // Use sendButtons utility (Defined above, so no ReferenceError)
+    // Use sendButtons utility
     return await sendButtons(to, bodyText, buttons);
   } catch (err) {
     console.error("❌ sendListingCard error:", err);
