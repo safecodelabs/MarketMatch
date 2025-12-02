@@ -79,17 +79,15 @@ async function sendButtons(to, bodyText, buttons) {
 }
 
 // -------------------------------------------------------------
-// 3) SEND INTERACTIVE LIST (corrected WhatsApp menu format)
+// 3) SEND INTERACTIVE LIST (WhatsApp menu)
 // -------------------------------------------------------------
 async function sendList(to, headerText, bodyText, buttonText, sections) {
   try {
-    // Ensure valid button text
     buttonText =
       typeof buttonText === "string" && buttonText.trim()
         ? buttonText
         : "Select";
 
-    // Fallback if sections missing
     if (!Array.isArray(sections) || sections.length === 0) {
       sections = [
         {
@@ -99,7 +97,6 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
       ];
     }
 
-    // Normalize sections for WhatsApp
     const safeSections = sections.map((sec, sIdx) => ({
       title: sec.title || `Section ${sIdx + 1}`,
       rows:
@@ -125,15 +122,12 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
         footer: { text: "MarketMatch AI" },
         action: {
           button: buttonText,
-          sections: safeSections, // ← REQUIRED for menu to show rows
+          sections: safeSections,
         },
       },
     };
 
-    console.log(
-      "📤 Sending List Menu:",
-      JSON.stringify(payload, null, 2)
-    );
+    console.log("📤 Sending List Menu:", JSON.stringify(payload, null, 2));
 
     const res = await axios.post(API_URL, payload, {
       headers: {
@@ -150,8 +144,43 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
   }
 }
 
+// -------------------------------------------------------------
+// 🚀 NEW: SEND LISTING CARD (3 buttons)
+// -------------------------------------------------------------
+async function sendListingCard(to, listing, index = 0) {
+  try {
+    const bodyText =
+      `🏡 ${listing.title || "Property"}\n` +
+      `💰 ${listing.price || "Price N/A"}\n` +
+      `📍 ${listing.location || "Location N/A"}\n` +
+      `📏 ${listing.area || "Area N/A"}\n` +
+      `🛋 ${listing.furnishing || "N/A"}`;
+
+    const buttons = [
+      {
+        id: `listing_view_${listing.id}`,
+        title: "View Details",
+      },
+      {
+        id: `listing_save_${listing.id}`,
+        title: "Save ❤️",
+      },
+      {
+        id: `listing_next_${index + 1}`,
+        title: "Next ➡",
+      },
+    ];
+
+    return await sendButtons(to, bodyText, buttons);
+  } catch (err) {
+    console.error("❌ sendListingCard error:", err);
+    return null;
+  }
+}
+
 module.exports = {
   sendMessage,
   sendButtons,
   sendList,
+  sendListingCard, // ⭐ NEW EXPORT
 };

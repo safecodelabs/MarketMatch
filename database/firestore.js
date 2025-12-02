@@ -73,10 +73,7 @@ async function getAllListings() {
 // -----------------------------------------------
 async function getUserListings(userId) {
   try {
-    const snapshot = await listingsRef
-      .where("owner", "==", userId)
-      .get();
-
+    const snapshot = await listingsRef.where("owner", "==", userId).get();
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
     console.error("🔥 Error fetching user listings:", err);
@@ -126,6 +123,39 @@ async function getTopListings() {
   }
 }
 
+// -----------------------------------------------------
+// ✅ NEW: GET SINGLE LISTING BY ID
+// -----------------------------------------------------
+async function getListingById(listingId) {
+  try {
+    const doc = await listingsRef.doc(listingId).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() };
+  } catch (err) {
+    console.error("🔥 Error fetching listing by ID:", err);
+    return null;
+  }
+}
+
+// -----------------------------------------------------
+// ✅ NEW: SAVE LISTING TO USER VIEW HISTORY (pagination)
+// -----------------------------------------------------
+async function saveListingForUser(userId, listingId) {
+  try {
+    const userDoc = usersRef.doc(userId);
+    await userDoc.set(
+      {
+        viewedListings: admin.firestore.FieldValue.arrayUnion(listingId)
+      },
+      { merge: true }
+    );
+    return true;
+  } catch (err) {
+    console.error("🔥 Error saving viewed listing:", err);
+    return false;
+  }
+}
+
 module.exports = {
   db,
   addListing,
@@ -133,5 +163,9 @@ module.exports = {
   getUserListings,
   getUserProfile,
   saveUserLanguage,
-  getTopListings
+  getTopListings,
+
+  // 🔥 Newly added helpers
+  getListingById,
+  saveListingForUser
 };

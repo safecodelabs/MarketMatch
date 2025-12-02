@@ -1,12 +1,165 @@
 // src/flows/housingFlow.js
 const { addListing, getAllListings, getUserListings, db } = require('../../database/firestore');
 const { searchListings, generateFollowUpQuestion, generatePropertyReply, classify } = require('../ai/aiEngine');
+const { sendMessage } = require('../services/messageService');
+
+/**
+ * Helper: send one listing as an interactive "card" message with 3 buttons.
+ * Uses WhatsApp interactive button payload (raw) via sendMessage(..., raw=true)
+ */
+async function sendListingCard(sender, listing, index = 0, total = 1) {
+  if (!listing) {
+    return sendMessage(sender, 'No listing to show.');
+  }
+
+  const title = listing.title || `${listing.property_type || 'Property'}`;
+  const price = listing.price ? `₹${listing.price}` : listing.price || 'N/A';
+  const location = listing.location || 'Location N/A';
+  const area = listing.area ? `${listing.area} sq ft` : (listing.size || 'Area N/A');
+  const furnishing = listing.furnishing || 'N/A';
+
+  const bodyText =
+    `🏡 ${title}\n` +
+    `💰 Price: ${price}\n` +
+    `📍 ${location}\n` +
+    `📏 ${area}\n` +
+    `🛋 ${furnishing}\n\n` +
+    `(${index + 1} of ${total})`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: sender,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: bodyText },
+      action: {
+        buttons: [
+          {
+            type: "reply",
+            reply: {
+              id: `VIEW_${listing.id}`,
+              title: "View Details"
+            }
+          },
+          {
+            type: "reply",
+            reply: {
+              id: `SAVE_${listing.id}`,
+              title: "Save ❤️"
+            }
+          },
+          {
+            type: "reply",
+            reply: {
+              id: `NEXT_LISTING`,
+              title: "Next ➡"
+            }
+          }
+        ]
+      }
+    }
+  };
+
+  // send raw payload (assumes sendMessage supports raw send)
+  await sendMessage(sender, payload, true);
+}
+
+/**
+ * Move to next listing in session.lastResults and send it
+ */
+async function handleNextListing({ sender, session = {} }) {
+  try {
+    const lastResults = Array.isArray(session.lastResults) ? session.lastResults : [];
+    if (!lastResults.length) {
+      // Fallback: fetch latest
+      const all = await getAllListings(50);
+      if (!all || all.length === 0) {
+        return { nextSession: { ...session }, reply: 'No listings available.', buttons: null };
+      }
+      session.lastResults = all.slice(0, 8);
+      session.listingIndex = 0;
+    }
+
+    let index = typeof session.listingIndex === 'number' ? session.listingIndex : 0;
+    index += 1;
+    if (index >= session.lastResults.length) index = 0; // loop
+
+    // persist index for next time
+    const nextSession = { ...session, listingIndex: index, lastResults: session.lastResults };
+    await sendListingCard(sender, session.lastResults[index], index, session.lastResults.length);
+
+    return { nextSession, reply: null, buttons: null };
+  } catch (err) {
+    console.error('handleNextListing error', err);
+    return { nextSession: session, reply: 'Something went wrong while loading next listing.', buttons: null };
+  }
+}
+
+/**
+ * View full details for a listingId
+ */
+async function handleViewDetails({ sender, listingId, session = {} }) {
+  try {
+    // Try to find listing in session lastResults first
+    let listing = (Array.isArray(session.lastResults) && session.lastResults.find(l => String(l.id) === String(listingId))) || null;
+
+    // fallback to scanning all listings
+    if (!listing) {
+      const all = await getAllListings(500);
+      listing = all.find(l => String(l.id) === String(listingId));
+    }
+
+    if (!listing) {
+      await sendMessage(sender, '⚠️ Listing not found.');
+      return { nextSession: session, reply: null, buttons: null };
+    }
+
+    const details =
+      `🏡 *${listing.title || listing.property_type}*\n\n` +
+      `📍 Location: ${listing.location || 'N/A'}\n` +
+      `💰 Price: ${listing.price ? `₹${listing.price}` : listing.price || 'N/A'}\n` +
+      `📏 Area: ${listing.area || listing.size || 'N/A'}\n` +
+      `🛋 Furnishing: ${listing.furnishing || 'N/A'}\n` +
+      `☎ Contact: ${listing.contact || 'N/A'}\n\n` +
+      `${listing.description || ''}`;
+
+    await sendMessage(sender, details);
+    return { nextSession: session, reply: null, buttons: null };
+  } catch (err) {
+    console.error('handleViewDetails error', err);
+    return { nextSession: session, reply: 'Failed to fetch listing details.', buttons: null };
+  }
+}
+
+/**
+ * Save a listing for a user (simple saved collection)
+ */
+async function handleSaveListing({ sender, listingId, session = {} }) {
+  try {
+    // store in a simple "saved" collection with composite id to avoid duplicates
+    const docId = `${String(sender)}_${String(listingId)}`;
+    const docRef = db.collection('saved').doc(docId);
+    const data = {
+      userId: sender,
+      listingId,
+      savedAt: Date.now()
+    };
+    await docRef.set(data, { merge: true });
+
+    await sendMessage(sender, '❤️ Listing saved to your favorites.');
+    return { nextSession: session, reply: null, buttons: null };
+  } catch (err) {
+    console.error('handleSaveListing error', err);
+    return { nextSession: session, reply: 'Failed to save listing.', buttons: null };
+  }
+}
 
 /**
  * NEW FUNCTION ADDED
- * handleShowListings — shows latest listings directly
+ * handleShowListings — shows latest listings directly (as a card slider)
  */
-async function handleShowListings({ sender, session, userLang = "en" }) {
+async function handleShowListings({ sender, session = {}, userLang = "en" }) {
   try {
     const all = await getAllListings(50);
 
@@ -23,18 +176,14 @@ async function handleShowListings({ sender, session, userLang = "en" }) {
     // Show top 8 latest listings
     const latest = all.slice(0, 8);
 
-    const summary = latest
-      .map((l, idx) => `${idx + 1}. ${l.title || l.property_type} in ${l.location} — ${l.price}`)
-      .join("\n\n");
+    // initialize session pagination state
+    const nextSession = { ...session, step: "show_listings", lastResults: latest, listingIndex: 0 };
 
-    return {
-      nextSession: { ...session, step: "show_listings", lastResults: latest },
-      reply: userLang === "hi"
-        ? `यहाँ नवीनतम प्रॉपर्टी लिस्टिंग्स हैं:\n\n${summary}`
-        : `Here are the latest property listings:\n\n${summary}`,
-      buttons: null
-    };
+    // send the first card
+    await sendListingCard(sender, latest[0], 0, latest.length);
 
+    // reply is null because we sent an interactive message already
+    return { nextSession, reply: null, buttons: null };
   } catch (err) {
     console.error("handleShowListings error:", err);
     return {
@@ -45,10 +194,11 @@ async function handleShowListings({ sender, session, userLang = "en" }) {
   }
 }
 
-
-
 /**
  * MAIN FLOW — handleAIAction
+ *
+ * Note: this function returns objects of shape { nextSession, reply, buttons }
+ * When we send interactive card(s) directly we return reply: null because message already delivered.
  */
 async function handleAIAction({ sender, message, aiResult = {}, session = {}, userLang = 'en' }) {
   session = session && typeof session === 'object'
@@ -87,15 +237,10 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
       };
     }
 
-    const summary = await generatePropertyReply({
-      entities,
-      listings: matches,
-      language: userLang,
-      maxResults: 5
-    });
-
-    const nextSession = { ...session, step: 'showing_results', lastResults: matches.slice(0, 5) };
-    return { nextSession, reply: summary, buttons: null };
+    // Instead of returning text summary, send the first match as a card and store session
+    const nextSession = { ...session, step: 'showing_results', lastResults: matches.slice(0, 8), listingIndex: 0 };
+    await sendListingCard(sender, matches[0], 0, matches.length);
+    return { nextSession, reply: null, buttons: null };
   }
 
   // POST / SELL: create listing
@@ -220,15 +365,10 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
       };
     }
 
-    const summary = await generatePropertyReply({
-      entities: session.data,
-      listings: matches,
-      language: userLang,
-      maxResults: 5
-    });
-
-    const nextSession = { ...session, step: 'showing_results', lastResults: matches.slice(0, 5) };
-    return { nextSession, reply: summary, buttons: null };
+    // send first matched card instead of text summary
+    const nextSession = { ...session, step: 'showing_results', lastResults: matches.slice(0, 8), listingIndex: 0 };
+    await sendListingCard(sender, matches[0], 0, matches.length);
+    return { nextSession, reply: null, buttons: null };
   }
 
   // POST DETAILS (manual)
@@ -282,7 +422,6 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
     return handleShowListings({ sender, session, userLang });
   }
 
-
   // DEFAULT MENU
   const nextSession = { ...session, step: 'start' };
   return {
@@ -301,4 +440,10 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
   };
 }
 
-module.exports = { handleAIAction };
+module.exports = {
+  handleAIAction,
+  handleShowListings,
+  handleNextListing,
+  handleViewDetails,
+  handleSaveListing
+};
