@@ -1,33 +1,45 @@
+// =======================================================
+// ✅ PATCHED FILE: src/bots/whatsappBot.js
+// =======================================================
+
 // Import entire service (fixes missing functions)
 const messageService = require("../services/messageService");
 
-// Import the command router to delegate interactive/menu command processing
-const commandRouter = require("../router/commandRouter");
-
-// Import housing flow for flow-specific text input handling (e.g., posting a listing)
-const housingFlow = require("../flows/housingFlow");
-
 const { getSession, saveSession } = require("../../utils/sessionStore");
+
+// Housing flow handlers
+const {
+  handleShowListings,
+  handleNextListing,
+  handleViewDetails,
+  handleSaveListing,
+  handleDeleteListing,
+  handleManageSelection
+} = require("../flows/housingFlow");
 
 // AI (kept, but not used in your core flow)
 const { classify, askAI } = require("../ai/aiEngine");
 
-// Firestore helpers (only keep necessary ones, as some are only used in flow files)
+// Firestore helpers
 const {
+  db,
+  addListing,
+  getAllListings,
+  getUserListings,
   getUserProfile,
   saveUserLanguage,
-} = require("../../database/firestore"); // Assuming these are still needed here
-
+  getListingById,
+  deleteListing
+} = require("../../database/firestore");
 
 // =======================================================
-// HELPERS (Menu & Language Options)
+// HELPERS
 // =======================================================
 
 function menuRows() {
   return [
-    // IDs changed to match static commands in commandRouter
-    { id: "listings", title: "View listings" }, 
-    { id: "post_command", title: "Post listing" }, 
+    { id: "view_listings", title: "View listings" },
+    { id: "post_listing", title: "Post listing" },
     { id: "manage_listings", title: "Manage listings" },
     { id: "change_language", title: "Change Language" }
   ];
@@ -70,38 +82,35 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   if (!sender) return;
 
   // ======================================================
-  // 🌟 1. Extract Interactive Inputs
+  // 🌟 1. Extract Interactive Inputs (FINAL FIX)
   // ======================================================
-  let rawInput = msgBody;
-  let command = msgBody; // Initialize command with text body
+  let command = msgBody;
 
   try {
     if (metadata.type === "interactive") {
       const inter = metadata.interactive;
 
       if (inter.button_reply) {
-        command = inter.button_reply.id;
+        command = inter.button_reply.id?.toLowerCase();
       } else if (inter.list_reply) {
-        command = inter.list_reply.id;
+        command = inter.list_reply.id?.toLowerCase();
       }
     }
 
     // WhatsApp new formats:
     if (metadata.type === "interactive_response") {
-      // Interactive_response is used for quick reply buttons (like the ones on listing cards)
-      command = metadata.interactive_response.id; 
+      command = metadata.interactive_response.id?.toLowerCase();
     }
 
     if (metadata.type === "button") {
-      command = metadata.button?.payload;
+      command = metadata.button?.payload?.toLowerCase();
     }
   } catch (e) {
     console.log("⚠️ Interactive parse error:", e);
   }
-  
-  // Normalize command for comparison (lowercase)
+
   command = command?.toString().trim().toLowerCase();
-  
+
   // ======================================================
   // 2. Load session
   // ======================================================
@@ -116,17 +125,50 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
     };
 
   const userProfile = await getUserProfile(sender);
-  const userLang = userProfile?.language || "en";
-  
-  const greetings = ["hi", "hello", "hey", "start", "menu"];
+  const greetings = ["hi", "hello", "hey", "start"];
   const isGreeting = greetings.includes(command);
   const isNewUser = !session.isInitialized;
 
-  // ⚠️ Removed all manual command handlers (Sections 3 and the switch in 7) 
-  // and replaced them with delegation to commandRouter.
+  // ======================================================
+  // 🅰️ 3. Interactive card buttons (HIGH PRIORITY)
+  // ======================================================
+
+  if (command.startsWith("view_")) {
+    const listingId = command.replace("view_", "");
+    const result = await handleViewDetails({ sender, listingId, session });
+    await saveSession(sender, result.nextSession);
+    return;
+  }
+
+  if (command.startsWith("save_")) {
+    const listingId = command.replace("save_", "");
+    const result = await handleSaveListing({ sender, listingId, session });
+    await saveSession(sender, result.nextSession);
+    return;
+  }
+
+  if (command.startsWith("manage_")) {
+    const listingId = command.replace("manage_", "");
+    const result = await handleManageSelection({ sender, listingId, session });
+    await saveSession(sender, result.nextSession);
+    return;
+  }
+
+  if (command.startsWith("delete_")) {
+    const listingId = command.replace("delete_", "");
+    const result = await handleDeleteListing({ sender, listingId, session });
+    await saveSession(sender, result.nextSession);
+    return;
+  }
+
+  if (command === "next_listing") {
+    const result = await handleNextListing({ sender, session });
+    await saveSession(sender, result.nextSession);
+    return;
+  }
 
   // ======================================================
-  // 🅱️ 3. Greeting → new user → language selection
+  // 🅱️ 4. Greeting → new user → language selection
   // ======================================================
   if (isGreeting && isNewUser) {
     await messageService.sendMessage(
@@ -142,7 +184,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   }
 
   // ======================================================
-  // 🅲️ 4. Returning user greeting → main menu
+  // 🅲️ 5. Returning user greeting → main menu
   // ======================================================
   if (isGreeting && !isNewUser) {
     session.step = "menu";
@@ -151,80 +193,84 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   }
 
   // ======================================================
-  // 🅳️ 5. Language selection flow
+  // 🅳️ 6. Language selection flow
   // ======================================================
   if (session.awaitingLang || command.startsWith("lang_")) {
     let lang = "en";
-    
-    if (command.startsWith("lang_")) {
-        lang = command.split("_")[1];
-        await saveUserLanguage(sender, lang);
-    }
-    
+    if (command.startsWith("lang_")) lang = command.split("_")[1];
+
+    await saveUserLanguage(sender, lang);
+
     session.awaitingLang = false;
     session.step = "menu";
     await saveSession(sender, session);
 
-    // If they were awaiting language but didn't send a lang_ command, resend selection.
-    if (!command.startsWith("lang_") && !isGreeting) {
-        return sendLanguageSelection(sender); 
-    }
-    
-    // If language was successfully set or they sent a greeting, send main menu
     return sendMainMenu(sender);
   }
 
   // ======================================================
-  // 🅴️ 6. Command/Menu Handling (Delegate to Router)
+  // 🅴️ 7. Menu Options
   // ======================================================
-  
-  // Try to parse/normalize the command (handles prefixes, text-to-command conversion)
-  const normalizedCommand = commandRouter.parseCommand(command);
+  switch (command) {
+    case "view_listings": {
+      const r = await handleShowListings({
+        sender,
+        session,
+        userLang: userProfile.language || "en"
+      });
 
-  if (normalizedCommand) {
-    // Delegate command execution to the router
-    const routerResult = await commandRouter.handle(
-      normalizedCommand,
-      session,
-      sender,
-      userLang,
-      metadata
-    );
-
-    // Update session from router result
-    if (routerResult && routerResult.nextSession) {
-      await saveSession(sender, routerResult.nextSession);
+      await saveSession(sender, r.nextSession);
+      return;
     }
-    
-    // Router sends messages directly, so we just return here
-    return;
+
+    case "post_listing":
+      await messageService.sendMessage(
+        sender,
+        "Send your listing like this:\n\nRahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro"
+      );
+      session.step = "awaiting_post_details";
+      await saveSession(sender, session);
+      return;
+
+    case "manage_listings": {
+      const list = await getUserListings(sender);
+
+      if (!list || list.length === 0) {
+        await messageService.sendMessage(sender, "You have no listings to manage.");
+      } else {
+        const rows = list.map((l, i) => ({
+          id: `manage_${l.id}`,
+          title: `${i + 1}. ${l.title || "Untitled"}`,
+          description: `Price: ₹${l.price || "N/A"} • ${l.location || "N/A"}`
+        }));
+
+        await messageService.sendList(
+          sender,
+          "📝 Manage Listings",
+          `Select a listing to view/delete.\nYou have ${list.length} active listings.`,
+          "Select",
+          [{ title: "Your Listings", rows }]
+        );
+
+        session.step = "awaiting_management_selection";
+      }
+
+      await saveSession(sender, session);
+      return;
+    }
+
+    case "change_language":
+      session.awaitingLang = true;
+      await saveSession(sender, session);
+      return sendLanguageSelection(sender);
   }
-  
-  // ======================================================
-  // 🅵️ 7. Flow-specific text input handling (Not a command)
-  // ======================================================
-
-  // If the user is expected to provide text input (e.g., listing details)
-  if (session.step === "awaiting_post_details") {
-    // Assuming housingFlow exports this handler to process the raw message body
-    // NOTE: handlePostListingInput is assumed to be defined in housingFlow
-    const postResult = await housingFlow.handlePostListingInput({
-      sender,
-      msgBody: rawInput, // Use the raw message body for processing
-      session
-    });
-    
-    await saveSession(sender, postResult.nextSession);
-    return;
-  }
-
 
   // ======================================================
-  // 🅶️ 8. DEFAULT FALLBACK
+  // 🅵️ 8. DEFAULT FALLBACK
   // ======================================================
   await messageService.sendMessage(
     sender,
-    "I didn't understand that. Please choose an option from the menu."
+    "I didn't understand that. Please choose an option."
   );
 
   await saveSession(sender, session);
