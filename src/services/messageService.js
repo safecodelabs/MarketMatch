@@ -11,26 +11,25 @@ const API_URL = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
 // -------------------------------------------------------------
 // 1) SEND NORMAL TEXT MESSAGE (OR RAW PAYLOAD)
 // -------------------------------------------------------------
-// ✅ FIX 3: Update sendMessage to optionally accept a raw payload
 async function sendMessage(to, messageOrPayload) {
   try {
     let payload;
-    let logType;
+    let logType;
 
-    // If the input is an object, assume it's a raw payload (e.g., interactive card)
-    if (typeof messageOrPayload === 'object' && messageOrPayload !== null) {
-        payload = messageOrPayload;
-        logType = payload.type === 'interactive' ? 'Interactive Card' : 'Raw Message';
-    } else {
-        // Otherwise, construct a standard text message payload
-        payload = {
-            messaging_product: "whatsapp",
-            to,
-            type: "text",
-            text: { body: String(messageOrPayload) },
-        };
-        logType = 'Text';
-    }
+    // If the input is an object, assume it's a raw payload (e.g., interactive card)
+    if (typeof messageOrPayload === 'object' && messageOrPayload !== null) {
+        payload = messageOrPayload;
+        logType = payload.type === 'interactive' ? 'Interactive Card' : 'Raw Message';
+    } else {
+        // Otherwise, construct a standard text message payload
+        payload = {
+            messaging_product: "whatsapp",
+            to,
+            type: "text",
+            text: { body: String(messageOrPayload) },
+        };
+        logType = 'Text';
+    }
 
     const res = await axios.post(API_URL, payload, {
       headers: {
@@ -39,8 +38,7 @@ async function sendMessage(to, messageOrPayload) {
       },
     });
 
-    // Update logging to reflect the actual message type
-    const messageId = res.data.messages?.[0]?.id || 'N/A';
+    const messageId = res.data.messages?.[0]?.id || 'N/A';
     console.log(`📤 ${logType} sent (ID: ${messageId}):`, res.data); 
     return res.data;
   } catch (err) {
@@ -79,7 +77,7 @@ async function sendButtons(to, bodyText, buttons) {
       },
     };
 
-    // Use generic sendMessage for sending the payload
+    // Use generic sendMessage for sending the payload
     return await sendMessage(to, payload);
   } catch (err) {
     console.error("❌ sendButtons error:", err.response?.data || err);
@@ -111,7 +109,7 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
       rows:
         Array.isArray(sec.rows) && sec.rows.length
           ? sec.rows.map((r, rIdx) => ({
-              id: String(r.id || `row_${sIdx}_${rIdx}`).slice(0, 256), // Ensure ID is safe length
+              id: String(r.id || `row_${sIdx}_${rIdx}`).slice(0, 256),
               title: String(r.title || `Option ${rIdx + 1}`).slice(0, 24),
               description: r.description
                 ? String(r.description).slice(0, 72)
@@ -136,7 +134,7 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
       },
     };
 
-    // Use generic sendMessage for sending the payload
+    // Use generic sendMessage for sending the payload
     return await sendMessage(to, payload);
   } catch (err) {
     console.error("❌ sendList error:", err.response?.data || err);
@@ -147,7 +145,6 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 // -------------------------------------------------------------
 // 🚀 SEND LISTING CARD (Utility that uses sendButtons)
 // -------------------------------------------------------------
-// We need this function accessible in housingFlow.js
 async function sendListingCard(to, listing, index = 0, total = 1) {
   try {
     const bodyText =
@@ -186,5 +183,5 @@ module.exports = {
   sendMessage,
   sendButtons,
   sendList,
-  sendListingCard, // Export the listing card utility
+  sendListingCard,
 };
