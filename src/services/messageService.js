@@ -78,16 +78,21 @@ async function sendButtons(to, bodyText, buttons) {
     });
 
     // 4. Construct payload
-    const payload = {
-      messaging_product: "whatsapp",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "button",
-        body: { text: bodyText },
-        action: { buttons: formattedButtons },
-      },
-    };
+const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+        type: "button",
+        header: { // Adding a header as a last resort, using 'text' type
+            type: "text",
+            text: "Listing Details" // This text must be < 60 characters
+        }, 
+        body: { text: bodyText },
+        action: { buttons: formattedButtons },
+        footer: { text: "Tap a button to interact." } // Adding a mandatory-style footer
+    },
+};
 
     // 5. Call sendMessage and check response
     const res = await sendMessage(to, payload);
