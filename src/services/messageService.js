@@ -7,10 +7,10 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 const API_URL = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
 
 // --- Utility function for cleaning strings ---
-function cleanString(str) {
+function cleanString(str, maxLength = 100) {
   if (typeof str !== 'string') return '';
   // Remove characters that might break JSON or WhatsApp formatting
-  return str.replace(/[\n\t\r]/g, ' ').trim().slice(0, 100);
+  return str.replace(/[\n\t\r]/g, ' ').trim().slice(0, maxLength);
 }
 
 // -------------------------------------------------------------
@@ -47,7 +47,8 @@ async function sendMessage(to, messageOrPayload) {
       console.error("❌ AXIOS CONFIG ERROR:", err.config?.url); 
     }
 
-    return null;
+    // RETHROW THE ERROR to be caught by the calling function (e.g., sendListingCard)
+    throw new Error(`API Send Failed: ${err.message}`, { cause: err.response?.data });
   }
 }
 
@@ -118,21 +119,16 @@ async function sendButtons(to, bodyText, buttons, headerText) {
     };
 
     // ⚠️ DEBUG: Log the generated payload before sending to help diagnose silent rejection
-    console.log(`[DEBUG] sendButtons Payload for ${to}:`, JSON.stringify(payload, null, 2));
+    // console.log(`[DEBUG] sendButtons Payload for ${to}:`, JSON.stringify(payload, null, 2));
 
 
-    // 5. Call sendMessage and check response
+    // 5. Call sendMessage and check response (Error re-thrown by sendMessage)
     const res = await sendMessage(to, payload);
-
-    // ⚠️ CRITICAL DEBUG: If sendMessage failed, log it here.
-    if (res === null) {
-      console.error("❌ sendButtons: sendMessage returned NULL (API REJECTION LIKELY).");
-    }
 
     return res;
   } catch (err) {
-    console.error("❌ sendButtons failure (returning null):", err.message, "Recipient:", to);
-    return null;
+    // Re-throw the error so the caller (sendListingCard) can catch it and fall back
+    throw new Error(`sendButtons failed: ${err.message}`);
   }
 }
 
@@ -189,7 +185,7 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
     // Use generic sendMessage for sending the payload
     return await sendMessage(to, payload);
   } catch (err) {
-    console.error("❌ sendList error:", err.response?.data || err);
+    console.error("❌ sendList error:", err.message || err);
     return null;
   }
 }
@@ -199,7 +195,6 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 // -------------------------------------------------------------
 /**
  * Sends a message with 1 to 3 quick reply buttons.
- * Used in chatbotController.js for interactive listings.
  * @param {string} to - Recipient WA_ID
  * @param {string} bodyText - The main text of the message
  * @param {Array<{id: string, title: string}>} buttons - Array of button objects (max 3)
@@ -223,26 +218,28 @@ async function sendSimpleText(to, text) {
 // 7) SEND LISTING CARD (Uses sendButtons)
 // -------------------------------------------------------------
 /**
- * Sends an interactive listing card with property details and action buttons.
- * This function cleans the Firestore ID for button safety.
- * @param {string} to - Recipient WA_ID
- * @param {object} listing - Listing object with id, title, location, price, bedrooms, property_type
- * @param {number} currentIndex - Index of the current listing
- * @param {number} totalCount - Total number of listings
- * @returns {Promise<object|null>} API response data
- */
+ * Sends an interactive listing card with property details and action buttons.
+ * This function cleans the Firestore ID for button safety.
+ * @param {string} to - Recipient WA_ID
+ * @param {object} listing - Listing object with id, title, location, price, bedrooms, property_type
+ * @param {number} currentIndex - Index of the current listing
+ * @param {number} totalCount - Total number of listings
+ * @returns {Promise<object|null>} API response data
+ */
 async function sendListingCard(to, listing, currentIndex, totalCount) {
-    // 1. Prepare safe IDs and display text
-    // Replace non-alphanumeric characters (except underscore and hyphen) with underscore for ID safety.
-    const listingId = String(listing.id).replace(/[^a-zA-Z0-9_-]/g, '_'); 
-    const listingTitle = cleanString(listing.title);
-    const listingLocation = cleanString(listing.location);
-    const listingPrice = listing.price ? `₹${Number(listing.price).toLocaleString('en-IN')}` : 'N/A';
-    const listingBedrooms = listing.bedrooms || 'N/A';
-    const listingType = listing.property_type || 'Property';
+    // 1. Prepare safe IDs and display text
+    // Replace non-alphanumeric characters (except underscore and hyphen) with underscore for ID safety.
+    const listingId = String(listing.id).replace(/[^a-zA-Z0-9_-]/g, '_'); 
+    
+    // ⭐ FIX: Apply strict length limits to content fields
+    const listingTitle = cleanString(listing.title, 50); // Limit to 50 for safe header construction
+    const listingLocation = cleanString(listing.location, 50);
+    const listingPrice = listing.price ? `₹${Number(listing.price).toLocaleString('en-IN')}` : 'N/A';
+    const listingBedrooms = listing.bedrooms || 'N/A';
+    const listingType = listing.property_type || 'Property';
 
-    // 2. Construct the message body
-    const bodyText = 
+    // 2. Construct the message body
+    const bodyText = 
 `🏡 *Listing ${currentIndex + 1} of ${totalCount}*
 *Title:* ${listingTitle}
 *Location:* ${listingLocation}
@@ -251,23 +248,24 @@ async function sendListingCard(to, listing, currentIndex, totalCount) {
 
 Tap 'View Details' for contact info or 'Next' to skip.`;
 
-    // 3. Construct the buttons
-    const buttons = [
-        // Button 1: View Details (Uses the cleaned ID)
-        { id: `VIEW_DETAILS_${listingId}`, title: "View Details" },
-        // Button 2: Save for later (Uses the cleaned ID)
-        { id: `SAVE_LISTING_${listingId}`, title: "Save Listing" },
-        // Button 3: Next (Uses the standard ID from the controller)
-        { id: "NEXT_LISTING", title: "Next >>" },
-    ];
+    // 3. Construct the buttons
+    const buttons = [
+        // Button 1: View Details (Uses the cleaned ID)
+        { id: `VIEW_DETAILS_${listingId}`, title: "View Details" },
+        // Button 2: Save for later (Uses the cleaned ID)
+        { id: `SAVE_LISTING_${listingId}`, title: "Save Listing" },
+        // Button 3: Next (Uses the standard ID from the controller)
+        { id: "NEXT_LISTING", title: "Next >>" },
+    ];
 
-    // 4. Send the buttons message
-    return await sendReplyButtons(to, bodyText, buttons, `MarketMatch Listing: ${listingTitle}`);
+    // 4. Send the buttons message
+    // The header text must be <= 60 chars. Since listingTitle is <= 50, this is safe.
+    return await sendReplyButtons(to, bodyText, buttons, `MarketMatch Listing: ${listingTitle}`);
 }
 
 
 // -------------------------------------------------------------
-// 8) EXPORTS (FIXED: All core functions are exported, including new one)
+// 8) EXPORTS
 // -------------------------------------------------------------
 module.exports = {
   sendMessage, 
@@ -276,5 +274,5 @@ module.exports = {
   sendList,
   sendReplyButtons, 
   sendSimpleText,
-  sendListingCard, // ⭐ NEW: Exported for use in chatbotController.js
+  sendListingCard, 
 };
