@@ -5,12 +5,14 @@ const { getSession, saveSession } = require("./utils/sessionStore");
 const { 
   getUserProfile, 
   saveUserLanguage,
-  getTopListings
+  getTopListings,
+  // NOTE: getUserListings must be implemented in ./database/firestore.js 
+  // to fetch listings specific to the user ID.
+  getUserListings 
 } = require("./database/firestore");
 
 const { sendMessage, sendList } = require("./src/services/messageService");
 const { db } = require("./database/firestore");   // <-- required for flow submission
-
 
 
 // ========================================
@@ -114,7 +116,7 @@ function parseLangFromText(text) {
 
 
 // ========================================
-// SHOW TOP LISTINGS
+// SHOW TOP LISTINGS (IMPROVED READABILITY)
 // ========================================
 async function handleShowListings(sender) {
   try {
@@ -124,24 +126,26 @@ async function handleShowListings(sender) {
       return sendMessage(sender, "No listings available right now.");
     }
 
-    let txt = "🏘️ *Top Listings*\n\n";
+    let txt = "🏘️ *Top Listings* \n\n";
+    
+    // Iterate over listings and use bolding and clear separation
     listings.forEach((l, i) => {
-      txt += `*${i + 1}. ${l.title || "Untitled"}*\n`;
-      txt += `${l.location || "Location not provided"}\n`;
-      txt += `Price: ₹${l.price || "N/A"}\n`;
-      txt += "-------------------------\n";
+      txt += `*---------------------- Listing ${i + 1} ----------------------*\n`;
+      txt += `*Title:* ${l.title || "Untitled"}\n`;
+      txt += `*Location:* ${l.location || "Not provided"}\n`;
+      txt += `*Type:* ${l.listingType || l.type || "N/A"}\n`;
+      // Use localestring for better price display (e.g., 15,000)
+      txt += `*Price:* ₹${l.price ? l.price.toLocaleString('en-IN') : "N/A"}\n`; 
+      txt += `*Contact:* ${l.contact || "N/A"}\n\n`;
     });
 
     await sendMessage(sender, txt);
 
     await sendMessage(
       sender,
-      `📦 We currently have a total of *${totalCount}* listings saved in our database.`
-    );
-
-    await sendMessage(
-      sender,
-      "To find the best match, kindly tell me the *location* and *type of property* you want.\n\nExample: *2BHK flats in Noida Sector 56*"
+      `📦 We currently have a total of *${totalCount}* listings saved in our database.\n\n` +
+      "To find the best match, kindly tell me the *location* and *type of property* you want.\n\n" +
+      "Example: *2BHK flats in Noida Sector 56*"
     );
 
   } catch (err) {
@@ -150,6 +154,43 @@ async function handleShowListings(sender) {
   }
 }
 
+
+
+// ========================================
+// MANAGE USER LISTINGS (NEW FEATURE)
+// ========================================
+async function handleManageListings(sender) {
+  try {
+    // NOTE: getUserListings must be implemented in ./database/firestore.js
+    const listings = await getUserListings(sender); 
+
+    if (!listings || listings.length === 0) {
+      return sendMessage(sender, "You haven't posted any listings yet. Select *Post Listing* from the menu to add one!");
+    }
+
+    let txt = "🏡 *Your Listings for Management*\n\n";
+    
+    listings.forEach((l, i) => {
+      txt += `*---------------------- Listing ${i + 1} ----------------------*\n`;
+      txt += `*ID:* ${l.id}\n`; // Assuming the listing object includes the Firestore ID
+      txt += `*Title:* ${l.title || "Untitled"}\n`;
+      txt += `*Location:* ${l.location || "Not provided"}\n`;
+      txt += `*Type:* ${l.listingType || l.type || "N/A"}\n`;
+      txt += `*Price:* ₹${l.price ? l.price.toLocaleString('en-IN') : "N/A"}\n\n`;
+    });
+
+    await sendMessage(sender, txt);
+
+    await sendMessage(
+      sender,
+      "To *delete* a listing, reply with its *ID* (e.g., 'Delete ID-XYZ').\nTo go back, type *hi*."
+    );
+
+  } catch (err) {
+    console.error("Error in handleManageListings:", err);
+    await sendMessage(sender, "❌ Unable to fetch your listings right now.");
+  }
+}
 
 
 // ========================================
@@ -314,13 +355,11 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
         "Please send the listing details in this exact format:\nExample: *Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro*"
       );
       session.step = "awaiting_post_details";
-      // Removed session.pending as it's not used in this single-turn parsing flow
       break;
 
     case "manage_listings":
-      await sendMessage(sender, "Fetching your listings...");
+      await handleManageListings(sender);
       session.step = "managing";
-      // NOTE: Actual fetching/display logic for manage listings should be added here later.
       break;
 
     case "change_language":
@@ -331,6 +370,15 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
       break;
 
     default:
+      // Check for delete command only if in 'managing' state (to be implemented later)
+      if (session.step === "managing" && lower.startsWith("delete")) {
+          // To be implemented: logic to parse ID and delete listing
+          await sendMessage(sender, "Received delete command. Deletion logic is not yet implemented.");
+          await handleManageListings(sender); // Show list again
+          return session;
+      }
+      
+      // Default: show menu
       await sendMessage(sender, "I didn't understand that. Choose an option or type *hi* to restart.");
       await sendMainMenuViaService(sender);
       session.step = "menu";
