@@ -48,44 +48,56 @@ async function sendMessage(to, messageOrPayload) {
 }
 
 // -------------------------------------------------------------
-// 2) SEND INTERACTIVE BUTTONS (1–3 buttons only)
+// 2) SEND INTERACTIVE BUTTONS (1–3 buttons only) - (NEWLY ADDED/FIXED)
 // -------------------------------------------------------------
-async function sendListingCard(to, listing, index = 0, total = 1) {
+async function sendButtons(to, bodyText, buttons) {
   try {
-    // ⚠️ CRITICAL FIX: Ensure listing has a usable ID. Use 'unknown' if missing.
-    const listingId = String(listing.id || 'unknown').slice(0, 50);
+    // 1. Validation: Ensure body text is not empty
+    if (!bodyText || typeof bodyText !== 'string' || bodyText.trim().length === 0) {
+        throw new Error('Interactive body text is required and cannot be empty.');
+    }
+    
+    // 2. Validation: Check button count
+    if (!Array.isArray(buttons) || buttons.length < 1 || buttons.length > 3) {
+      throw new Error(
+        `Buttons array must have 1–3 items. Received: ${buttons?.length || 0}`
+      );
+    }
 
-    const bodyText =
-      `🏡 ${listing.title || "Property"}\n` +
-      `💰 Price: ${listing.price ? `₹${listing.price}` : 'N/A'}\n` +
-      `📍 ${listing.location || "Location N/A"}\n` +
-      `📏 ${listing.area || listing.size || "Area N/A"}\n` +
-      `🛋 ${listing.furnishing || "N/A"}\n\n` +
-      `(${index + 1} of ${total})`;
+    // 3. Format and validate buttons
+    const formattedButtons = buttons.map((btn, idx) => {
+        const title = String(btn.title || `Button ${idx + 1}`).slice(0, 20);
+        const id = String(btn.id || `btn_${idx + 1}`).slice(0, 256);
+        if (!title || !id) {
+            console.error(`[ERROR] Button validation failed: Title=${title}, ID=${id}`);
+            throw new Error('Button title or ID validation failed.');
+        }
+        return {
+          type: "reply",
+          reply: { id, title },
+        };
+    });
 
-
-    const buttons = [
-      {
-        id: `view_${listingId}`, // Use the guaranteed string ID
-        title: "View Details",
+    // 4. Construct payload
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: bodyText },
+        action: { buttons: formattedButtons },
       },
-      {
-        id: `save_${listingId}`, // Use the guaranteed string ID
-        title: "Save ❤️",
-      },
-      {
-        id: `next_listing`,
-        title: "Next ➡",
-      },
-    ];
+    };
 
-    // Use sendButtons utility
-    return await sendButtons(to, bodyText, buttons);
+    // Use generic sendMessage for sending the payload
+    return await sendMessage(to, payload);
   } catch (err) {
-    console.error("❌ sendListingCard error:", err);
-    return null;
+    console.error("❌ sendButtons failure (returning null):", err.message, "Recipient:", to);
+    return null; 
   }
 }
+
 
 // -------------------------------------------------------------
 // 3) SEND INTERACTIVE LIST (WhatsApp menu)
@@ -145,10 +157,13 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 }
 
 // -------------------------------------------------------------
-// 🚀 SEND LISTING CARD (Utility that uses sendButtons)
+// 4) SEND LISTING CARD (Utility that uses sendButtons) - (FIXED ID SAFETY)
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, index = 0, total = 1) {
   try {
+    // ⚠️ CRITICAL FIX: Ensure listing has a usable ID. Use 'unknown' if missing.
+    const listingId = String(listing.id || 'unknown').slice(0, 50);
+
     const bodyText =
       `🏡 ${listing.title || "Property"}\n` +
       `💰 Price: ${listing.price ? `₹${listing.price}` : 'N/A'}\n` +
@@ -160,11 +175,11 @@ async function sendListingCard(to, listing, index = 0, total = 1) {
 
     const buttons = [
       {
-        id: `view_${listing.id}`,
+        id: `view_${listingId}`, // Use the guaranteed string ID
         title: "View Details",
       },
       {
-        id: `save_${listing.id}`,
+        id: `save_${listingId}`, // Use the guaranteed string ID
         title: "Save ❤️",
       },
       {
@@ -173,13 +188,14 @@ async function sendListingCard(to, listing, index = 0, total = 1) {
       },
     ];
 
-    // Use sendButtons utility
+    // Use sendButtons utility (Defined above, so no ReferenceError)
     return await sendButtons(to, bodyText, buttons);
   } catch (err) {
     console.error("❌ sendListingCard error:", err);
     return null;
   }
 }
+
 
 module.exports = {
   sendMessage,
