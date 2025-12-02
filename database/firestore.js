@@ -44,28 +44,26 @@ async function addListing(listingData) {
 // -----------------------------------------------
 // FETCH ALL LISTINGS
 // -----------------------------------------------
-async function getAllListings(limit) {
-    try {
-        let query = listingsRef;
-        
-        query = query.orderBy('timestamp', 'desc');
+async function getAllListings() { // Removed limit argument for this test
+  try {
+    // ⭐ TEMPORARY TEST: REMOVE orderBy AND limit TO GET EVERYTHING
+    const snapshot = await listingsRef.get();
+    
+    if (snapshot.empty) return [];
 
-        // Apply limit after ordering
-        if (limit) query = query.limit(limit); 
-        
-        const snapshot = await query.get();
-        if (snapshot.empty) return [];
+    let items = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    console.log(`[DB] Fetched ${items.length} listings successfully.`); // ⭐ CHECK THIS LOG
 
-        let items = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-
-        return items;
-    } catch (err) {
-        console.error("🔥 Error fetching all listings:", err);
-        return [];
-    }
+    // Manually sort/return the items here.
+    return items; 
+  } catch (err) {
+    console.error("🔥 Error fetching all listings:", err);
+    return [];
+  }
 }
 
 // -----------------------------------------------
