@@ -52,6 +52,11 @@ async function sendMessage(to, messageOrPayload) {
 // -------------------------------------------------------------
 async function sendButtons(to, bodyText, buttons) {
   try {
+    // ⚠️ New validation: Ensure body text is not empty
+    if (!bodyText || typeof bodyText !== 'string' || bodyText.trim().length === 0) {
+        throw new Error('Interactive body text is required and cannot be empty.');
+    }
+    
     if (!Array.isArray(buttons) || buttons.length < 1 || buttons.length > 3) {
       throw new Error(
         `Buttons array must have 1–3 items. Received: ${buttons?.length || 0}`
@@ -72,7 +77,8 @@ async function sendButtons(to, bodyText, buttons) {
       type: "interactive",
       interactive: {
         type: "button",
-        body: { text: bodyText || "Choose an option:" },
+        // Use the provided bodyText (now guaranteed non-empty)
+        body: { text: bodyText }, 
         action: { buttons: formattedButtons },
       },
     };
@@ -80,8 +86,9 @@ async function sendButtons(to, bodyText, buttons) {
     // Use generic sendMessage for sending the payload
     return await sendMessage(to, payload);
   } catch (err) {
-    console.error("❌ sendButtons error:", err.response?.data || err);
-    return null;
+    // Log the failure to diagnose why it returned null
+    console.error("❌ sendButtons failure:", err.message, "Recipient:", to);
+    return null; // Returns null, causing outer function to treat it as a missed message
   }
 }
 
