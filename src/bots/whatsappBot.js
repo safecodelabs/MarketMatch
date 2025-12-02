@@ -1,5 +1,5 @@
 // =======================================================
-// src/bots/whatsappBot.js (CLEAN + FIXED VERSION)
+// src/bots/whatsappBot.js (CLEAN + FINAL PATCHED VERSION)
 // =======================================================
 
 const { sendMessage, sendList } = require("../services/messageService");
@@ -27,7 +27,7 @@ const {
 } = require("../../database/firestore");
 
 // =======================================================
-// HELPERS (Menu definitions are fine)
+// HELPERS (No changes needed)
 // =======================================================
 
 function menuRows() {
@@ -107,26 +107,26 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
 
   // -------------------------------
   // 🅰️ INTERACTIVE CARD BUTTONS (High Priority)
+  // These handlers send the message and return immediately.
   // -------------------------------
   if (msgBody.startsWith("view_")) {
     const listingId = msgBody.replace("view_", "");
-    // IMPORTANT: Pass the session and capture the result
     const result = await handleViewDetails({ sender, listingId, session });
     await saveSession(sender, result.nextSession);
-    return; // Handler sends the message internally
+    return; // ✅ CRITICAL: Return immediately after the flow is complete.
   }
 
   if (msgBody.startsWith("save_")) {
     const listingId = msgBody.replace("save_", "");
     const result = await handleSaveListing({ sender, listingId, session });
     await saveSession(sender, result.nextSession);
-    return; // Handler sends the message internally
+    return; // ✅ CRITICAL: Return immediately after the flow is complete.
   }
 
   if (msgBody === "next_listing") {
     const result = await handleNextListing({ sender, session });
     await saveSession(sender, result.nextSession);
-    return; // Handler sends the message internally
+    return; // ✅ CRITICAL: Return immediately after the flow is complete.
   }
   
   // -------------------------------
@@ -173,26 +173,28 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
 
   // -------------------------------
   // 4️⃣ MENU ACTIONS & OTHER COMMANDS
+  // We use RETURN for cases that send a message and complete the cycle.
   // -------------------------------
   switch (msgBody) {
     case "view_listings":
-      // IMPORTANT: handleShowListings now returns a structured object that carries the next session state
+      // The flow sends the card and returns the next session state
       const listResult = await handleShowListings({ sender, session, userLang: userProfile.language || 'en' }); 
-      // We ignore listResult.reply (which is null) because the card was sent inside the handler.
-      session = listResult.nextSession; // Update session with lastResults and listingIndex
-      break; // Do not fall through
+      session = listResult.nextSession; 
+      
+      // ✅ FIX: Save session and RETURN to prevent falling through.
+      await saveSession(sender, session);
+      return; 
 
     case "post_listing":
-      // ... (Logic remains the same)
       await sendMessage(
         sender,
         "Send your listing in this format:\n\nRahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro"
       );
       session.step = "awaiting_post_details";
+      // Fall through to the final save, or add save + return here.
       break;
 
     case "manage_listings":
-      // ... (Logic remains the same)
       const list = await getUserListings(sender);
 
       if (!list || list.length === 0) {
@@ -209,23 +211,27 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       }
 
       session.step = "menu";
-      break;
+      break; // Fall through to the final save.
 
     case "change_language":
       session.awaitingLang = true;
       await saveSession(sender, session);
-      return sendLanguageSelection(sender);
+      return sendLanguageSelection(sender); // Returns the list message directly
 
     default:
-        // 5️⃣ AI/Flow Continuation (for things like post details, AI search, etc.)
-        // Since you removed the commandRouter and AI/NLP logic is complex, 
-        // the safest default action is to redirect to the menu.
-        // If the message wasn't a recognized command or button ID:
-        await sendMessage(sender, "I didn't understand that. Please choose an option.");
-        return sendMainMenu(sender);
+        // 5️⃣ Fallback: Sends a message, saves the session, and returns.
+        await sendMessage(sender, "I didn't understand that. Please choose an option.");
+        // Save is done in sendMainMenu's wrapper functions or below.
+        break;
   }
 
+  // This final save is reached by 'post_listing', 'manage_listings', and 'default'.
   await saveSession(sender, session);
+  
+  // If the default case executed, we now send the main menu
+  if (msgBody !== "post_listing" && msgBody !== "manage_listings") {
+      return sendMainMenu(sender);
+  }
 }
 
 module.exports = {
