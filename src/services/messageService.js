@@ -9,44 +9,41 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 const API_URL = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
 
 // -------------------------------------------------------------
-// 1) SEND NORMAL TEXT MESSAGE (OR RAW PAYLOAD)
+// 1) SEND MESSAGE (FINAL, UNCONDITIONAL LOGGING)
 // -------------------------------------------------------------
 async function sendMessage(to, messageOrPayload) {
-  try {
-    let payload;
-    let logType;
+  const logType = messageOrPayload.type || 'Text';
+  const payload = typeof messageOrPayload === 'string' 
+    ? { messaging_product: "whatsapp", to, type: "text", text: { body: messageOrPayload } }
+    : messageOrPayload;
 
-    // If the input is an object, assume it's a raw payload (e.g., interactive card)
-    if (typeof messageOrPayload === 'object' && messageOrPayload !== null) {
-        payload = messageOrPayload;
-        logType = payload.type === 'interactive' ? 'Interactive Card' : 'Raw Message';
-    } else {
-        // Otherwise, construct a standard text message payload
-        payload = {
-            messaging_product: "whatsapp",
-            to,
-            type: "text",
-            text: { body: String(messageOrPayload) },
-        };
-        logType = 'Text';
-    }
+  try {
+    const res = await axios.post(API_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-    const res = await axios.post(API_URL, payload, {
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-const messageId = res.data.messages?.[0]?.id || 'N/A';
-    console.log(`📤 ${logType} sent (ID: ${messageId}):`, res.data); 
-    return res.data;
-  } catch (err) {
-    // ⚠️ CRITICAL DIAGNOSTIC: Log the full error JSON to capture API rejection details.
-    const errorDetails = err.response?.data || err.message || err;
-    console.error("❌ sendMessage API ERROR:", JSON.stringify(errorDetails, null, 2));
-    return null;
-  }
+    const messageId = res.data.messages?.[0]?.id || 'N/A';
+    console.log(`📤 ${logType} sent (ID: ${messageId}):`, res.data); 
+    return res.data;
+  } catch (err) {
+    // ⚠️ CRITICAL: Log the simplest possible error message.
+    console.error("❌ FINAL SEND MESSAGE ERROR (AXIOS): Status:", err.response?.status, "Message:", err.message);
+    
+    // Log the entire response data if available (this is usually the API error body)
+    if (err.response?.data) {
+        console.error("❌ FINAL SEND MESSAGE API RESPONSE BODY:", JSON.stringify(err.response.data));
+    }
+    
+    // Log the configuration error (e.g., if URL/Headers failed)
+    if (err.config) {
+        console.error("❌ AXIOS CONFIG ERROR:", JSON.config?.url);
+    }
+    
+    return null;
+  }
 }
 
 // -------------------------------------------------------------
