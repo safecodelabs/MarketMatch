@@ -4,7 +4,10 @@ const {
   handleShowListings,
   handleNextListing,
   handleViewDetails,
-  handleSaveListing
+  handleSaveListing,
+  // Assuming these functions exist in housingFlow to handle new management commands
+  handleDeleteListing, 
+  handleManageSelection 
 } = require("../flows/housingFlow");
 
 const { startOrContinue } = require('../flows/housingFlow');
@@ -12,36 +15,51 @@ const { generateFollowUpQuestion } = require('../ai/aiEngine');
 const { getString } = require('../utils/languageStrings');
 
 async function handle(cmd, session = {}, userId, language = "en", payload = {}) {
-  // NOTE: Assuming interactive button/list IDs (like VIEW_123, NEXT_LISTING, show_listings)
+  // NOTE: Interactive button/list IDs (like VIEW_123, NEXT_LISTING, show_listings)
   // are passed directly as the 'cmd' string from the webhook.
-    
+    
   // TEXT COMMAND HANDLING / INTERACTIVE ID HANDLING
   switch (cmd) {
 
-    // 1. Interactive Button Handler: VIEW_
-    case (cmd.startsWith("VIEW_") ? cmd : null): {
-        const id = cmd.replace("VIEW_", "");
-        const flowResult = await handleViewDetails({ sender: userId, listingId: id, session });
-        // NOTE: Since flowResult.reply is null or a simple string, we return it.
-        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
-    }
+    // 1. Interactive Button Handler: VIEW_
+    case (cmd.startsWith("VIEW_") ? cmd : null): {
+        const id = cmd.replace("VIEW_", "");
+        const flowResult = await handleViewDetails({ sender: userId, listingId: id, session });
+        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+    }
 
-    // 2. Interactive Button Handler: SAVE_
-    case (cmd.startsWith("SAVE_") ? cmd : null): {
-        const id = cmd.replace("SAVE_", "");
-        const flowResult = await handleSaveListing({ sender: userId, listingId: id, session });
-        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
-    }
+    // 2. Interactive Button Handler: SAVE_
+    case (cmd.startsWith("SAVE_") ? cmd : null): {
+        const id = cmd.replace("SAVE_", "");
+        const flowResult = await handleSaveListing({ sender: userId, listingId: id, session });
+        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+    }
 
-    // 3. Interactive Button Handler: NEXT_LISTING
-    case "next_listing": // Webhook converts to lowercase
-    case "NEXT_LISTING": {
-        const flowResult = await handleNextListing({ sender: userId, session });
-        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
-    }
-    
-    // 4. Main Menu/List Commands
-    case "show_listings":
+    // 3. Interactive Button Handler: DELETE_ (New for Management)
+    case (cmd.startsWith("DELETE_") ? cmd : null): {
+        const id = cmd.replace("DELETE_", "");
+        // Assuming handleDeleteListing exists in housingFlow
+        const flowResult = await handleDeleteListing({ sender: userId, listingId: id, session }); 
+        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+    }
+
+    // 4. Interactive Button Handler: MANAGE_ (New for Management Selection)
+    case (cmd.startsWith("MANAGE_") ? cmd : null): {
+        const id = cmd.replace("MANAGE_", "");
+        // Assuming handleManageSelection exists in housingFlow to show the action menu (view/delete)
+        const flowResult = await handleManageSelection({ sender: userId, listingId: id, session }); 
+        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+    }
+    
+    // 5. Interactive Button Handler: NEXT_LISTING
+    case "next_listing": // Webhook converts to lowercase
+    case "NEXT_LISTING": {
+        const flowResult = await handleNextListing({ sender: userId, session });
+        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+    }
+    
+    // 6. Main Menu/List Commands
+    case "show_listings":
     case "listings":
       // handleShowListings sends the message internally, so we extract session and return empty reply
       const listingResult = await handleShowListings({ sender: userId, session, userLang: language });
@@ -49,7 +67,7 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
         reply: listingResult.reply ? { type: "text", text: { body: listingResult.reply } } : null,
         nextSession: listingResult.nextSession || { ...session, step: "show_listings" }
       };
-      
+      
     case "menu":
       return {
         reply: {
@@ -137,11 +155,16 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
 function parseCommand(text) {
   if (!text || !text.trim()) return null;
   const t = text.trim().toLowerCase();
-    
+    
   if (t === "menu") return "menu";
   if (t === "restart") return "restart";
-  if (t.startsWith("view_")) return t; // Return the raw ID for switch case
-  if (t.startsWith("save_")) return t; // Return the raw ID for switch case
+  
+  // Check for dynamic commands (VIEW_, SAVE_, MANAGE_, DELETE_)
+  if (t.startsWith("view_")) return t.toUpperCase(); 
+  if (t.startsWith("save_")) return t.toUpperCase();
+  if (t.startsWith("manage_")) return t.toUpperCase(); // New management selection command
+  if (t.startsWith("delete_")) return t.toUpperCase(); // New deletion command
+  
   if (t === "next_listing") return "NEXT_LISTING"; // Return uppercase for consistency/clarity
   if (t === "listings" || t === "show listings" || t === "show_listings") return "listings"; 
   if (/^post[:\s]/i.test(t)) return "post_command";

@@ -55,11 +55,11 @@ async function getAllListings() { // Removed limit argument for this test
       id: doc.id,
       ...doc.data()
     }));
-    
-    console.log(`[DB] Fetched ${items.length} listings successfully.`); // ⭐ CHECK THIS LOG
+    
+    console.log(`[DB] Fetched ${items.length} listings successfully.`); // ⭐ CHECK THIS LOG
 
     // Manually sort/return the items here.
-    return items; 
+    return items; 
   } catch (err) {
     console.error("🔥 Error fetching all listings:", err);
     return [];
@@ -71,7 +71,8 @@ async function getAllListings() { // Removed limit argument for this test
 // -----------------------------------------------
 async function getUserListings(userId) {
   try {
-    const snapshot = await listingsRef.where("userId", "==", userId).get(); // Assuming 'userId' field
+    // Listings are saved with the 'user' field corresponding to the sender's WA_ID
+    const snapshot = await listingsRef.where("user", "==", userId).get(); 
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
     console.error("🔥 Error fetching user listings:", err);
@@ -80,7 +81,7 @@ async function getUserListings(userId) {
 }
 
 // -----------------------------------------------------
-// ✅ NEW: GET SINGLE LISTING BY ID
+// GET SINGLE LISTING BY ID
 // -----------------------------------------------------
 async function getListingById(listingId) {
   try {
@@ -94,7 +95,20 @@ async function getListingById(listingId) {
 }
 
 // -----------------------------------------------------
-// ✅ NEW: SAVE LISTING TO USER FAVORITES/SAVED
+// DELETE LISTING BY ID
+// -----------------------------------------------------
+async function deleteListing(listingId) {
+  try {
+    await listingsRef.doc(listingId).delete();
+    return { success: true };
+  } catch (err) {
+    console.error("🔥 Error deleting listing:", err);
+    return { success: false, error: err.message || err };
+  }
+}
+
+// -----------------------------------------------------
+// SAVE LISTING TO USER FAVORITES/SAVED
 // -----------------------------------------------------
 async function saveSavedListing(userId, listingId) {
   try {
@@ -143,9 +157,9 @@ module.exports = {
   addListing,
   getAllListings,
   getUserListings,
-  getListingById, // ⭐ NEW
-  saveSavedListing, // ⭐ NEW
+  getListingById, 
+  saveSavedListing, 
+  deleteListing, // ⭐ NEW
   getUserProfile,
   saveUserLanguage,
-  // Removed getTopListings, saveListingForUser as they weren't in the core flow but can be kept if needed elsewhere
 };

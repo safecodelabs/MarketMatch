@@ -6,12 +6,14 @@
 const messageService = require("../services/messageService"); 
 const { getSession, saveSession } = require("../../utils/sessionStore");
 
-// ⭐ Import housing flow handlers
+// ⭐ Import housing flow handlers (Adding management handlers)
 const {
   handleShowListings,
   handleNextListing,
   handleViewDetails,
-  handleSaveListing
+  handleSaveListing,
+  handleDeleteListing, 
+  handleManageSelection 
 } = require("../flows/housingFlow");
 
 // ⭐ Import AI + classification (kept for completeness)
@@ -24,7 +26,9 @@ const {
   getAllListings,
   getUserListings,
   getUserProfile,
-  saveUserLanguage
+  saveUserLanguage,
+  getListingById, 
+  deleteListing 
 } = require("../../database/firestore");
 
 // =======================================================
@@ -126,6 +130,24 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
     return; 
   }
   
+  // FIX: Handling the management selection (MANAGE_)
+  if (msgBody.startsWith("manage_")) {
+    const listingId = msgBody.replace("manage_", "");
+    // handleManageSelection is assumed to send the action menu (view/delete)
+    const result = await handleManageSelection({ sender, listingId, session });
+    await saveSession(sender, result.nextSession);
+    return; 
+  }
+
+  // FIX: Handling the delete action (DELETE_)
+  if (msgBody.startsWith("delete_")) {
+    const listingId = msgBody.replace("delete_", "");
+    // handleDeleteListing is assumed to perform deletion and send confirmation
+    const result = await handleDeleteListing({ sender, listingId, session });
+    await saveSession(sender, result.nextSession);
+    return; 
+  }
+  
   // Fix case mismatch issue in button IDs from housingFlow.js
   if (msgBody === "next_listing" || msgBody === "NEXT_LISTING") { 
     const result = await handleNextListing({ sender, session });
@@ -203,21 +225,31 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
 
       if (!list || list.length === 0) {
         // ✅ FIX 1: Use messageService.sendMessage
-        await messageService.sendMessage(sender, "You have no listings yet."); 
+        await messageService.sendMessage(sender, "You have no listings yet to manage."); 
       } else {
-        const preview = list
-          .map(
-            (l, i) =>
-              `${i + 1}. ${l.title || "Listing"} — ${l.location || "N/A"} — ₹${l.price}`
-          )
-          .join("\n\n");
-        // ✅ FIX 1: Use messageService.sendMessage
-        await messageService.sendMessage(sender, `Your listings:\n\n${preview}`); 
+        // Refactor to send a clickable list for management
+        const listingRows = list.map((l, i) => ({
+          id: `manage_${l.id}`, // e.g., manage_listingId123
+          title: `${i + 1}. ${l.title || "Untitled"}`,
+          description: `Price: ₹${l.price || "N/A"} in ${l.location || "N/A"}`
+        }));
+        
+        const sections = [{ title: "Your Active Listings", rows: listingRows }];
+        
+        await messageService.sendList(
+          sender,
+          "📝 Manage Listings",
+          `Select a listing to view/delete it. You have ${list.length} active listings.`,
+          "MarketMatch AI",
+          "Select Listing",
+          sections
+        );
+
+        session.step = "awaiting_management_selection"; // Set a specific step
       }
 
-      session.step = "menu";
       await saveSession(sender, session); 
-      return sendMainMenu(sender); 
+      return; 
 
     case "change_language":
       session.awaitingLang = true;
