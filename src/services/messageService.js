@@ -79,19 +79,16 @@ async function sendButtons(to, bodyText, buttons) {
 
     // 4. Construct payload
 const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "interactive",
-    interactive: {
-        type: "button",
-        header: { // Adding a header as a last resort, using 'text' type
-            type: "text",
-            text: "Listing Details" // This text must be < 60 characters
-        }, 
-        body: { text: bodyText },
-        action: { buttons: formattedButtons },
-        footer: { text: "Tap a button to interact." } // Adding a mandatory-style footer
-    },
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+        type: "button",
+        // REMOVED: header: { type: "text", text: "Listing Details" }, 
+        body: { text: bodyText },
+        action: { buttons: formattedButtons },
+        footer: { text: "Tap a button to interact." }
+    },
 };
 
     // 5. Call sendMessage and check response
@@ -172,22 +169,38 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, index = 0, total = 1) {
   try {
-    // 1. Use DUMMY/STATIC content for testing
-    const bodyText = `Listing Test ${index + 1} of ${total}:\n\nIf this message appears, the interactive button logic is working, and the previous issue was due to dynamic data or payload complexity.`;
+    // 1. Data Cleaning and Safety Checks
+    const listingId = String(listing.id || 'unknown').slice(0, 50);
+    const title = String(listing.title || "Property").slice(0, 100);
+    const price = listing.price ? `₹${String(listing.price).replace(/[^\d,\.]/g, '')}` : 'N/A';
+    const location = String(listing.location || "Location N/A").slice(0, 100);
+    const area = String(listing.area || listing.size || "Area N/A").slice(0, 50);
+    const furnishing = String(listing.furnishing || "N/A").slice(0, 50);
 
-    // 2. Use DUMMY buttons (simple and short IDs)
+    // 2. Build bodyText
+    const rawBodyText =
+      `🏡 ${title}\n` +
+      `💰 Price: ${price}\n` +
+      `📍 ${location}\n` +
+      `📏 ${area}\n` +
+      `🛋 ${furnishing}\n\n` +
+      `(${index + 1} of ${total})`;
+    
+    // Final truncation to ensure safe body length (under 1024 chars)
+    const bodyText = rawBodyText.slice(0, 950);
+
     const buttons = [
       {
-        id: `d_view`,
-        title: "View Details (TEST)",
+        id: `view_${listingId}`,
+        title: "View Details",
       },
       {
-        id: `d_save`,
-        title: "Save (TEST)",
+        id: `save_${listingId}`,
+        title: "Save ❤️",
       },
       {
-        id: `d_next`,
-        title: "Next (TEST)",
+        id: `next_listing`,
+        title: "Next ➡",
       },
     ];
 
