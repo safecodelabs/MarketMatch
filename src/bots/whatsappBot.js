@@ -113,27 +113,26 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
     const listingId = msgBody.replace("view_", "");
     const result = await handleViewDetails({ sender, listingId, session });
     await saveSession(sender, result.nextSession);
-    return; // ✅ CRITICAL: Return immediately after the flow is complete.
+    return; // ✅ CRITICAL: Return immediately.
   }
 
   if (msgBody.startsWith("save_")) {
     const listingId = msgBody.replace("save_", "");
     const result = await handleSaveListing({ sender, listingId, session });
     await saveSession(sender, result.nextSession);
-    return; // ✅ CRITICAL: Return immediately after the flow is complete.
+    return; // ✅ CRITICAL: Return immediately.
   }
 
   if (msgBody === "next_listing") {
     const result = await handleNextListing({ sender, session });
     await saveSession(sender, result.nextSession);
-    return; // ✅ CRITICAL: Return immediately after the flow is complete.
+    return; // ✅ CRITICAL: Return immediately.
   }
   
   // -------------------------------
   // 1️⃣ NEW USER → WELCOME + LANGUAGE
   // -------------------------------
   if (isGreeting && isNewUser) {
-    // ... (Logic remains the same)
     await sendMessage(
       sender,
       "🤖 MarketMatch AI helps you find rental properties, services & more in your area."
@@ -173,17 +172,16 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
 
   // -------------------------------
   // 4️⃣ MENU ACTIONS & OTHER COMMANDS
-  // We use RETURN for cases that send a message and complete the cycle.
   // -------------------------------
   switch (msgBody) {
     case "view_listings":
       // The flow sends the card and returns the next session state
       const listResult = await handleShowListings({ sender, session, userLang: userProfile.language || 'en' }); 
       session = listResult.nextSession; 
-      
-      // ✅ FIX: Save session and RETURN to prevent falling through.
+      
+      // ✅ FIX: Save session and RETURN to prevent falling through to the final block.
       await saveSession(sender, session);
-      return; 
+      return; 
 
     case "post_listing":
       await sendMessage(
@@ -191,8 +189,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
         "Send your listing in this format:\n\nRahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro"
       );
       session.step = "awaiting_post_details";
-      // Fall through to the final save, or add save + return here.
-      break;
+      break; // Falls through to the final save.
 
     case "manage_listings":
       const list = await getUserListings(sender);
@@ -211,7 +208,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       }
 
       session.step = "menu";
-      break; // Fall through to the final save.
+      break; // Falls through to the final save.
 
     case "change_language":
       session.awaitingLang = true;
@@ -219,19 +216,26 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       return sendLanguageSelection(sender); // Returns the list message directly
 
     default:
-        // 5️⃣ Fallback: Sends a message, saves the session, and returns.
+        // If the user sends an unrecognized command, we send the fallback text.
         await sendMessage(sender, "I didn't understand that. Please choose an option.");
-        // Save is done in sendMainMenu's wrapper functions or below.
-        break;
+        break; // Falls through to the final save and menu send.
   }
 
-  // This final save is reached by 'post_listing', 'manage_listings', and 'default'.
+  // -------------------------------------------------------------------------
+  // FINAL EXIT LOGIC: Handles cases that used 'break' (post_listing, manage_listings, default)
+  // -------------------------------------------------------------------------
   await saveSession(sender, session);
+  
+  // Send the main menu only if the message was NOT 'post_listing' or 'manage_listings',
+  // and it was NOT a command that returned the menu earlier (like default case).
+  // Since the default case now sends the 'I didn't understand' message,
+  // we send the menu immediately after that for clarity.
+  if (msgBody !== "post_listing" && msgBody !== "manage_listings") {
+      return sendMainMenu(sender);
+  }
   
-  // If the default case executed, we now send the main menu
-  if (msgBody !== "post_listing" && msgBody !== "manage_listings") {
-      return sendMainMenu(sender);
-  }
+  // If it was post_listing, we just return silently as we expect input.
+  return;
 }
 
 module.exports = {
