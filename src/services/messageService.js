@@ -43,9 +43,10 @@ async function sendMessage(to, messageOrPayload) {
 		}
 
 		// Log the configuration error (e.g., if URL/Headers failed)
-		if (err.config) {
-			console.error("❌ AXIOS CONFIG ERROR:", JSON.config?.url);
-		}
+if (err.config) {
+	console.error("❌ AXIOS CONFIG ERROR: URL:", err.config.url);
+	console.error("❌ AXIOS CONFIG PAYLOAD:", err.config.data);
+}
 
 		return null;
 	}
@@ -125,10 +126,20 @@ async function sendButtons(to, bodyText, buttons, headerText) {
 		}
 
 		return res;
-	} catch (err) {
-		console.error("❌ sendButtons failure (returning null):", err.message, "Recipient:", to);
-		return null;
+} catch (err) {
+	console.error("❌ sendButtons failure:", err.message);
+
+	// ADD THIS DEBUG
+	if (err.response?.data) {
+		console.error("❌ sendButtons API ERROR BODY:", JSON.stringify(err.response.data, null, 2));
 	}
+
+	if (err.config) {
+		console.error("❌ sendButtons REQUEST PAYLOAD:", err.config.data);
+	}
+
+	return null;
+}
 }
 
 
@@ -234,11 +245,12 @@ async function sendListingCard(to, listing, index = 0, total = 1) {
 		];
 
 		// 4. ATTEMPT INTERACTIVE BUTTONS (Pass the specific headerText)
-		const interactiveResponse = await sendButtons(to, bodyText, buttons, headerText);
+const interactiveResponse = await sendButtons(to, bodyText, buttons, headerText);
 
-		// 5. ROBUST TEXT FALLBACK (if interactive failed)
-		if (!interactiveResponse) {
-			console.warn(`⚠️ [${to}] Interactive Button Card failed. Falling back to robust text message.`);
+if (!interactiveResponse) {
+	console.warn(`⚠️ Interactive Button Card failed — sendButtons returned NULL.`);
+	console.warn("⚠️ Body Text:", bodyText);
+	console.warn("⚠️ Buttons:", buttons);
 
 			// Send the key information with clear text instructions
 			const textMessage =
