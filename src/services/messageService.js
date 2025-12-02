@@ -43,10 +43,9 @@ async function sendMessage(to, messageOrPayload) {
 		}
 
 		// Log the configuration error (e.g., if URL/Headers failed)
-if (err.config) {
-	console.error("❌ AXIOS CONFIG ERROR: URL:", err.config.url);
-	console.error("❌ AXIOS CONFIG PAYLOAD:", err.config.data);
-}
+		if (err.config) {
+			console.error("❌ AXIOS CONFIG ERROR:", JSON.config?.url);
+		}
 
 		return null;
 	}
@@ -68,7 +67,7 @@ async function sendText(to, text) {
 }
 
 // -------------------------------------------------------------
-// 3) SEND INTERACTIVE BUTTONS (1–3 buttons only) - (MINIMAL PAYLOAD)
+// 3) SEND INTERACTIVE BUTTONS (1–3 buttons only) - (DEPRECATED FOR LISTING CARDS)
 // -------------------------------------------------------------
 async function sendButtons(to, bodyText, buttons, headerText) {
 	try {
@@ -117,6 +116,10 @@ async function sendButtons(to, bodyText, buttons, headerText) {
 			},
 		};
 
+        // ⚠️ DEBUG: Log the generated payload before sending to help diagnose silent rejection
+        console.log(`[DEBUG] sendButtons Payload for ${to}:`, JSON.stringify(payload, null, 2));
+
+
 		// 5. Call sendMessage and check response
 		const res = await sendMessage(to, payload);
 
@@ -126,20 +129,10 @@ async function sendButtons(to, bodyText, buttons, headerText) {
 		}
 
 		return res;
-} catch (err) {
-	console.error("❌ sendButtons failure:", err.message);
-
-	// ADD THIS DEBUG
-	if (err.response?.data) {
-		console.error("❌ sendButtons API ERROR BODY:", JSON.stringify(err.response.data, null, 2));
+	} catch (err) {
+		console.error("❌ sendButtons failure (returning null):", err.message, "Recipient:", to);
+		return null;
 	}
-
-	if (err.config) {
-		console.error("❌ sendButtons REQUEST PAYLOAD:", err.config.data);
-	}
-
-	return null;
-}
 }
 
 
@@ -202,72 +195,81 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 
 
 // -------------------------------------------------------------
-// 5) SEND LISTING CARD (Robust with Text Fallback)
+// 5) SEND LISTING CARD (Using Interactive List)
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, index = 0, total = 1) {
 	try {
-		// --- ADDED: Input validation for the listing object ---
+		// 1. Data Cleaning and Safety Checks
 		if (!listing || typeof listing !== 'object' || Array.isArray(listing)) {
 			console.error(`❌ sendListingCard: Invalid listing object passed. Type: ${typeof listing}`);
-			// Return null, forcing the calling flow to handle the error or skip this entry
 			return null;
 		}
 
-		// 1. Data Cleaning and Safety Checks
 		const listingId = String(listing.id || 'unknown').slice(0, 50);
-		const title = String(listing.title || "Property").slice(0, 100);
+		const title = String(listing.title || "Property Listing").slice(0, 60); // Header max 60 chars
 		const price = listing.price ? `₹${String(listing.price).replace(/[^\d,\.]/g, '')}` : 'N/A';
 		const location = String(listing.location || "Location N/A").slice(0, 100);
+		// Using detailed fields for description since 'shortDescription' is not defined in the source data
 		const area = String(listing.area || listing.size || "Area N/A").slice(0, 50);
 		const furnishing = String(listing.furnishing || "N/A").slice(0, 50);
 
-		// 2. Build bodyText (Max 1024 chars for interactive/text)
-		const rawBodyText =
-			`💰 Price: ${price}\n` +
-			`📍 ${location}\n` +
-			`📏 ${area}\n` +
-			`🛋 ${furnishing}\n\n` +
-			`Listing ${index + 1} of ${total}\n\n` +
-			`*To view details, reply with: view ${listingId}*\n` +
-			`*To see the next listing, reply with: next*`;
+		// 2. Build the List Card Payload
+		const payload = {
+			messaging_product: "whatsapp",
+			to,
+			type: "interactive",
+			interactive: {
+				type: "list",
+				// Header: The main title of the card
+				header: {
+					type: "text",
+					text: `🏡 ${title}` // Max 60 chars
+				},
+				// Body: The main content/description area
+				body: {
+					text:
+						`💰 Price: ${price}\n` +
+						`📍 Location: ${location}\n` +
+						`📏 Area: ${area}\n` +
+						`🛋 Furnishing: ${furnishing}` // Max 1024 chars
+				},
+				// Footer: Small instruction text
+				footer: {
+					text: `Listing ${index + 1} of ${total}. Choose an action below:` // Max 60 chars
+				},
+				action: {
+					// Button that opens the list menu
+					button: "Choose Action", // Max 20 chars
+					sections: [
+						{
+							title: "Options", // Section title, Max 24 chars
+							rows: [
+								{
+									id: `view_${listingId}`,
+									title: "View Details", // Row title max 24 chars
+									description: "See full property photos and info" // Row description max 72 chars
+								},
+								{
+									id: `next_listing`, // Static ID for next allows simpler routing
+									title: "Next Listing",
+									description: "Skip and view the next property"
+								},
+								{
+									id: `save_${listingId}`,
+									title: "Save Listing",
+									description: "Add this property to your saved list ❤️"
+								}
+							]
+						}
+					]
+				}
+			}
+		};
 
-		// Set a specific header text for the card
-		const headerText = `🏡 ${title}`;
-
-		// Final truncation to ensure safe body length (under 1024 chars)
-		const bodyText = rawBodyText.slice(0, 950);
-
-		// 3. Define buttons
-		const buttons = [
-			{ id: `view_${listingId}`, title: "View Details" },
-			{ id: `save_${listingId}`, title: "Save ❤️" },
-			{ id: `next_listing`, title: "Next ➡" },
-		];
-
-		// 4. ATTEMPT INTERACTIVE BUTTONS (Pass the specific headerText)
-const interactiveResponse = await sendButtons(to, bodyText, buttons, headerText);
-
-if (!interactiveResponse) {
-	console.warn(`⚠️ Interactive Button Card failed — sendButtons returned NULL.`);
-	console.warn("⚠️ Body Text:", bodyText);
-	console.warn("⚠️ Buttons:", buttons);
-
-			// Send the key information with clear text instructions
-			const textMessage =
-				`*Listing ${index + 1} of ${total}*:\n` +
-				`🏡 ${title}\n` +
-				`💰 Price: ${price}\n` +
-				`📍 ${location}\n` +
-				`\n` +
-				`*Reply with 'Next' to see the next listing.*\n` +
-				`*To view details, type 'View ${listingId}'*`;
-
-			return await sendText(to, textMessage);
-		}
-
-		return interactiveResponse;
+        // 3. Send the message using the generic handler
+		return await sendMessage(to, payload);
 	} catch (err) {
-		console.error("❌ sendListingCard caught unhandled error:", err.message, "Listing Index:", index);
+		console.error("❌ sendListingCard (List) error:", err.message, "Listing Index:", index);
 		return null;
 	}
 }

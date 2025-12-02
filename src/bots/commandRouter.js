@@ -1,18 +1,16 @@
-// ===== FILE: src/bots/commandRouter.js (Final Patched Version) =====
-
-const { 
-  handleShowListings,
-  handleNextListing,
-  handleViewDetails,
-  handleSaveListing,
-  // Assuming these functions exist in housingFlow to handle new management commands
-  handleDeleteListing, 
-  handleManageSelection 
-} = require("../flows/housingFlow");
-
+// Import the core housing flow logic (including state management, and complex functions)
+const housingFlow = require("../flows/housingFlow"); 
 const { startOrContinue } = require('../flows/housingFlow');
 const { generateFollowUpQuestion } = require('../ai/aiEngine');
 const { getString } = require('../utils/languageStrings');
+
+// Import the dedicated, simple handlers for the listing *actions* // (which send the message directly using the new list card design).
+const { 
+  handleViewDetails: handleViewDetailsAction,
+  handleNextListing: handleNextListingAction,
+  handleSaveListing: handleSaveListingAction,
+} = require("../flows/listingHandlers");
+
 
 async function handle(cmd, session = {}, userId, language = "en", payload = {}) {
   // NOTE: Interactive button/list IDs (like VIEW_123, NEXT_LISTING, show_listings)
@@ -21,48 +19,55 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
   // TEXT COMMAND HANDLING / INTERACTIVE ID HANDLING
   switch (cmd) {
 
-    // 1. Interactive Button Handler: VIEW_
+    // 1. Interactive List Handler: VIEW_ (Calls simple handler, which sends the reply)
     case (cmd.startsWith("VIEW_") ? cmd : null): {
         const id = cmd.replace("VIEW_", "");
-        const flowResult = await handleViewDetails({ sender: userId, listingId: id, session });
-        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+        // Call the simple handler, which sends the message directly
+        await handleViewDetailsAction(userId, id); 
+        // Return null reply, as the message is already sent
+        return { reply: null, nextSession: session };
     }
 
-    // 2. Interactive Button Handler: SAVE_
+    // 2. Interactive List Handler: SAVE_ (Calls simple handler, which sends the reply)
     case (cmd.startsWith("SAVE_") ? cmd : null): {
         const id = cmd.replace("SAVE_", "");
-        const flowResult = await handleSaveListing({ sender: userId, listingId: id, session });
-        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+        // Call the simple handler, which sends the message directly
+        await handleSaveListingAction(userId, id); 
+        // Return null reply, as the message is already sent
+        return { reply: null, nextSession: session };
     }
 
-    // 3. Interactive Button Handler: DELETE_ (New for Management)
+    // 3. Interactive List Handler: DELETE_ (New for Management, assuming complex flow structure)
     case (cmd.startsWith("DELETE_") ? cmd : null): {
         const id = cmd.replace("DELETE_", "");
-        // Assuming handleDeleteListing exists in housingFlow
-        const flowResult = await handleDeleteListing({ sender: userId, listingId: id, session }); 
+        // Assuming this flow function is complex and handles its own reply/session updates
+        const flowResult = await housingFlow.handleDeleteListing({ sender: userId, listingId: id, session }); 
         return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
     }
 
-    // 4. Interactive Button Handler: MANAGE_ (New for Management Selection)
+    // 4. Interactive List Handler: MANAGE_ (New for Management Selection, assuming complex flow structure)
     case (cmd.startsWith("MANAGE_") ? cmd : null): {
         const id = cmd.replace("MANAGE_", "");
-        // Assuming handleManageSelection exists in housingFlow to show the action menu (view/delete)
-        const flowResult = await handleManageSelection({ sender: userId, listingId: id, session }); 
+        // Assuming this flow function is complex and handles its own reply/session updates
+        const flowResult = await housingFlow.handleManageSelection({ sender: userId, listingId: id, session }); 
         return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
     }
     
-    // 5. Interactive Button Handler: NEXT_LISTING
+    // 5. Interactive List Handler: NEXT_LISTING (Calls simple handler, which sends the reply)
     case "next_listing": // Webhook converts to lowercase
-    case "NEXT_LISTING": {
-        const flowResult = await handleNextListing({ sender: userId, session });
-        return { reply: flowResult.reply, nextSession: flowResult.nextSession || session };
+    case "NEXT_LISTING": {s
+        // Call the simple handler, which sends the message directly
+        await handleNextListingAction(userId); 
+        // Return null reply, as the message is already sent
+        return { reply: null, nextSession: session };
     }
     
-    // 6. Main Menu/List Commands
+    // 6. Main Menu/List Commands (assuming complex flow structure)
+    // Note: handleShowListings must also be imported from housingFlow
     case "show_listings":
     case "listings":
       // handleShowListings sends the message internally, so we extract session and return empty reply
-      const listingResult = await handleShowListings({ sender: userId, session, userLang: language });
+      const listingResult = await housingFlow.handleShowListings({ sender: userId, session, userLang: language });
       return {
         reply: listingResult.reply ? { type: "text", text: { body: listingResult.reply } } : null,
         nextSession: listingResult.nextSession || { ...session, step: "show_listings" }
