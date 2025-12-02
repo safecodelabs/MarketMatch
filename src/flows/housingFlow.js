@@ -180,7 +180,7 @@ async function handleShowListings({ sender, session = {}, userLang = "en" }) {
     const nextSession = { ...session, step: "show_listings", lastResults: latest, listingIndex: 0 };
 
     // send the first card
-    await sendListingCard(sender, latest[0], 0, latest.length);
+    await sendListingCard(sender, latest[0], latest.length);
 
     // reply is null because we sent an interactive message already
     return { nextSession, reply: null, buttons: null };

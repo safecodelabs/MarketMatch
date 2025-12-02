@@ -179,7 +179,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       const listResult = await handleShowListings({ sender, session, userLang: userProfile.language || 'en' }); 
       session = listResult.nextSession; 
       
-      // ✅ FIX: Save session and RETURN to prevent falling through to the final block.
+      // ✅ FIX: Save session and RETURN to prevent falling through.
       await saveSession(sender, session);
       return; 
 
@@ -189,7 +189,8 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
         "Send your listing in this format:\n\nRahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro"
       );
       session.step = "awaiting_post_details";
-      break; // Falls through to the final save.
+      // Falls through to the final save, but returns immediately after.
+      break; 
 
     case "manage_listings":
       const list = await getUserListings(sender);
@@ -208,7 +209,8 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       }
 
       session.step = "menu";
-      break; // Falls through to the final save.
+      // Falls through to the final save, but returns immediately after.
+      break; 
 
     case "change_language":
       session.awaitingLang = true;
@@ -216,26 +218,25 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
       return sendLanguageSelection(sender); // Returns the list message directly
 
     default:
-        // If the user sends an unrecognized command, we send the fallback text.
+        // 5️⃣ FIX: Handle the default case by sending the error and the menu, then RETURN.
         await sendMessage(sender, "I didn't understand that. Please choose an option.");
-        break; // Falls through to the final save and menu send.
+        // No need to save session here, it's done below.
+        break; // Fall through to the final block to save session and send menu
   }
 
   // -------------------------------------------------------------------------
-  // FINAL EXIT LOGIC: Handles cases that used 'break' (post_listing, manage_listings, default)
+  // FINAL EXIT LOGIC: For cases that used 'break'
   // -------------------------------------------------------------------------
   await saveSession(sender, session);
   
-  // Send the main menu only if the message was NOT 'post_listing' or 'manage_listings',
-  // and it was NOT a command that returned the menu earlier (like default case).
-  // Since the default case now sends the 'I didn't understand' message,
-  // we send the menu immediately after that for clarity.
-  if (msgBody !== "post_listing" && msgBody !== "manage_listings") {
+  // The final action is to send the menu IF we were not waiting for post details.
+  // post_listing and manage_listings are handled correctly here.
+  if (session.step !== "awaiting_post_details") {
+      // This will send the main menu for 'manage_listings' and the 'default' case.
       return sendMainMenu(sender);
   }
   
-  // If it was post_listing, we just return silently as we expect input.
-  return;
+  return; // Default silent return for 'post_listing' when awaiting details.
 }
 
 module.exports = {
