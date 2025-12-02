@@ -1,67 +1,14 @@
 // src/flows/housingFlow.js
+// NOTE: sendListingCard is now imported from messageService
 const { addListing, getAllListings, getUserListings, db } = require('../../database/firestore');
 const { searchListings, generateFollowUpQuestion, generatePropertyReply, classify } = require('../ai/aiEngine');
-const { sendMessage } = require('../services/messageService');
+const { sendMessage, sendListingCard } = require('../services/messageService'); // ✅ IMPORTED
 
-// --- HELPER: send one listing as an interactive "card" message with 3 buttons.
-async function sendListingCard(sender, listing, index = 0, total = 1) {
-  if (!listing) {
-    return sendMessage(sender, 'No listing to show.');
-  }
+// --- The local sendListingCard function was REMOVED to use the one from messageService ---
 
-  const title = listing.title || `${listing.property_type || 'Property'}`;
-  const price = listing.price ? `₹${listing.price}` : listing.price || 'N/A';
-  const location = listing.location || 'Location N/A';
-  const area = listing.area ? `${listing.area} sq ft` : (listing.size || 'Area N/A');
-  const furnishing = listing.furnishing || 'N/A';
-
-  const bodyText =
-    `🏡 ${title}\n` +
-    `💰 Price: ${price}\n` +
-    `📍 ${location}\n` +
-    `📏 ${area}\n` +
-    `🛋 ${furnishing}\n\n` +
-    `(${index + 1} of ${total})`;
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to: sender,
-    type: "interactive",
-    interactive: {
-      type: "button",
-      body: { text: bodyText },
-      action: {
-        buttons: [
-          {
-            type: "reply",
-            reply: {
-              id: `VIEW_${listing.id}`,
-              title: "View Details"
-            }
-          },
-          {
-            type: "reply",
-            reply: {
-              id: `SAVE_${listing.id}`,
-              title: "Save ❤️"
-            }
-          },
-          {
-            type: "reply",
-            reply: {
-              id: `NEXT_LISTING`,
-              title: "Next ➡"
-            }
-          }
-        ]
-      }
-    }
-  };
-
-  await sendMessage(sender, payload, true);
-}
-
-// --- handleNextListing — Move to next listing in session.lastResults and send it
+/**
+ * Move to next listing in session.lastResults and send it
+ */
 async function handleNextListing({ sender, session = {} }) {
   try {
     const lastResults = Array.isArray(session.lastResults) ? session.lastResults : [];
@@ -81,8 +28,7 @@ async function handleNextListing({ sender, session = {} }) {
 
     // persist index for next time
     const nextSession = { ...session, listingIndex: index, lastResults: session.lastResults };
-    
-    // Correct call signature
+    // ✅ Correct call signature: (sender, listing, index, total)
     await sendListingCard(sender, session.lastResults[index], index, session.lastResults.length);
 
     return { nextSession, reply: null, buttons: null };
@@ -92,7 +38,9 @@ async function handleNextListing({ sender, session = {} }) {
   }
 }
 
-// --- handleViewDetails — View full details for a listingId
+/**
+ * View full details for a listingId
+ */
 async function handleViewDetails({ sender, listingId, session = {} }) {
   try {
     let listing = (Array.isArray(session.lastResults) && session.lastResults.find(l => String(l.id) === String(listingId))) || null;
@@ -124,7 +72,9 @@ async function handleViewDetails({ sender, listingId, session = {} }) {
   }
 }
 
-// --- handleSaveListing — Save a listing for a user
+/**
+ * Save a listing for a user (simple saved collection)
+ */
 async function handleSaveListing({ sender, listingId, session = {} }) {
   try {
     const docId = `${String(sender)}_${String(listingId)}`;
@@ -144,7 +94,9 @@ async function handleSaveListing({ sender, listingId, session = {} }) {
   }
 }
 
-// --- handleShowListings — shows latest listings directly (as a card slider)
+/**
+ * handleShowListings — shows latest listings directly (as a card slider)
+ */
 async function handleShowListings({ sender, session = {}, userLang = "en" }) {
   try {
     const all = await getAllListings(50);
@@ -159,13 +111,17 @@ async function handleShowListings({ sender, session = {}, userLang = "en" }) {
       };
     }
 
+    // Show top 8 latest listings
     const latest = all.slice(0, 8);
 
+    // initialize session pagination state
     const nextSession = { ...session, step: "show_listings", lastResults: latest, listingIndex: 0 };
 
-    // ✅ CRITICAL FIX: The call signature MUST be (sender, listing, index, total)
+    // send the first card
+    // ✅ Correct call signature: (sender, listing, index, total)
     await sendListingCard(sender, latest[0], nextSession.listingIndex, latest.length);
 
+    // reply is null because we sent an interactive message already
     return { nextSession, reply: null, buttons: null };
   } catch (err) {
     console.error("handleShowListings error:", err);
@@ -177,7 +133,9 @@ async function handleShowListings({ sender, session = {}, userLang = "en" }) {
   }
 }
 
-// --- MAIN FLOW — handleAIAction
+/**
+ * MAIN FLOW — handleAIAction
+ */
 async function handleAIAction({ sender, message, aiResult = {}, session = {}, userLang = 'en' }) {
   session = session && typeof session === 'object'
     ? { step: 'start', data: {}, ...session }
@@ -215,6 +173,7 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
       };
     }
 
+    // Instead of returning text summary, send the first match as a card and store session
     const nextSession = { ...session, step: 'showing_results', lastResults: matches.slice(0, 8), listingIndex: 0 };
     await sendListingCard(sender, matches[0], 0, matches.length);
     return { nextSession, reply: null, buttons: null };
@@ -342,6 +301,7 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
       };
     }
 
+    // send first matched card instead of text summary
     const nextSession = { ...session, step: 'showing_results', lastResults: matches.slice(0, 8), listingIndex: 0 };
     await sendListingCard(sender, matches[0], 0, matches.length);
     return { nextSession, reply: null, buttons: null };
@@ -391,7 +351,8 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
   }
 
   // NEW MENU MAPPING ADDED
-if (message === "show_listings" || message === "view_listings" || session?.selected === "show_listings") {
+  // Handles user clicking the "View listings" button from the menu
+  if (message === "show_listings" || message === "view_listings" || session?.selected === "show_listings") {
     return handleShowListings({ sender, session, userLang });
   }
 
@@ -405,7 +366,7 @@ if (message === "show_listings" || message === "view_listings" || session?.selec
 3) Manage listings
 4) Change language`,
     buttons: [
-      { id: 'show_listings', title: 'View listings' }, // Uses ID: show_listings
+      { id: 'show_listings', title: 'View listings' },
       { id: 'post_listing', title: 'Post listing' },
       { id: 'manage_listings', title: 'Manage listings' },
       { id: '4', title: 'Change language' }
