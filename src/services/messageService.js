@@ -170,21 +170,25 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, index = 0, total = 1) {
   try {
-    // 1. Ensure listing has a usable ID (from previous fix)
+    // 1. Data Cleaning and Safety Checks
     const listingId = String(listing.id || 'unknown').slice(0, 50);
-    
-    // 2. Build bodyText with safe string lengths for dynamic fields
+    const title = String(listing.title || "Property").slice(0, 100);
+    const price = listing.price ? `₹${String(listing.price).replace(/[^\d,\.]/g, '')}` : 'N/A';
+    const location = String(listing.location || "Location N/A").slice(0, 100);
+    const area = String(listing.area || listing.size || "Area N/A").slice(0, 50);
+    const furnishing = String(listing.furnishing || "N/A").slice(0, 50);
+
+    // 2. Build bodyText
     const rawBodyText =
-      `🏡 ${String(listing.title || "Property").slice(0, 100)}\n` +
-      `💰 Price: ${listing.price ? `₹${listing.price}` : 'N/A'}\n` +
-      `📍 ${String(listing.location || "Location N/A").slice(0, 100)}\n` +
-      `📏 ${String(listing.area || listing.size || "Area N/A").slice(0, 50)}\n` +
-      `🛋 ${String(listing.furnishing || "N/A").slice(0, 50)}\n\n` +
+      `🏡 ${title}\n` +
+      `💰 Price: ${price}\n` +
+      `📍 ${location}\n` +
+      `📏 ${area}\n` +
+      `🛋 ${furnishing}\n\n` +
       `(${index + 1} of ${total})`;
     
-    // 3. CRITICAL: Truncate the final body text to ensure it's under the 1024 limit
-    // We'll use a safer limit like 950 just in case.
-    const bodyText = rawBodyText.slice(0, 950);
+    // Final truncation to ensure safe body length (under 1024 chars)
+    const bodyText = rawBodyText.slice(0, 950);
 
     const buttons = [
       {
@@ -201,10 +205,10 @@ async function sendListingCard(to, listing, index = 0, total = 1) {
       },
     ];
 
-    // Use sendButtons utility
+    // 3. Use sendButtons utility
     return await sendButtons(to, bodyText, buttons);
   } catch (err) {
-    console.error("❌ sendListingCard error:", err);
+    console.error("❌ sendListingCard caught unhandled error:", err.message, "Listing Index:", index);
     return null;
   }
 }
