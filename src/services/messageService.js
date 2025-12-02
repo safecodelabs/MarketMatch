@@ -198,14 +198,14 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 // 5) SEND REPLY BUTTONS (Alias for sendButtons for clear intent)
 // -------------------------------------------------------------
 /**
- * Sends a message with 1 to 3 quick reply buttons.
- * Used in chatbotController.js for interactive listings.
- * @param {string} to - Recipient WA_ID
- * @param {string} bodyText - The main text of the message
- * @param {Array<{id: string, title: string}>} buttons - Array of button objects (max 3)
- * @param {string} [headerText] - Optional header text for the interactive message
- * @returns {Promise<object|null>} API response data
- */
+ * Sends a message with 1 to 3 quick reply buttons.
+ * Used in chatbotController.js for interactive listings.
+ * @param {string} to - Recipient WA_ID
+ * @param {string} bodyText - The main text of the message
+ * @param {Array<{id: string, title: string}>} buttons - Array of button objects (max 3)
+ * @param {string} [headerText] - Optional header text for the interactive message
+ * @returns {Promise<object|null>} API response data
+ */
 async function sendReplyButtons(to, bodyText, buttons, headerText) {
   // Use the core sendButtons function
   return await sendButtons(to, bodyText, buttons, headerText);
@@ -219,15 +219,62 @@ async function sendSimpleText(to, text) {
   return await sendText(to, text);
 }
 
+// -------------------------------------------------------------
+// 7) SEND LISTING CARD (Uses sendButtons)
+// -------------------------------------------------------------
+/**
+ * Sends an interactive listing card with property details and action buttons.
+ * This function cleans the Firestore ID for button safety.
+ * @param {string} to - Recipient WA_ID
+ * @param {object} listing - Listing object with id, title, location, price, bedrooms, property_type
+ * @param {number} currentIndex - Index of the current listing
+ * @param {number} totalCount - Total number of listings
+ * @returns {Promise<object|null>} API response data
+ */
+async function sendListingCard(to, listing, currentIndex, totalCount) {
+    // 1. Prepare safe IDs and display text
+    // Replace non-alphanumeric characters (except underscore and hyphen) with underscore for ID safety.
+    const listingId = String(listing.id).replace(/[^a-zA-Z0-9_-]/g, '_'); 
+    const listingTitle = cleanString(listing.title);
+    const listingLocation = cleanString(listing.location);
+    const listingPrice = listing.price ? `₹${Number(listing.price).toLocaleString('en-IN')}` : 'N/A';
+    const listingBedrooms = listing.bedrooms || 'N/A';
+    const listingType = listing.property_type || 'Property';
+
+    // 2. Construct the message body
+    const bodyText = 
+`🏡 *Listing ${currentIndex + 1} of ${totalCount}*
+*Title:* ${listingTitle}
+*Location:* ${listingLocation}
+*Type:* ${listingType} (${listingBedrooms})
+*Price:* ${listingPrice}
+
+Tap 'View Details' for contact info or 'Next' to skip.`;
+
+    // 3. Construct the buttons
+    const buttons = [
+        // Button 1: View Details (Uses the cleaned ID)
+        { id: `VIEW_DETAILS_${listingId}`, title: "View Details" },
+        // Button 2: Save for later (Uses the cleaned ID)
+        { id: `SAVE_LISTING_${listingId}`, title: "Save Listing" },
+        // Button 3: Next (Uses the standard ID from the controller)
+        { id: "NEXT_LISTING", title: "Next >>" },
+    ];
+
+    // 4. Send the buttons message
+    return await sendReplyButtons(to, bodyText, buttons, `MarketMatch Listing: ${listingTitle}`);
+}
+
 
 // -------------------------------------------------------------
-// 7) EXPORTS (FIXED: All core functions are exported)
+// 8) EXPORTS (FIXED: All core functions are exported, including new one)
 // -------------------------------------------------------------
 module.exports = {
   sendMessage, 
   sendText,
   sendButtons, 
   sendList,
-  sendReplyButtons, // New export to match chatbotController.js
+  sendReplyButtons, 
   sendSimpleText,
+  sendListingCard, // ⭐ NEW: Exported for use in chatbotController.js
 };
