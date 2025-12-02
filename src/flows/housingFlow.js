@@ -95,42 +95,32 @@ async function handleSaveListing({ sender, listingId, session = {} }) {
 /**
  * handleShowListings — shows latest listings directly (as a card slider)
  */
-// 🐞 FIX 1: Change function signature to accept destructuring object
 async function handleShowListings({ sender, session = {}, text }) {
-	// ⚠️ CRITICAL INITIALIZATION FIX
 	let listingIndex = session.listingIndex || 0;
 	let listings = [];
 
 	try {
-		// 1. Fetch Listings
-		// 🐞 FIX 2: Use the explicitly imported getAllListings() function
 		listings = await getAllListings();
 		console.log(`[DB] Fetched ${listings.length} listings successfully.`);
 
 		if (!listings || listings.length === 0) {
-			// No listings found scenario
 			return {
 				nextSession: { ...session, lastAction: 'menu' },
 				reply: "Sorry, I couldn't find any listings right now. Try searching later.",
 			};
 		}
 
-		// 2. Check current listing index validity
 		if (listingIndex >= listings.length) {
 			listingIndex = 0; // Reset to the first listing if we ran out
 		}
 
-		// Safely access the current listing object
 		const listing = listings[listingIndex];
 
-		// Ensure the listing object itself is valid
 		if (!listing) {
 			console.error("❌ CRASH AVOIDED: Listing object is undefined at index", listingIndex);
-			// Fallback to the first listing or an error message
 			listingIndex = 0;
 			const fallbackListing = listings[0];
 
-			// If even the first listing is bad, return error
 			if (!fallbackListing) {
 				return {
 					nextSession: { ...session, lastAction: 'menu' },
@@ -139,8 +129,6 @@ async function handleShowListings({ sender, session = {}, text }) {
 			}
 		}
 
-		// 3. Send the Interactive Listing Card
-		// 🐞 FIX 3: Correct function call alias (remove messageService.)
 		const response = await sendListingCard(
 			sender,
 			listing, // Pass the safely accessed listing object
@@ -149,14 +137,12 @@ async function handleShowListings({ sender, session = {}, text }) {
 		);
 
 		if (!response) {
-			// Fallback if the interactive card sending failed (API rejection/null return)
 			return {
 				nextSession: { ...session, lastAction: 'menu' },
 				reply: "I found listings, but I couldn't display them. Please try again or type 'menu'.",
 			};
 		}
 
-		// 4. Update session for next/previous actions
 		const nextSession = {
 			...session,
 			lastAction: 'showing_listing',
@@ -214,7 +200,7 @@ async function handleAIAction({ sender, message, aiResult = {}, session = {}, us
 			};
 		}
 
-		// Instead of returning text summary, send the first match as a card and store session
+		// Send the first match as a card and store session
 		const nextSession = { ...session, step: 'showing_results', lastResults: matches.slice(0, 8), listingIndex: 0 };
 		await sendListingCard(sender, matches[0], 0, matches.length);
 		return { nextSession, reply: null, buttons: null };
