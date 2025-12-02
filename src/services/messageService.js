@@ -90,12 +90,17 @@ async function sendButtons(to, bodyText, buttons) {
       },
     };
 
-    // Use generic sendMessage for sending the payload
-    return await sendMessage(to, payload);
-} catch (err) {
-    // ⚠️ CRITICAL DEBUGGING: Log the full API response error if available.
-    const apiError = err.response?.data?.error || err.message;
-    console.error("❌ sendButtons API FAILURE (Returning null):", JSON.stringify(apiError), "Recipient:", to);
+    // 5. Call sendMessage and check response
+    const res = await sendMessage(to, payload);
+    
+    // ⚠️ CRITICAL DEBUG: If sendMessage failed, log it here.
+    if (res === null) {
+        console.error("❌ sendButtons: sendMessage returned NULL (API REJECTION LIKELY).");
+    }
+    
+    return res;
+  } catch (err) {
+    console.error("❌ sendButtons failure (returning null):", err.message, "Recipient:", to);
     return null; 
   }
 }
