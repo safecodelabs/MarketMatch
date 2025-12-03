@@ -1,15 +1,3 @@
-const housingFlow = require("../flows/housingFlow"); 
-const { startOrContinue } = require("../flows/housingFlow");
-const { generateFollowUpQuestion } = require("../ai/aiEngine");
-const { getString } = require("../../utils/languageStrings");
-
-// Simple action handlers (send their own messages)
-const { 
-  handleViewDetails: handleViewDetailsAction,
-  handleNextListing: handleNextListingAction,
-  handleSaveListing: handleSaveListingAction,
-} = require("../flows/listingHandlers");
-
 
 // -----------------------------------------------------------
 // MAIN COMMAND HANDLER
@@ -18,96 +6,59 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
   console.log(`🤖 CommandRouter.handle called with cmd: "${cmd}"`);
 
   // ============================
-  // DYNAMIC PREFIX COMMANDS
+  // DYNAMIC PREFIX COMMANDS - SIMPLIFIED
   // ============================
 
   // VIEW_xxxxxxxxx
   if (cmd.startsWith("view_")) {
-    console.log(`🔍 Handling view command for ID: ${cmd}`);
-    const id = cmd.replace("view_", "");
-    await handleViewDetailsAction(userId, id);
+    console.log(`🔍 Would handle view command for ID: ${cmd}`);
+    // Just return without doing anything for now
     return { reply: null, nextSession: session };
   }
 
   // SAVE_xxxxxxxxx
   if (cmd.startsWith("save_")) {
-    console.log(`💾 Handling save command for ID: ${cmd}`);
-    const id = cmd.replace("save_", "");
-    await handleSaveListingAction(userId, id);
+    console.log(`💾 Would handle save command for ID: ${cmd}`);
     return { reply: null, nextSession: session };
   }
 
   // DELETE_xxxxxxxxx
   if (cmd.startsWith("DELETE_")) {
-    console.log(`🗑️ Handling delete command for ID: ${cmd}`);
-    const id = cmd.replace("DELETE_", "");
-    const flowResult = await housingFlow.handleDeleteListing({
-      sender: userId,
-      listingId: id,
-      session
-    });
+    console.log(`🗑️ Would handle delete command for ID: ${cmd}`);
     return { 
-      reply: flowResult.reply || null,
-      nextSession: flowResult.nextSession || session
+      reply: { type: "text", text: { body: "Delete functionality not available yet." } },
+      nextSession: session
     };
   }
 
   // MANAGE_xxxxxxxxx
   if (cmd.startsWith("MANAGE_")) {
-    console.log(`⚙️ Handling manage command for ID: ${cmd}`);
-    const id = cmd.replace("MANAGE_", "");
-    const flowResult = await housingFlow.handleManageSelection({
-      sender: userId,
-      listingId: id,
-      session
-    });
+    console.log(`⚙️ Would handle manage command for ID: ${cmd}`);
     return { 
-      reply: flowResult.reply || null,
-      nextSession: flowResult.nextSession || session
+      reply: { type: "text", text: { body: "Manage functionality not available yet." } },
+      nextSession: session
     };
   }
 
   // NEXT LISTING
   if (cmd === "next_listing") {
-    console.log("⏭️ Handling next listing command");
-    await handleNextListingAction(userId, session);
-    return { reply: null, nextSession: session };
+    console.log("⏭️ Would handle next listing command");
+    return { 
+      reply: { type: "text", text: { body: "Next listing functionality not available yet." } },
+      nextSession: session
+    };
   }
-
 
   // ---------------------------------------------------------
   // STATIC COMMANDS (MENU / SHOW LISTINGS / BUY / SELL ETC.)
   // ---------------------------------------------------------
   switch (cmd) {
-    // ⚠️ REMOVED: "listings" command - this was causing the conflict!
-    // The controller should handle "view_listings" menu item directly
-    // case "listings": {
-    //   console.log("🏠 CommandRouter: listings command intercepted - THIS IS THE PROBLEM!");
-    //   const listingResult = await housingFlow.handleShowListings({
-    //     sender: userId,
-    //     session,
-    //     userLang: language
-    //   });
-    // 
-    //   if (!listingResult.reply) {
-    //     return {
-    //       reply: null,
-    //       nextSession: listingResult.nextSession || { ...session, step: "show_listings" }
-    //     };
-    //   }
-    // 
-    //   return {
-    //     reply: { type: "text", text: { body: listingResult.reply } },
-    //     nextSession: listingResult.nextSession || { ...session, step: "show_listings" }
-    //   };
-    // }
-
     case "menu":
       console.log("📱 Handling menu command");
       return {
         reply: {
           type: "text",
-          text: { body: getString(language, "menu") }
+          text: { body: "Main Menu: Type 'view_listings', 'post_listing', 'manage_listings', or 'change_language'" }
         },
         nextSession: { ...session, step: "start" }
       };
@@ -117,7 +68,7 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
       return {
         reply: {
           type: "text",
-          text: { body: getString(language, "restart") }
+          text: { body: "Bot restarted! Type 'hi' to begin." }
         },
         nextSession: {
           ...session,
@@ -126,106 +77,56 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
         }
       };
 
-    case "post_command": {
-      console.log("📝 Handling post_command (NLP trigger)");
-      const postSession = await startOrContinue(
-        "post",
-        "",
-        session.housingFlow || {},
-        {},
-        userId
-      );
-
-      const question = await generateFollowUpQuestion({
-        missing: postSession.missing || [],
-        entities: postSession.data || {},
-        language
-      });
-
+    case "post_command":
+      console.log("📝 Handling post_command");
       return {
         reply: {
           type: "text",
-          text: { body: question || getString(language, "postPrompt") }
+          text: { body: "Please provide listing details: title, location, type, price, and contact." }
         },
-        nextSession: { ...session, housingFlow: postSession }
+        nextSession: session
       };
-    }
 
-    case "buy": {
-      console.log("💰 Handling buy command (NLP trigger)");
-      const buySession = await startOrContinue(
-        "buy",
-        "",
-        session.housingFlow || {},
-        {},
-        userId
-      );
-
-      const buyQuestion = await generateFollowUpQuestion({
-        missing: buySession.missing || [],
-        entities: buySession.data || {},
-        language
-      });
-
+    case "buy":
+      console.log("💰 Handling buy command");
       return {
         reply: {
           type: "text",
-          text: { body: buyQuestion || getString(language, "buyPrompt") }
+          text: { body: "What type of property are you looking for?" }
         },
-        nextSession: { ...session, housingFlow: buySession }
+        nextSession: session
       };
-    }
 
-    case "sell": {
-      console.log("🏷️ Handling sell command (NLP trigger)");
-      const sellSession = await startOrContinue(
-        "sell",
-        "",
-        session.housingFlow || {},
-        {},
-        userId
-      );
-
-      const sellQuestion = await generateFollowUpQuestion({
-        missing: sellSession.missing || [],
-        entities: sellSession.data || {},
-        language
-      });
-
+    case "sell":
+      console.log("🏷️ Handling sell command");
       return {
         reply: {
           type: "text",
-          text: { body: sellQuestion || getString(language, "sellPrompt") }
+          text: { body: "Tell me about the property you want to sell." }
         },
-        nextSession: { ...session, housingFlow: sellSession }
+        nextSession: session
       };
-    }
 
     default:
       console.log(`❓ CommandRouter: Unknown command "${cmd}"`);
       return {
         reply: {
           type: "text",
-          text: { body: getString(language, "unknownCommand") }
+          text: { body: "I didn't understand that command. Please try again." }
         },
         nextSession: session
       };
   }
 }
 
-
 // -----------------------------------------------------------
-// PARSE COMMAND - FIXED VERSION
+// PARSE COMMAND - SIMPLIFIED VERSION
 // -----------------------------------------------------------
 function parseCommand(text) {
   if (!text || !text.trim()) return null;
   const t = text.trim().toLowerCase();
 
   console.log(`🔍 CommandRouter.parseCommand analyzing: "${t}"`);
-
-  // ⚠️ REMOVED menu items - let controller handle them
-  // if (t === "menu") return "menu"; // REMOVED
-  // if (t === "restart") return "restart"; // REMOVED
 
   // Dynamic commands only - these should be handled by router
   if (t.startsWith("view_")) {
@@ -253,22 +154,14 @@ function parseCommand(text) {
     return "next_listing";
   }
 
-  // ⚠️ CRITICAL: REMOVE these lines that were catching menu items
-  // This was causing "view_listings" to be intercepted by router!
-  // if (
-  //   t === "listings" ||
-  //   t === "show listings" ||
-  //   t === "show_listings" ||
-  //   t === "view_listings"  // ⚠️ THIS WAS THE CULPRIT!
-  // ) {
-  //   console.log(`❌ Router: INTERCEPTING menu item "${t}" - THIS IS WRONG!`);
-  //   return "listings";
-  // }
-
-  // ⚠️ REMOVED: NLP triggers that overlap with menu - let controller handle them
-  // if (/^post[:\s]/i.test(t)) return "post_command"; // REMOVED
-  // if (t === "buy") return "buy"; // REMOVED
-  // if (t === "sell") return "sell"; // REMOVED
+  // Simple menu commands (kept minimal)
+  if (t === "menu") return "menu";
+  if (t === "restart") return "restart";
+  
+  // NLP triggers
+  if (/^post[:\s]/i.test(t)) return "post_command";
+  if (t === "buy") return "buy";
+  if (t === "sell") return "sell";
 
   console.log(`❌ Router: No match for "${t}" - returning null`);
   return null;
