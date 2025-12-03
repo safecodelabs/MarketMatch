@@ -91,14 +91,19 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
         userLang: language
       });
 
-      // The reply might be the first listing card, which is handled internally by housingFlow, 
-      // but if there's a simple text reply (e.g., "No listings found"), it's returned here.
-      return {
-        reply: listingResult.reply
-          ? { type: "text", text: { body: listingResult.reply } }
-          : null,
-        nextSession: listingResult.nextSession || { ...session, step: "show_listings" }
-      };
+// If housingFlow already sent the listing card, do NOT send anything else
+if (!listingResult.reply) {
+  return {
+    reply: null,
+    nextSession: listingResult.nextSession || { ...session, step: "show_listings" }
+  };
+}
+
+// If housingFlow returned a text-based reply (e.g., "No listings found")
+return {
+  reply: { type: "text", text: { body: listingResult.reply } },
+  nextSession: listingResult.nextSession || { ...session, step: "show_listings" }
+};
     }
 
     case "menu":
