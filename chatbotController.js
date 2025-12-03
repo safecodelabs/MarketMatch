@@ -574,9 +574,8 @@ case "view_listings":
   return session;
 }
 
-
-
-// ========================================
 module.exports = {
   handleIncomingMessage,
+  handleShowListings,  // Make sure this is exported
+  handleManageListings // Make sure this is exported
 };

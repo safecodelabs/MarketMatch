@@ -5,7 +5,7 @@ const express = require("express");
 const router = express.Router();
 
 // Import bot handler
-const { handleIncomingMessage } = require("../src/bots/whatsappBot");
+const { handleIncomingMessage } = require("../chatbotController");
 
 // Fix: Sometimes WhatsApp sends raw buffer instead of JSON
 router.use((req, res, next) => {
