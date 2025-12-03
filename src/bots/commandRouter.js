@@ -244,7 +244,8 @@ function parseCommand(text) {
 
   if (t === "listings" || t === "show listings" || t === "show_listings")
     return "listings";
-
+  if (t === "view_listings") return "show_listings"; 
+  
   // NLP command triggers
   if (/^post[:\s]/i.test(t)) return "post_command";
   if (t === "buy") return "buy";
