@@ -4,7 +4,7 @@
 
 // Import entire service (fixes missing functions)
 const messageService = require("../services/messageService");
-
+const { handleShowListings: controllerHandleShowListings } = require("../../chatbotController")
 const { getSession, saveSession } = require("../../utils/sessionStore");
 
 // Housing flow handlers

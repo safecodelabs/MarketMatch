@@ -1,7 +1,7 @@
 const housingFlow = require("../flows/housingFlow"); 
 const { startOrContinue } = require("../flows/housingFlow");
 const { generateFollowUpQuestion } = require("../ai/aiEngine");
-const { getString } = require("../utils/languageStrings");
+const { getString } = require("../../utils/languageStrings");
 
 // Simple action handlers (send their own messages)
 const { 
