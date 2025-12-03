@@ -1,6 +1,7 @@
 // ========================================
 // IMPORTS
 // ========================================
+const commandRouter = require("./src/bots/commandRouter");
 const { getSession, saveSession } = require("./utils/sessionStore");
 const { 
   getUserProfile, 
@@ -444,6 +445,40 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   // ===========================
   // 6) MENU COMMAND HANDLING
   // ===========================
+
+
+// ===========================================
+// 🚀 NEW: ROUTER-BASED COMMAND PROCESSING
+// ===========================================
+
+// Parse using the new command router
+const cmd = commandRouter.parseCommand(lower);
+
+// If command recognized by router, route it
+if (cmd) {
+  const result = await commandRouter.handle(
+    cmd,
+    session,
+    sender,
+    "en",
+    {}
+  );
+
+  // send card / text
+  if (result.reply) {
+    await sendMessage(sender, result.reply);
+  }
+
+  // store new session
+  await saveSession(sender, result.nextSession);
+
+  return result.nextSession;
+}
+
+// =======================================================
+// OLD MENU SYSTEM — REACHED ONLY IF ROUTER DIDN'T MATCH
+// =======================================================
+
   switch (lower) {
     case "view_listings":
       await handleShowListings(sender, session); 
