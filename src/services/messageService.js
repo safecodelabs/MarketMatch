@@ -250,10 +250,10 @@ async function sendSimpleText(to, text) {
 }
 
 // -------------------------------------------------------------
-// 7) SEND LISTING CARD (Uses sendButtons) - REFINED VERSION
+// 7) SEND LISTING CARD (Uses sendButtons) - PATCHED VERSION
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, currentIndex, totalCount) {
-    console.log("🔄 sendListingCard called");
+    console.log("🔄 [MESSAGE SERVICE] sendListingCard called");
     console.log("📊 Listing metadata:", { 
         currentIndex, 
         totalCount,
@@ -264,15 +264,12 @@ async function sendListingCard(to, listing, currentIndex, totalCount) {
     
     try {
         // 1. Clean and validate the listing ID
-        // WhatsApp button IDs cannot contain special characters except underscore and hyphen
         const originalId = String(listing.id || 'unknown');
         const listingId = originalId.replace(/[^a-zA-Z0-9_-]/g, '_');
         
-        if (listingId !== originalId) {
-            console.log(`🔧 Cleaned ID: "${originalId}" → "${listingId}"`);
-        }
+        console.log(`🔧 Listing ID: "${originalId}" → "${listingId}"`);
         
-        // 2. Prepare display values with safe defaults
+        // 2. Prepare display values
         const listingTitle = cleanString(listing.title || listing.property_type || 'Property', 40);
         const listingLocation = cleanString(listing.location || 'Location not specified', 40);
         const listingPrice = listing.price 
@@ -281,7 +278,7 @@ async function sendListingCard(to, listing, currentIndex, totalCount) {
         const listingBedrooms = listing.bedrooms || listing.bhk || 'N/A';
         const listingType = listing.property_type || listing.type || 'Property';
 
-        console.log("🎨 Formatted listing data:", {
+        console.log("🎨 Formatted listing:", {
             title: listingTitle,
             location: listingLocation,
             price: listingPrice,
@@ -289,7 +286,7 @@ async function sendListingCard(to, listing, currentIndex, totalCount) {
             type: listingType
         });
 
-        // 3. Construct the message body (within WhatsApp's 1024 char limit)
+        // 3. Construct the message body
         const bodyText = 
 `🏡 *Listing ${currentIndex + 1} of ${totalCount}*
 
@@ -302,41 +299,41 @@ Tap a button below to interact.`;
 
         console.log(`📝 Body text length: ${bodyText.length}/1024`);
 
-        // 4. Construct buttons with SIMPLIFIED IDs for WhatsApp compatibility
-        // Critical: Keep button IDs short and simple
+        // 4. Construct buttons - CRITICAL: Match controller's expected IDs
         const buttons = [
             { 
-                id: `VIEW_${listingId.slice(0, 20)}`, // Keep it short
+                id: `VIEW_DETAILS_${listingId.slice(0, 20)}`, // Must match controller's check
                 title: "View Details" 
             },
             { 
-                id: `SAVE_${listingId.slice(0, 20)}`, // Keep it short  
-                title: "Save" 
+                id: `SAVE_LISTING_${listingId.slice(0, 20)}`, // Must match controller's check
+                title: "Save Listing" 
             },
             { 
-                id: "NEXT", // Simple static ID
+                id: "NEXT_LISTING", // Must match controller's check
                 title: "Next >>" 
             },
         ];
 
         console.log("🔘 Prepared buttons:", buttons.map(b => ({ id: b.id, title: b.title })));
 
-        // 5. Prepare header (max 60 chars)
+        // 5. Prepare header
         const headerText = `🏡 ${listingTitle}`.slice(0, 60);
         
-        console.log(`📋 Header: "${headerText}" (${headerText.length}/60)`);
-        console.log("📤 Sending listing card...");
+        console.log(`📋 Header: "${headerText}"`);
+        console.log("📤 Calling sendReplyButtons...");
         
         // 6. Send the interactive message
         const result = await sendReplyButtons(to, bodyText, buttons, headerText);
         
-        console.log("✅ Listing card sent successfully!");
+        console.log("✅ [MESSAGE SERVICE] sendListingCard completed successfully!");
         return result;
         
     } catch (error) {
-        console.error("❌ ERROR in sendListingCard:", error.message);
+        console.error("❌ [MESSAGE SERVICE] sendListingCard ERROR:", error.message);
+        console.error("❌ Error details:", error);
         
-        // 7. FALLBACK: Send a simple text message if interactive fails
+        // 7. FALLBACK
         console.log("🔄 Falling back to text message...");
         
         const fallbackText = 

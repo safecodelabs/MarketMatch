@@ -121,56 +121,52 @@ function parseLangFromText(text) {
 
 
 // ========================================
-// START/CONTINUE LISTING FLOW - FIXED VERSION
+// START/CONTINUE LISTING FLOW - EXTREME DEBUG VERSION
 // ========================================
 async function handleShowListings(sender, session) {
-  console.log("🔍 [DEBUG] handleShowListings ENTERED");
-  console.log("🔍 [DEBUG] session.step:", session.step);
-  console.log("🔍 [DEBUG] session.housingFlow:", JSON.stringify(session.housingFlow, null, 2));
+  console.log("🎯 [EXTREME DEBUG] handleShowListings ENTERED");
+  console.log("🎯 [EXTREME DEBUG] session:", JSON.stringify(session, null, 2));
   
   try {
     // Check if we already have listings stored in the session
     let { listings, totalCount } = session.housingFlow.listingData || {};
     
-    console.log("🔍 [DEBUG] Initial listings from session:", listings ? `${listings.length} listings` : "none");
+    console.log("🎯 [EXTREME DEBUG] listings from session:", listings ? `${listings.length} listings` : "NONE");
 
-    // If not, fetch the top listings (this happens on the first 'View Listings' click)
+    // If not, fetch the top listings
     if (!listings) {
-      console.log("🔄 [DEBUG] Fetching fresh listings from database");
+      console.log("🎯 [EXTREME DEBUG] Fetching fresh listings...");
       const result = await getTopListings();
       listings = result.listings;
       totalCount = result.totalCount;
       
-      console.log(`📊 [DEBUG] Found ${listings.length} listings`);
-      console.log("📋 [DEBUG] First listing:", JSON.stringify(listings[0], null, 2));
-
+      console.log(`🎯 [EXTREME DEBUG] Fetched ${listings.length} listings`);
+      
       if (!listings || listings.length === 0) {
-        console.log("❌ [DEBUG] No listings found - sending text message");
+        console.log("🎯 [EXTREME DEBUG] NO LISTINGS FOUND");
         await sendMessage(sender, "No listings available right now.");
         return;
       }
 
-      // Initialize session for the new interactive flow
+      // Initialize session
       session.step = "awaiting_listing_action";
       session.housingFlow.currentIndex = 0;
       session.housingFlow.listingData = { listings, totalCount };
       
-      // ✅ CRITICAL: Save the session
       await saveSession(sender, session);
-      console.log("💾 [DEBUG] Session saved with listing data");
+      console.log("🎯 [EXTREME DEBUG] Session saved");
     }
     
     // Get current listing
     const currentIndex = session.housingFlow.currentIndex || 0;
     const listing = listings[currentIndex];
     
-    console.log("🔍 [DEBUG] Current index:", currentIndex);
-    console.log("🔍 [DEBUG] Current listing:", listing ? `Found listing ID: ${listing.id}` : "NO LISTING FOUND!");
+    console.log("🎯 [EXTREME DEBUG] currentIndex:", currentIndex);
+    console.log("🎯 [EXTREME DEBUG] listing:", listing ? `ID: ${listing.id}` : "NULL");
 
     if (!listing) {
-      // Handles flow completion
-      console.log("✅ [DEBUG] All listings shown, resetting flow");
-      await sendMessage(sender, "You've seen all the available listings! Type *hi* to return to the main menu.");
+      console.log("🎯 [EXTREME DEBUG] No listing at index");
+      await sendMessage(sender, "You've seen all the available listings!");
       session.step = "menu";
       delete session.housingFlow.listingData;
       delete session.housingFlow.currentIndex;
@@ -178,36 +174,54 @@ async function handleShowListings(sender, session) {
       return;
     }
 
-    console.log("📤 [DEBUG] Calling sendListingCard with:", {
-      listingId: listing.id,
-      title: listing.title,
-      currentIndex,
-      totalCount
+    console.log("🎯 [EXTREME DEBUG] Calling sendListingCard NOW...");
+    console.log("🎯 [EXTREME DEBUG] Listing data:", {
+      id: listing.id,
+      title: listing.title || listing.type,
+      location: listing.location,
+      price: listing.price
     });
     
-    // Show the current listing
-    await sendListingCard(
-      sender, 
-      { 
-        id: listing.id,
-        title: listing.title || listing.type,
-        location: listing.location,
-        price: listing.price,
-        bedrooms: listing.bhk,
-        property_type: listing.type,
-        description: listing.description,
-        contact: listing.contact
-      }, 
-      currentIndex, 
-      totalCount
-    );
-    
-    console.log("✅ [DEBUG] handleShowListings completed");
+    // CRITICAL: Try-catch sendListingCard
+    try {
+      await sendListingCard(
+        sender, 
+        { 
+          id: listing.id,
+          title: listing.title || listing.type || "Property",
+          location: listing.location || "Not specified",
+          price: listing.price || "N/A",
+          bedrooms: listing.bhk || "N/A",
+          property_type: listing.type || "Property",
+          description: listing.description || "No description",
+          contact: listing.contact || "Contact not provided"
+        }, 
+        currentIndex, 
+        totalCount
+      );
+      console.log("🎯 [EXTREME DEBUG] sendListingCard SUCCESS!");
+    } catch (cardError) {
+      console.error("🎯 [EXTREME DEBUG] sendListingCard FAILED:", cardError.message);
+      console.error("🎯 [EXTREME DEBUG] Error stack:", cardError.stack);
+      
+      // FALLBACK: Send simple text
+      const fallbackText = 
+`🏡 Listing ${currentIndex + 1}/${totalCount}
+${listing.title || listing.type || "Property"}
+
+📍 ${listing.location || "Location not specified"}
+💰 ${listing.price || "Price on request"}
+🛏️ ${listing.bhk || "N/A"} BHK
+
+Reply "next" for next listing.`;
+      
+      await sendMessage(sender, fallbackText);
+    }
 
   } catch (err) {
-    console.error("❌ [DEBUG] Error in handleShowListings:", err);
-    console.error("❌ [DEBUG] Error stack:", err.stack);
-    await sendMessage(sender, "❌ Unable to fetch listings right now.");
+    console.error("🎯 [EXTREME DEBUG] FATAL ERROR in handleShowListings:", err);
+    console.error("🎯 [EXTREME DEBUG] Error stack:", err.stack);
+    await sendMessage(sender, "❌ Error fetching listings.");
   }
 }
 
@@ -253,13 +267,11 @@ async function handleManageListings(sender) {
 // MAIN CONTROLLER - FIXED VERSION
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}) {
-
   console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
   console.log("🔍 [CONTROLLER DEBUG] Input - sender:", sender);
   console.log("🔍 [CONTROLLER DEBUG] Input - text:", text);
-  console.log("🔍 [CONTROLLER DEBUG] Input - lower:", lower);
-  console.log("🔍 [CONTROLLER DEBUG] Input - replyId:", replyId);
-  console.log("🔍 [CONTROLLER DEBUG] Input - msg:", msg);
+  console.log("🔍 [CONTROLLER DEBUG] Input - metadata type:", metadata?.type);
+  
   if (!sender) return;
 
   // ===========================
@@ -277,9 +289,14 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
     replyId = metadata.interactive.button_reply.id;
   }
   
+  console.log("🔍 [CONTROLLER DEBUG] replyId:", replyId);
+  
   // Use replyId if present, otherwise use raw text
   const msg = String(replyId || text || "").trim();
   const lower = msg.toLowerCase();
+  
+  console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
+  console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
 
   // session
   let session = (await getSession(sender)) || { 
@@ -491,91 +508,93 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   // =======================================================
 
   switch (lower) {
-case "view_listings":
-  console.log("🔍 [CRITICAL DEBUG] view_listings CASE ENTERED!");
-  console.log("🔍 [CRITICAL DEBUG] About to call handleShowListings...");
-  
-  // Test: Call sendListingCard directly first
-  console.log("🔍 [CRITICAL DEBUG] TEST: Calling sendListingCard directly...");
-  
-  try {
-    // Get listings first
-    const result = await getTopListings();
-    const listings = result.listings;
-    
-    if (listings && listings.length > 0) {
-      const testListing = listings[0];
-      console.log("🔍 [CRITICAL DEBUG] Test listing:", testListing);
-      
-      // Call sendListingCard directly
-      await sendListingCard(
+    case "view_listings":
+      console.log("🏠 Menu: View Listings selected");
+      session.step = "awaiting_listing_action"; 
+      await saveSession(sender, session); // Save session BEFORE calling handleShowListings
+      await handleShowListings(sender, session); 
+      return session; // Return early
+
+    case "post_listing":
+      console.log("📝 Menu: Post Listing selected");
+      await sendMessage(
         sender,
-        {
-          id: testListing.id,
-          title: testListing.title || testListing.type,
-          location: testListing.location,
-          price: testListing.price,
-          bedrooms: testListing.bhk,
-          property_type: testListing.type,
-          description: testListing.description,
-          contact: testListing.contact
-        },
-        0,
-        listings.length
+        "Please send the listing details in this exact format:\nExample: *Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro*"
       );
-      console.log("🔍 [CRITICAL DEBUG] Direct sendListingCard call completed!");
-    } else {
-      await sendMessage(sender, "No listings found for test.");
-    }
-  } catch (testError) {
-    console.error("🔍 [CRITICAL DEBUG] Test failed:", testError.message);
+      session.step = "awaiting_post_details";
+      break;
+
+    case "manage_listings":
+      console.log("⚙️ Menu: Manage Listings selected");
+      await handleManageListings(sender);
+      session.step = "managing";
+      break;
+
+    case "change_language":
+      console.log("🌐 Menu: Change Language selected");
+      session.housingFlow.awaitingLangSelection = true;
+      session.step = "awaiting_language";
+      await saveSession(sender, session);
+      await sendLanguageListViaService(sender);
+      return session; // Return early
+
+    default:
+      // Check for delete command only if in 'managing' state (to be implemented later)
+      if (session.step === "managing" && lower.startsWith("delete")) {
+        // To be implemented: logic to parse ID and delete listing
+        await sendMessage(sender, "Received delete command. Deletion logic is not yet implemented.");
+        await handleManageListings(sender); // Show list again
+        return session;
+      }
+      
+      // Default: show menu
+      console.log(`❓ Unknown command: ${lower}, showing menu`);
+      await sendMessage(sender, "I didn't understand that. Choose an option or type *hi* to restart.");
+      await sendMainMenuViaService(sender);
+      session.step = "menu";
+      break;
   }
-  
-  // Now try the normal flow
-  console.log("🔍 [CRITICAL DEBUG] Now trying normal handleShowListings...");
-  session.step = "awaiting_listing_action"; 
+
   await saveSession(sender, session);
-  await handleShowListings(sender, session); 
-  return session;
-  }
-
-  await saveSession(sender, session);
 
 
-  // ===========================================
-  // 🚀 NEW: ROUTER-BASED COMMAND PROCESSING
-  // ===========================================
+//   // ===========================================
+//   // 🚀 NEW: ROUTER-BASED COMMAND PROCESSING
+//   // ===========================================
 
-  // Parse using the new command router
-  const cmd = commandRouter.parseCommand(lower);
+//   // Parse using the new command router
+//   const cmd = commandRouter.parseCommand(lower);
 
-  // If command recognized by router, route it
-  if (cmd) {
-    console.log(`🤖 Router handling command: ${cmd}`);
-    const result = await commandRouter.handle(
-      cmd,
-      session,
-      sender,
-      "en",
-      {}
-    );
+//   // If command recognized by router, route it
+//   if (cmd) {
+//     console.log(`🤖 Router handling command: ${cmd}`);
+//     const result = await commandRouter.handle(
+//       cmd,
+//       session,
+//       sender,
+//       "en",
+//       {}
+//     );
 
-    // send card / text
-    if (result.reply) {
-      await sendMessage(sender, result.reply);
-    }
+//     // send card / text
+//     if (result.reply) {
+//       await sendMessage(sender, result.reply);
+//     }
 
-    // store new session
-    await saveSession(sender, result.nextSession);
+//     // store new session
+//     await saveSession(sender, result.nextSession);
 
-    return result.nextSession;
-  }
+//     return result.nextSession;
+//   }
   
   return session;
 }
 
+
+
+// ========================================
 module.exports = {
   handleIncomingMessage,
-  handleShowListings,  // Make sure this is exported
-  handleManageListings // Make sure this is exported
+  handleShowListings,
+  handleManageListings
 };
