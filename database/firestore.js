@@ -23,6 +23,9 @@ const db = admin.firestore();
 const listingsRef = db.collection("listings");
 const usersRef = db.collection("users");
 const savedRef = db.collection("saved"); // Dedicated collection for saved items
+async function getTopListings(limit = 10) {
+  console.log("🔍 [DB DEBUG] getTopListings CALLED from:", new Error().stack.split('\n')[2]);
+}
 
 // -----------------------------------------------
 // ADD NEW LISTING

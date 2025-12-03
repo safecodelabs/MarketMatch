@@ -253,6 +253,13 @@ async function handleManageListings(sender) {
 // MAIN CONTROLLER - FIXED VERSION
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}) {
+
+  console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
+  console.log("🔍 [CONTROLLER DEBUG] Input - sender:", sender);
+  console.log("🔍 [CONTROLLER DEBUG] Input - text:", text);
+  console.log("🔍 [CONTROLLER DEBUG] Input - lower:", lower);
+  console.log("🔍 [CONTROLLER DEBUG] Input - replyId:", replyId);
+  console.log("🔍 [CONTROLLER DEBUG] Input - msg:", msg);
   if (!sender) return;
 
   // ===========================
@@ -484,51 +491,52 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   // =======================================================
 
   switch (lower) {
-    case "view_listings":
-      console.log("🏠 Menu: View Listings selected");
-      session.step = "awaiting_listing_action"; 
-      await saveSession(sender, session); // Save session BEFORE calling handleShowListings
-      await handleShowListings(sender, session); 
-      return session; // Return early
-
-    case "post_listing":
-      console.log("📝 Menu: Post Listing selected");
-      await sendMessage(
-        sender,
-        "Please send the listing details in this exact format:\nExample: *Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro*"
-      );
-      session.step = "awaiting_post_details";
-      break;
-
-    case "manage_listings":
-      console.log("⚙️ Menu: Manage Listings selected");
-      await handleManageListings(sender);
-      session.step = "managing";
-      break;
-
-    case "change_language":
-      console.log("🌐 Menu: Change Language selected");
-      session.housingFlow.awaitingLangSelection = true;
-      session.step = "awaiting_language";
-      await saveSession(sender, session);
-      await sendLanguageListViaService(sender);
-      return session; // Return early
-
-    default:
-      // Check for delete command only if in 'managing' state (to be implemented later)
-      if (session.step === "managing" && lower.startsWith("delete")) {
-        // To be implemented: logic to parse ID and delete listing
-        await sendMessage(sender, "Received delete command. Deletion logic is not yet implemented.");
-        await handleManageListings(sender); // Show list again
-        return session;
-      }
+case "view_listings":
+  console.log("🔍 [CRITICAL DEBUG] view_listings CASE ENTERED!");
+  console.log("🔍 [CRITICAL DEBUG] About to call handleShowListings...");
+  
+  // Test: Call sendListingCard directly first
+  console.log("🔍 [CRITICAL DEBUG] TEST: Calling sendListingCard directly...");
+  
+  try {
+    // Get listings first
+    const result = await getTopListings();
+    const listings = result.listings;
+    
+    if (listings && listings.length > 0) {
+      const testListing = listings[0];
+      console.log("🔍 [CRITICAL DEBUG] Test listing:", testListing);
       
-      // Default: show menu
-      console.log(`❓ Unknown command: ${lower}, showing menu`);
-      await sendMessage(sender, "I didn't understand that. Choose an option or type *hi* to restart.");
-      await sendMainMenuViaService(sender);
-      session.step = "menu";
-      break;
+      // Call sendListingCard directly
+      await sendListingCard(
+        sender,
+        {
+          id: testListing.id,
+          title: testListing.title || testListing.type,
+          location: testListing.location,
+          price: testListing.price,
+          bedrooms: testListing.bhk,
+          property_type: testListing.type,
+          description: testListing.description,
+          contact: testListing.contact
+        },
+        0,
+        listings.length
+      );
+      console.log("🔍 [CRITICAL DEBUG] Direct sendListingCard call completed!");
+    } else {
+      await sendMessage(sender, "No listings found for test.");
+    }
+  } catch (testError) {
+    console.error("🔍 [CRITICAL DEBUG] Test failed:", testError.message);
+  }
+  
+  // Now try the normal flow
+  console.log("🔍 [CRITICAL DEBUG] Now trying normal handleShowListings...");
+  session.step = "awaiting_listing_action"; 
+  await saveSession(sender, session);
+  await handleShowListings(sender, session); 
+  return session;
   }
 
   await saveSession(sender, session);
