@@ -124,23 +124,28 @@ function parseLangFromText(text) {
 // START/CONTINUE LISTING FLOW - FIXED VERSION
 // ========================================
 async function handleShowListings(sender, session) {
-  console.log("📞 handleShowListings called with session:", session.step); // Debug
+  console.log("🔍 [DEBUG] handleShowListings ENTERED");
+  console.log("🔍 [DEBUG] session.step:", session.step);
+  console.log("🔍 [DEBUG] session.housingFlow:", JSON.stringify(session.housingFlow, null, 2));
   
   try {
     // Check if we already have listings stored in the session
     let { listings, totalCount } = session.housingFlow.listingData || {};
+    
+    console.log("🔍 [DEBUG] Initial listings from session:", listings ? `${listings.length} listings` : "none");
 
     // If not, fetch the top listings (this happens on the first 'View Listings' click)
     if (!listings) {
-      console.log("🔄 Fetching fresh listings from database");
+      console.log("🔄 [DEBUG] Fetching fresh listings from database");
       const result = await getTopListings();
       listings = result.listings;
       totalCount = result.totalCount;
       
-      console.log(`📊 Found ${listings.length} listings`); // Debug
+      console.log(`📊 [DEBUG] Found ${listings.length} listings`);
+      console.log("📋 [DEBUG] First listing:", JSON.stringify(listings[0], null, 2));
 
       if (!listings || listings.length === 0) {
-        console.log("❌ No listings found");
+        console.log("❌ [DEBUG] No listings found - sending text message");
         await sendMessage(sender, "No listings available right now.");
         return;
       }
@@ -152,15 +157,19 @@ async function handleShowListings(sender, session) {
       
       // ✅ CRITICAL: Save the session
       await saveSession(sender, session);
+      console.log("💾 [DEBUG] Session saved with listing data");
     }
     
     // Get current listing
     const currentIndex = session.housingFlow.currentIndex || 0;
     const listing = listings[currentIndex];
+    
+    console.log("🔍 [DEBUG] Current index:", currentIndex);
+    console.log("🔍 [DEBUG] Current listing:", listing ? `Found listing ID: ${listing.id}` : "NO LISTING FOUND!");
 
     if (!listing) {
       // Handles flow completion
-      console.log("✅ All listings shown, resetting flow");
+      console.log("✅ [DEBUG] All listings shown, resetting flow");
       await sendMessage(sender, "You've seen all the available listings! Type *hi* to return to the main menu.");
       session.step = "menu";
       delete session.housingFlow.listingData;
@@ -169,29 +178,35 @@ async function handleShowListings(sender, session) {
       return;
     }
 
-    console.log(`📤 Sending listing card ${currentIndex + 1}/${totalCount}:`, listing.title || listing.type); // Debug
+    console.log("📤 [DEBUG] Calling sendListingCard with:", {
+      listingId: listing.id,
+      title: listing.title,
+      currentIndex,
+      totalCount
+    });
     
     // Show the current listing
     await sendListingCard(
       sender, 
       { 
         id: listing.id,
-        title: listing.title || listing.type || "Property Listing",
-        location: listing.location || "Location not specified",
-        price: listing.price || "Price on request",
-        bedrooms: listing.bhk || listing.bedrooms || "N/A",
-        property_type: listing.type || listing.property_type || "Property",
-        description: listing.description || "No description available",
-        contact: listing.contact || "Contact not provided"
+        title: listing.title || listing.type,
+        location: listing.location,
+        price: listing.price,
+        bedrooms: listing.bhk,
+        property_type: listing.type,
+        description: listing.description,
+        contact: listing.contact
       }, 
       currentIndex, 
       totalCount
     );
     
-    console.log("✅ Listing card sent successfully"); // Debug
+    console.log("✅ [DEBUG] handleShowListings completed");
 
   } catch (err) {
-    console.error("❌ Error in handleShowListings:", err);
+    console.error("❌ [DEBUG] Error in handleShowListings:", err);
+    console.error("❌ [DEBUG] Error stack:", err.stack);
     await sendMessage(sender, "❌ Unable to fetch listings right now.");
   }
 }
