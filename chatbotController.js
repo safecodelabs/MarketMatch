@@ -451,19 +451,38 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
     }
     
     // 5.1 Handle NEXT button
-    if (msg === "NEXT_LISTING") { // The ID is always "NEXT_LISTING" from the service
-      console.log("⏭️ Next button clicked");
-      session.housingFlow.currentIndex++;
-      // Check against total count
-      if (session.housingFlow.currentIndex >= listingData.totalCount) {
-        // Reset index to loop, or end the flow if preferred. Looping for infinite demo.
-        session.housingFlow.currentIndex = 0; 
-        await sendMessage(sender, "🔄 Looping back to the first listing.");
-      }
-      await saveSession(sender, session);
-      await handleShowListings(sender, session); // Display the next listing
-      return session;
-    } 
+if (msg === "NEXT_LISTING") {
+  console.log("⏭️ Next button clicked");
+  
+  // Get the current listings data
+  const listingData = session.housingFlow.listingData;
+  if (!listingData || !listingData.listings) {
+    await sendMessage(sender, "No listings data found. Please search again.");
+    session.step = "menu";
+    await saveSession(sender, session);
+    return session;
+  }
+  
+  const totalListings = listingData.listings.length;
+  let currentIndex = session.housingFlow.currentIndex || 0;
+  
+  // Move to next listing
+  currentIndex++;
+  
+  // Check if we've reached the end
+  if (currentIndex >= totalListings) {
+    currentIndex = 0; // Loop back to start
+    await sendMessage(sender, "🔄 You've seen all listings! Starting from the first one again.");
+  }
+  
+  // Update session
+  session.housingFlow.currentIndex = currentIndex;
+  await saveSession(sender, session);
+  
+  // Show the next listing
+  await handleShowListings(sender, session);
+  return session;
+}
     
     // 5.2 Handle VIEW DETAILS button (ID format: VIEW_DETAILS_CLEAN_ID)
     if (msg.startsWith("VIEW_DETAILS_")) {
