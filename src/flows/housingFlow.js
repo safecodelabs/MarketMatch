@@ -155,8 +155,8 @@ async function handleShowListings({ sender, session = {}, text }) {
     const nextSession = {
       ...session,
       lastAction: 'showing_listing',
-      listingIndex: listingIndex,
-      currentListings: listings.map(l => l.id), // Store IDs if needed for persistence
+      lastResults: listings,       // store full objects
+      listingIndex: listingIndex,  // keep pointer // Store IDs if needed for persistence
     };
 
     return { nextSession, reply: null, buttons: null };
