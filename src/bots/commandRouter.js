@@ -1,4 +1,3 @@
-
 // -----------------------------------------------------------
 // MAIN COMMAND HANDLER
 // -----------------------------------------------------------
@@ -6,23 +5,19 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
   console.log(`🤖 CommandRouter.handle called with cmd: "${cmd}"`);
 
   // ============================
-  // DYNAMIC PREFIX COMMANDS - SIMPLIFIED
+  // DYNAMIC PREFIX COMMANDS
   // ============================
 
-  // VIEW_xxxxxxxxx
   if (cmd.startsWith("view_")) {
     console.log(`🔍 Would handle view command for ID: ${cmd}`);
-    // Just return without doing anything for now
     return { reply: null, nextSession: session };
   }
 
-  // SAVE_xxxxxxxxx
   if (cmd.startsWith("save_")) {
     console.log(`💾 Would handle save command for ID: ${cmd}`);
     return { reply: null, nextSession: session };
   }
 
-  // DELETE_xxxxxxxxx
   if (cmd.startsWith("DELETE_")) {
     console.log(`🗑️ Would handle delete command for ID: ${cmd}`);
     return { 
@@ -31,7 +26,6 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
     };
   }
 
-  // MANAGE_xxxxxxxxx
   if (cmd.startsWith("MANAGE_")) {
     console.log(`⚙️ Would handle manage command for ID: ${cmd}`);
     return { 
@@ -40,7 +34,6 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
     };
   }
 
-  // NEXT LISTING
   if (cmd === "next_listing") {
     console.log("⏭️ Would handle next listing command");
     return { 
@@ -50,16 +43,15 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
   }
 
   // ---------------------------------------------------------
-  // STATIC COMMANDS (MENU / SHOW LISTINGS / BUY / SELL ETC.)
+  // STATIC COMMANDS
   // ---------------------------------------------------------
   switch (cmd) {
+
+    // ⭐ NEW FIX — TRUE /menu HANDLING ⭐
     case "menu":
-      console.log("📱 Handling menu command");
+      console.log("📱 Handling menu command (interactive list trigger)");
       return {
-        reply: {
-          type: "text",
-          text: { body: "Main Menu: Type 'view_listings', 'post_listing', 'manage_listings', or 'change_language'" }
-        },
+        reply: { action: "show_menu_list" },   // <-- controller now catches this!
         nextSession: { ...session, step: "start" }
       };
 
@@ -124,40 +116,23 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
 // -----------------------------------------------------------
 function parseCommand(text) {
   if (!text || !text.trim()) return null;
-  const t = text.trim().toLowerCase();
 
+  const t = text.trim().toLowerCase();
   console.log(`🔍 CommandRouter.parseCommand analyzing: "${t}"`);
 
-  // Dynamic commands only - these should be handled by router
-  if (t.startsWith("view_")) {
-    console.log(`✅ Router: Matched view_ prefix command: ${t}`);
-    return t;
-  }
-  
-  if (t.startsWith("save_")) {
-    console.log(`✅ Router: Matched save_ prefix command: ${t}`);
-    return t;
-  }
-  
-  if (t.startsWith("manage_")) {
-    console.log(`✅ Router: Matched manage_ prefix command: ${t}`);
-    return t.toUpperCase();
-  }
-  
-  if (t.startsWith("delete_")) {
-    console.log(`✅ Router: Matched delete_ prefix command: ${t}`);
-    return t.toUpperCase();
-  }
+  // Dynamic commands
+  if (t.startsWith("view_")) return t;
+  if (t.startsWith("save_")) return t;
+  if (t.startsWith("manage_")) return t.toUpperCase();
+  if (t.startsWith("delete_")) return t.toUpperCase();
+  if (t === "next_listing") return "next_listing";
 
-  if (t === "next_listing") {
-    console.log("✅ Router: Matched next_listing command");
-    return "next_listing";
-  }
-
-  // Simple menu commands (kept minimal)
+  // ⭐ FIXED: Menu commands mapping ⭐
+  if (t === "/menu") return "menu";
   if (t === "menu") return "menu";
+
   if (t === "restart") return "restart";
-  
+
   // NLP triggers
   if (/^post[:\s]/i.test(t)) return "post_command";
   if (t === "buy") return "buy";
