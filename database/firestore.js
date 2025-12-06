@@ -270,66 +270,133 @@ async function removeSavedListing(userId, listingId) {
 }
 
 // -----------------------------------------------------
-// GET USER'S SAVED LISTINGS
+// GET USER'S SAVED LISTINGS - FIXED VERSION
 // -----------------------------------------------------
 async function getUserSavedListings(userId) {
   try {
-    // Query saved collection for this user
-    const snapshot = await savedRef
-      .where("userId", "==", userId)
-      .orderBy("savedAt", "desc")
-      .get();
+    console.log(`🔍 [FIRESTORE] Getting saved listings for user: ${userId}`);
     
-    if (snapshot.empty) {
-      console.log(`📭 No saved listings found for user ${userId}`);
-      return [];
-    }
-    
-    console.log(`🔍 Found ${snapshot.docs.length} saved items for user ${userId}`);
-    
-    // Get all listing IDs
-    const savedItems = snapshot.docs.map(doc => ({
-      savedId: doc.id,
-      ...doc.data()
-    }));
-    
-    const listingIds = savedItems.map(item => item.listingId);
-    
-    if (listingIds.length === 0) {
-      return [];
-    }
-    
-    // Fetch the actual listing data for each saved listing ID
-    const listingsPromises = listingIds.map(async (listingId, index) => {
-      try {
-        const listingDoc = await listingsRef.doc(listingId).get();
-        if (listingDoc.exists) {
-          const listingData = listingDoc.data();
-          return {
-            id: listingId,
-            ...listingData,
-            savedAt: savedItems[index]?.savedAt?.toDate?.() || null
-          };
-        }
-        return null;
-      } catch (error) {
-        console.error(`Error fetching listing ${listingId}:`, error);
-        return null;
+    // METHOD 1: Try the optimized query first
+    try {
+      const snapshot = await savedRef
+        .where("userId", "==", userId)
+        .orderBy("savedAt", "desc")
+        .get();
+      
+      if (snapshot.empty) {
+        console.log(`📭 [FIRESTORE] No saved listings found for user ${userId} (Method 1)`);
+        return [];
       }
-    });
-    
-    const listings = await Promise.all(listingsPromises);
-    
-    // Filter out null results (listings that might have been deleted)
-    const validListings = listings.filter(listing => listing !== null);
-    
-    console.log(`✅ Retrieved ${validListings.length} valid saved listings for user ${userId}`);
-    return validListings;
+      
+      console.log(`✅ [FIRESTORE] Found ${snapshot.docs.length} saved items using optimized query`);
+      return await processSavedItems(snapshot);
+      
+    } catch (queryError) {
+      // If the optimized query fails (likely due to missing index), use fallback
+      console.log(`⚠️ [FIRESTORE] Optimized query failed, using fallback: ${queryError.message}`);
+      
+      // METHOD 2: Fallback - Get all documents and filter client-side
+      const allSnapshot = await savedRef.get();
+      const userSavedItems = [];
+      
+      allSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.userId === userId) {
+          userSavedItems.push({
+            savedId: doc.id,
+            ...data
+          });
+        }
+      });
+      
+      if (userSavedItems.length === 0) {
+        console.log(`📭 [FIRESTORE] No saved listings found for user ${userId} (Method 2)`);
+        return [];
+      }
+      
+      console.log(`✅ [FIRESTORE] Found ${userSavedItems.length} saved items using fallback query`);
+      
+      // Sort manually by savedAt (newest first)
+      userSavedItems.sort((a, b) => {
+        const timeA = a.savedAt?.toDate?.().getTime() || 0;
+        const timeB = b.savedAt?.toDate?.().getTime() || 0;
+        return timeB - timeA; // Descending
+      });
+      
+      return await processSavedItemsFromArray(userSavedItems);
+    }
     
   } catch (err) {
-    console.error("🔥 Error getting user saved listings:", err);
+    console.error("🔥 [FIRESTORE] Critical error in getUserSavedListings:", err);
     return [];
   }
+}
+
+// Helper function to process snapshot
+async function processSavedItems(snapshot) {
+  const savedItems = snapshot.docs.map(doc => ({
+    savedId: doc.id,
+    ...doc.data()
+  }));
+  
+  const listingIds = savedItems.map(item => item.listingId).filter(id => id);
+  
+  if (listingIds.length === 0) {
+    return [];
+  }
+  
+  // Fetch all listings in parallel
+  const listingPromises = listingIds.map(async (listingId, index) => {
+    try {
+      const listingDoc = await listingsRef.doc(listingId).get();
+      if (listingDoc.exists) {
+        const listingData = listingDoc.data();
+        return {
+          id: listingId,
+          ...listingData,
+          savedAt: savedItems[index]?.savedAt?.toDate?.() || null
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error(`Error fetching listing ${listingId}:`, error);
+      return null;
+    }
+  });
+  
+  const listings = await Promise.all(listingPromises);
+  return listings.filter(listing => listing !== null);
+}
+
+// Helper function to process array of saved items
+async function processSavedItemsFromArray(savedItems) {
+  const listingIds = savedItems.map(item => item.listingId).filter(id => id);
+  
+  if (listingIds.length === 0) {
+    return [];
+  }
+  
+  // Fetch all listings in parallel
+  const listingPromises = listingIds.map(async (listingId, index) => {
+    try {
+      const listingDoc = await listingsRef.doc(listingId).get();
+      if (listingDoc.exists) {
+        const listingData = listingDoc.data();
+        return {
+          id: listingId,
+          ...listingData,
+          savedAt: savedItems[index]?.savedAt?.toDate?.() || null
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error(`Error fetching listing ${listingId}:`, error);
+      return null;
+    }
+  });
+  
+  const listings = await Promise.all(listingPromises);
+  return listings.filter(listing => listing !== null);
 }
 
 // -----------------------------------------------------
