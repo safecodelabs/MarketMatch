@@ -283,7 +283,7 @@ async function handleListingSelection(sender, selectedId, session) {
   session.manageListings.step = "awaiting_action";
 
   const listingText = 
-`📋 *Listing Details:*
+`📋 Listing Details:
 *Title:* ${listing.title || 'Untitled'}
 *Location:* ${listing.location || 'Not specified'}
 *Type:* ${listing.type || listing.listingType || 'Property'}
@@ -301,7 +301,8 @@ What would you like to do with this listing?`;
       { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
       { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
       { id: "cancel_manage", title: "⬅️ Back to List" }
-    ]
+    ],
+    "Listing Details"
   );
 
   await saveSession(sender, session);
@@ -365,7 +366,7 @@ async function handleEditListing(sender, session) {
 
   await sendReplyButtons(
     sender,
-    `✏️ *Edit Listing: ${listing.title || 'Untitled'}*\n\nSelect which field you want to edit:`,
+    `✏️ Edit Listing: ${listing.title || 'Untitled'}\n\nSelect which field you want to edit:`,
     [
       { id: "edit_title", title: "📝 Title" },
       { id: "edit_location", title: "📍 Location" },
@@ -375,7 +376,8 @@ async function handleEditListing(sender, session) {
       { id: "edit_contact", title: "📞 Contact" },
       { id: "edit_description", title: "📄 Description" },
       { id: "edit_cancel", title: "❌ Cancel Edit" }
-    ]
+    ],
+    "Edit Listing"
   );
 
   await saveSession(sender, session);
@@ -446,7 +448,8 @@ async function updateFieldValue(sender, newValue, session) {
       { id: "edit_another", title: "✏️ Edit Another Field" },
       { id: "save_edits", title: "💾 Save All Changes" },
       { id: "cancel_edits", title: "❌ Discard Changes" }
-    ]
+    ],
+    "Edit Field"
   );
 
   await saveSession(sender, session);
@@ -493,7 +496,7 @@ async function saveAllEdits(sender, session) {
 
 
 // ========================================
-// MAIN CONTROLLER - FIXED VERSION
+// MAIN CONTROLLER - COMPLETELY FIXED VERSION
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}) {
   console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
@@ -536,6 +539,11 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
     },
     isInitialized: false
   };
+
+  console.log("🔍 [CONTROLLER DEBUG] Session state:", JSON.stringify(session, null, 2));
+  console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
+  console.log("🔍 [CONTROLLER DEBUG] Manage listings step:", session.manageListings?.step);
+  console.log("🔍 [CONTROLLER DEBUG] Edit flow step:", session.editFlow?.step);
 
   const user = await getUserProfile(sender);
   const greetings = ["hi", "hello", "hey", "start"];
@@ -603,29 +611,29 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   // ==========================================
   
   // Handle listing selection from manage listings
-  if (msg.startsWith("listing_") && session.step === "managing_listings") {
+  if (msg.startsWith("listing_") && (session.step === "managing_listings" || session.manageListings)) {
     console.log("🔍 [CONTROLLER] Listing selected for management:", msg);
     await handleListingSelection(sender, msg, session);
     return session;
   }
   
-  // Handle delete/confirm actions
+  // ==========================================
+  // 5) DELETE FLOW HANDLING
+  // ==========================================
+  
+  // Handle delete button click (shows confirmation)
   if (msg.startsWith("delete_") && session.manageListings?.step === "awaiting_action") {
-    console.log("🔍 [CONTROLLER] Delete action requested:", msg);
+    console.log("🔍 [CONTROLLER] Delete button clicked:", msg);
     
-    if (msg === "confirm_delete") {
-      await handleDeleteListing(sender, session);
-      return session;
-    }
-    
-    // Show confirmation for delete
+    // Show confirmation before deleting
     await sendReplyButtons(
       sender,
-      "⚠️ *Are you sure you want to delete this listing?*\nThis action cannot be undone.",
+      "⚠️ Are you sure you want to delete this listing?\nThis action cannot be undone.",
       [
         { id: "confirm_delete", title: "✅ Yes, Delete" },
         { id: "cancel_delete", title: "❌ No, Keep It" }
-      ]
+      ],
+      "Confirm Delete"
     );
     
     session.manageListings.step = "confirming_delete";
@@ -633,14 +641,25 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
     return session;
   }
   
+  // Handle delete confirmation (YES button)
+  if (msg === "confirm_delete" && session.manageListings?.step === "confirming_delete") {
+    console.log("🔍 [CONTROLLER] Confirm delete action");
+    await handleDeleteListing(sender, session);
+    return session;
+  }
+  
+  // Handle delete cancellation (NO button)
   if (msg === "cancel_delete" && session.manageListings?.step === "confirming_delete") {
-    console.log("🔍 [CONTROLLER] Delete cancelled");
-    const listing = session.manageListings.selectedListing;
+    console.log("🔍 [CONTROLLER] Cancel delete action");
+    
+    const listingId = session.manageListings?.selectedId;
+    const listing = session.manageListings?.selectedListing;
+    
     if (listing) {
       session.manageListings.step = "awaiting_action";
       await saveSession(sender, session);
       
-const listingText = 
+      const listingText = 
 `📋 Listing Details:
 *Title:* ${listing.title || 'Untitled'}
 *Location:* ${listing.location || 'Not specified'}
@@ -652,128 +671,189 @@ const listingText =
 
 What would you like to do with this listing?`;
 
-// Send buttons with a clean header
-await sendReplyButtons(
-  sender,
-  listingText,
-  [
-    { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
-    { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
-    { id: "cancel_manage", title: "⬅️ Back to List" }
-  ],
-  "Listing Details" // Clean header without markdown
-);
+      await sendReplyButtons(
+        sender,
+        listingText,
+        [
+          { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+          { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+          { id: "cancel_manage", title: "⬅️ Back to List" }
+        ],
+        "Listing Details"
+      );
     }
     return session;
   }
   
-  // Handle edit actions
+  // ==========================================
+  // 6) EDIT FLOW HANDLING
+  // ==========================================
+  
+  // Handle edit button click (starts edit flow)
   if (msg.startsWith("edit_") && session.manageListings?.step === "awaiting_action") {
-    console.log("🔍 [CONTROLLER] Edit action requested:", msg);
+    console.log("🔍 [CONTROLLER] Edit button clicked:", msg);
     
-    if (msg.startsWith("edit_") && msg !== "edit_cancel" && msg !== "edit_another") {
-      // This is for edit_field selection
-      const listingId = session.manageListings.selectedId;
-      if (msg === `edit_${listingId}`) {
-        await handleEditListing(sender, session);
-        return session;
-      }
+    const listingId = msg.replace('edit_', '');
+    console.log("🔍 [CONTROLLER] Extracted listing ID:", listingId);
+    console.log("🔍 [CONTROLLER] Selected listing ID:", session.manageListings?.selectedId);
+    
+    // Verify this is the correct listing
+    if (listingId === session.manageListings?.selectedId) {
+      console.log("🔍 [CONTROLLER] Starting edit flow for listing:", listingId);
+      
+      session.editFlow = {
+        listingId: session.manageListings.selectedId,
+        original: session.manageListings.selectedListing,
+        step: "awaiting_field_selection",
+        updatedFields: {}
+      };
+      session.manageListings.step = "editing";
+      await saveSession(sender, session);
+
+      await sendReplyButtons(
+        sender,
+        `✏️ Edit Listing: ${session.manageListings.selectedListing.title || 'Untitled'}\n\nSelect which field you want to edit:`,
+        [
+          { id: "edit_title", title: "📝 Title" },
+          { id: "edit_location", title: "📍 Location" },
+          { id: "edit_price", title: "💰 Price" },
+          { id: "edit_type", title: "🏠 Property Type" },
+          { id: "edit_bhk", title: "🛏️ BHK" },
+          { id: "edit_contact", title: "📞 Contact" },
+          { id: "edit_description", title: "📄 Description" },
+          { id: "edit_cancel", title: "❌ Cancel Edit" }
+        ],
+        "Edit Listing"
+      );
+    } else {
+      console.error("❌ [CONTROLLER] Listing ID mismatch");
+      await sendMessage(sender, "❌ Unable to edit listing. Please try again.");
     }
+    return session;
   }
   
-  // Handle edit flow
-  if (session.editFlow?.step) {
-    console.log("🔍 [CONTROLLER] In edit flow, step:", session.editFlow.step);
+  // ==========================================
+  // 7) EDIT FIELD SELECTION HANDLING
+  // ==========================================
+  
+  // Handle edit flow field selection
+  if (session.editFlow?.step === "awaiting_field_selection") {
+    console.log("🔍 [CONTROLLER] In edit flow field selection");
     
-    if (session.editFlow.step === "awaiting_field_selection") {
-      if (msg.startsWith("edit_") && msg !== "edit_cancel" && msg !== "edit_another") {
-        await handleFieldEdit(sender, msg, session);
-        return session;
-      }
-      
-      if (msg === "edit_cancel") {
-        delete session.editFlow;
-        session.manageListings.step = "awaiting_action";
-        await saveSession(sender, session);
-        
-        const listing = session.manageListings.selectedListing;
-        if (listing) {
-          const listingText = 
-`📋 *Listing Details:*
-*Title:* ${listing.title || 'Untitled'}
-*Location:* ${listing.location || 'Not specified'}
-*Type:* ${listing.type || listing.listingType || 'Property'}
-*BHK:* ${listing.bhk || 'N/A'}
-*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
-*Contact:* ${listing.contact || 'Not provided'}
-*Description:* ${listing.description || 'No description'}
-
-What would you like to do with this listing?`;
-
-          await sendReplyButtons(
-            sender,
-            listingText,
-            [
-              { id: `delete_${session.manageListings.selectedId}`, title: "🗑️ Delete Listing" },
-              { id: `edit_${session.manageListings.selectedId}`, title: "✏️ Edit Listing" },
-              { id: "cancel_manage", title: "⬅️ Back to List" }
-            ]
-          );
-        }
-        return session;
-      }
-      
-      if (msg === "edit_another") {
-        await handleEditListing(sender, session);
-        return session;
-      }
-      
-      if (msg === "save_edits") {
-        await saveAllEdits(sender, session);
-        return session;
-      }
-      
-      if (msg === "cancel_edits") {
-        delete session.editFlow;
-        session.manageListings.step = "awaiting_action";
-        await saveSession(sender, session);
-        
-        const listing = session.manageListings.selectedListing;
-        if (listing) {
-          const listingText = 
-`📋 *Listing Details:*
-*Title:* ${listing.title || 'Untitled'}
-*Location:* ${listing.location || 'Not specified'}
-*Type:* ${listing.type || listing.listingType || 'Property'}
-*BHK:* ${listing.bhk || 'N/A'}
-*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
-*Contact:* ${listing.contact || 'Not provided'}
-*Description:* ${listing.description || 'No description'}
-
-What would you like to do with this listing?`;
-
-          await sendReplyButtons(
-            sender,
-            listingText,
-            [
-              { id: `delete_${session.manageListings.selectedId}`, title: "🗑️ Delete Listing" },
-              { id: `edit_${session.manageListings.selectedId}`, title: "✏️ Edit Listing" },
-              { id: "cancel_manage", title: "⬅️ Back to List" }
-            ]
-          );
-        }
-        return session;
-      }
+    if (msg.startsWith("edit_") && msg !== "edit_cancel" && msg !== "edit_another") {
+      console.log("🔍 [CONTROLLER] Field selected for editing:", msg);
+      await handleFieldEdit(sender, msg, session);
+      return session;
     }
     
-    // Handle field value input
-    if (session.editFlow.step === "awaiting_field_value" && text) {
-      await updateFieldValue(sender, text, session);
+    if (msg === "edit_cancel") {
+      console.log("🔍 [CONTROLLER] Edit cancelled");
+      delete session.editFlow;
+      session.manageListings.step = "awaiting_action";
+      await saveSession(sender, session);
+      
+      const listing = session.manageListings.selectedListing;
+      if (listing) {
+        const listingText = 
+`📋 Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+        await sendReplyButtons(
+          sender,
+          listingText,
+          [
+            { id: `delete_${session.manageListings.selectedId}`, title: "🗑️ Delete Listing" },
+            { id: `edit_${session.manageListings.selectedId}`, title: "✏️ Edit Listing" },
+            { id: "cancel_manage", title: "⬅️ Back to List" }
+          ],
+          "Listing Details"
+        );
+      }
+      return session;
+    }
+    
+    if (msg === "edit_another") {
+      console.log("🔍 [CONTROLLER] Edit another field");
+      const listing = session.manageListings.selectedListing;
+      await sendReplyButtons(
+        sender,
+        `✏️ Edit Listing: ${listing.title || 'Untitled'}\n\nSelect which field you want to edit:`,
+        [
+          { id: "edit_title", title: "📝 Title" },
+          { id: "edit_location", title: "📍 Location" },
+          { id: "edit_price", title: "💰 Price" },
+          { id: "edit_type", title: "🏠 Property Type" },
+          { id: "edit_bhk", title: "🛏️ BHK" },
+          { id: "edit_contact", title: "📞 Contact" },
+          { id: "edit_description", title: "📄 Description" },
+          { id: "edit_cancel", title: "❌ Cancel Edit" }
+        ],
+        "Edit Listing"
+      );
+      return session;
+    }
+    
+    if (msg === "save_edits") {
+      console.log("🔍 [CONTROLLER] Saving edits");
+      await saveAllEdits(sender, session);
+      return session;
+    }
+    
+    if (msg === "cancel_edits") {
+      console.log("🔍 [CONTROLLER] Discarding edits");
+      delete session.editFlow;
+      session.manageListings.step = "awaiting_action";
+      await saveSession(sender, session);
+      
+      const listing = session.manageListings.selectedListing;
+      if (listing) {
+        const listingText = 
+`📋 Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+        await sendReplyButtons(
+          sender,
+          listingText,
+          [
+            { id: `delete_${session.manageListings.selectedId}`, title: "🗑️ Delete Listing" },
+            { id: `edit_${session.manageListings.selectedId}`, title: "✏️ Edit Listing" },
+            { id: "cancel_manage", title: "⬅️ Back to List" }
+          ],
+          "Listing Details"
+        );
+      }
       return session;
     }
   }
   
-  // Handle cancel manage
+  // ==========================================
+  // 8) EDIT FIELD VALUE INPUT (TEXT-BASED)
+  // ==========================================
+  if (session.editFlow?.step === "awaiting_field_value" && text) {
+    console.log("🔍 [CONTROLLER] Field value received:", text);
+    await updateFieldValue(sender, text, session);
+    return session;
+  }
+  
+  // ==========================================
+  // 9) CANCEL MANAGE (Back button)
+  // ==========================================
   if (msg === "cancel_manage" && session.manageListings?.step === "awaiting_action") {
     console.log("🔍 [CONTROLLER] Back to listing list");
     await handleManageListings(sender);
@@ -781,7 +861,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 5) AWAITING LISTING DETAILS (TEXT-BASED POST)
+  // 10) AWAITING LISTING DETAILS (TEXT-BASED POST)
   // ==========================================
   if (session.step === "awaiting_post_details") {
     try {
@@ -825,7 +905,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 6) INTERACTIVE LISTING ACTIONS
+  // 11) INTERACTIVE LISTING ACTIONS
   // ==========================================
   if (session.step === "awaiting_listing_action" && replyId) {
     console.log(`🔄 Handling listing action: ${msg}`);
@@ -897,7 +977,7 @@ What would you like to do with this listing?`;
   }
 
   // ===========================
-  // 7) MENU COMMAND HANDLING
+  // 12) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
