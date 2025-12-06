@@ -640,8 +640,8 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
       session.manageListings.step = "awaiting_action";
       await saveSession(sender, session);
       
-      const listingText = 
-`📋 *Listing Details:*
+const listingText = 
+`📋 Listing Details:
 *Title:* ${listing.title || 'Untitled'}
 *Location:* ${listing.location || 'Not specified'}
 *Type:* ${listing.type || listing.listingType || 'Property'}
@@ -652,15 +652,17 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
 
 What would you like to do with this listing?`;
 
-      await sendReplyButtons(
-        sender,
-        listingText,
-        [
-          { id: `delete_${session.manageListings.selectedId}`, title: "🗑️ Delete Listing" },
-          { id: `edit_${session.manageListings.selectedId}`, title: "✏️ Edit Listing" },
-          { id: "cancel_manage", title: "⬅️ Back to List" }
-        ]
-      );
+// Send buttons with a clean header
+await sendReplyButtons(
+  sender,
+  listingText,
+  [
+    { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+    { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+    { id: "cancel_manage", title: "⬅️ Back to List" }
+  ],
+  "Listing Details" // Clean header without markdown
+);
     }
     return session;
   }

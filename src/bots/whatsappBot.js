@@ -1,7 +1,21 @@
+// =======================================================
+// ✅ SIMPLIFIED whatsappBot.js - Forwarder to chatbotController
+// =======================================================
+const { handleIncomingMessage: chatbotHandler } = require("./chatbotController");
+
+async function handleIncomingMessage(sender, msgBody, metadata = {}) {
+  console.log("🔍 [WHATSAPP_BOT] Forwarding to chatbotController");
+  return chatbotHandler(sender, msgBody, metadata);
+}
+
+module.exports = {
+  handleIncomingMessage
+};
+
+
 // // =======================================================
 // // ✅ PATCHED FILE: src/bots/whatsappBot.js
 // // =======================================================
-
 // // Import entire service (fixes missing functions)
 // const messageService = require("../services/messageService");
 // const { handleShowListings: controllerHandleShowListings } = require("../../chatbotController")

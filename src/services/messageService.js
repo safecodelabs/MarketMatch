@@ -116,15 +116,31 @@ async function sendButtons(to, bodyText, buttons, headerText) {
 
     // 4. Construct payload with WhatsApp API limits
     // WhatsApp limits:
-    // - Header: max 60 characters
+    // - Header: max 60 characters (NO MARKDOWN ALLOWED)
     // - Body: max 1024 characters  
     // - Footer: max 60 characters
     // - Button title: max 20 characters
     // - Button ID: max 256 characters
     
-    const effectiveHeaderText = headerText 
+    // Clean header - remove markdown formatting (WhatsApp doesn't allow markdown in headers)
+    let effectiveHeaderText = headerText 
       ? String(headerText).slice(0, 60)
       : String(bodyText).split('\n')[0].trim().slice(0, 60);
+    
+    // Remove all markdown formatting from header
+    effectiveHeaderText = effectiveHeaderText
+      .replace(/\*/g, '')      // Remove asterisks
+      .replace(/[`~_]/g, '')   // Remove other markdown characters
+      .replace(/[#]/g, '')     // Remove hashtags
+      .trim();
+    
+    // If header is empty after cleaning, use a default
+    if (!effectiveHeaderText || effectiveHeaderText.length === 0) {
+      effectiveHeaderText = 'Property Details';
+    }
+    
+    // Ensure header doesn't exceed WhatsApp limit
+    effectiveHeaderText = effectiveHeaderText.slice(0, 60);
     
     const safeBodyText = String(bodyText).slice(0, 1024);
     
@@ -139,7 +155,7 @@ async function sendButtons(to, bodyText, buttons, headerText) {
         type: "button",
         header: { 
           type: "text", 
-          text: effectiveHeaderText || 'Property Listing' 
+          text: effectiveHeaderText
         },
         body: { 
           text: safeBodyText 
@@ -202,6 +218,13 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
           : [{ id: `row_${sIdx}_1`, title: "No options available" }],
     }));
 
+    // Clean header text for list as well (no markdown in headers)
+    let cleanHeaderText = String(headerText || "Menu")
+      .replace(/\*/g, '')
+      .replace(/[`~_]/g, '')
+      .trim()
+      .slice(0, 60);
+
     const payload = {
       messaging_product: "whatsapp",
       to,
@@ -210,7 +233,7 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
         type: "list",
         header: { 
           type: "text", 
-          text: String(headerText || "Menu").slice(0, 60) 
+          text: cleanHeaderText
         },
         body: { 
           text: (bodyText || "Choose an option below").slice(0, 1024) 
@@ -317,8 +340,13 @@ Tap a button below to interact.`;
 
         console.log("🔘 Prepared buttons:", buttons.map(b => ({ id: b.id, title: b.title })));
 
-        // 5. Prepare header
-        const headerText = `🏡 ${listingTitle}`.slice(0, 60);
+        // 5. Prepare header (CLEANED - NO MARKDOWN)
+        let headerText = `🏡 ${listingTitle}`.slice(0, 60);
+        // Remove emojis and ensure clean header
+        headerText = headerText.replace(/[🏡📍💰🛏️]/g, '').trim();
+        if (!headerText || headerText.length === 0) {
+            headerText = 'Property Listing';
+        }
         
         console.log(`📋 Header: "${headerText}"`);
         console.log("📤 Calling sendReplyButtons...");
