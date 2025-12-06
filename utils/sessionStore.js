@@ -74,4 +74,43 @@ async function deleteSession(userId) {
     }
 }
 
-module.exports = { getSession, saveSession, deleteSession };
+// ✅ NEW: Clear flow-specific data while keeping basic session
+async function clearFlowData(userId) {
+    if (!userId) throw new Error('userId required');
+    
+    try {
+        const session = await getSession(userId);
+        if (session) {
+            // Clear flow-specific data but keep basic session
+            delete session.editFlow;
+            delete session.manageListings;
+            delete session.manageFlow;
+            
+            // Clear housing flow data but keep the structure
+            if (session.housingFlow) {
+                delete session.housingFlow.listingData;
+                delete session.housingFlow.currentIndex;
+                delete session.housingFlow.currentListings;
+                session.housingFlow.step = 'start';
+            }
+            
+            // Set step back to menu
+            session.step = 'menu';
+            
+            // Save cleaned session
+            await saveSession(userId, session);
+            console.log(`✅ clearFlowData: cleaned flow data for ${userId}`);
+        }
+        return true;
+    } catch (err) {
+        console.error('❌ clearFlowData error:', err?.message || err);
+        return false;
+    }
+}
+
+module.exports = { 
+    getSession, 
+    saveSession, 
+    deleteSession,
+    clearFlowData  // ✅ ADDED
+};

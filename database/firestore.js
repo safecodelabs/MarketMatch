@@ -62,6 +62,7 @@ async function addListing(listingData) {
     const payload = {
       ...listingData,
       timestamp: admin.firestore.Timestamp.now(),
+      createdAt: Date.now()
     };
     const docRef = await listingsRef.add(payload);
     return { success: true, id: docRef.id };
@@ -74,9 +75,8 @@ async function addListing(listingData) {
 // -----------------------------------------------
 // FETCH ALL LISTINGS
 // -----------------------------------------------
-async function getAllListings() { // Removed limit argument for this test
+async function getAllListings() {
   try {
-    // ⭐ TEMPORARY TEST: REMOVE orderBy AND limit TO GET EVERYTHING
     const snapshot = await listingsRef.get();
     
     if (snapshot.empty) return [];
@@ -86,9 +86,7 @@ async function getAllListings() { // Removed limit argument for this test
       ...doc.data()
     }));
     
-    console.log(`[DB] Fetched ${items.length} listings successfully.`); // ⭐ CHECK THIS LOG
-
-    // Manually sort/return the items here.
+    console.log(`[DB] Fetched ${items.length} listings successfully.`);
     return items; 
   } catch (err) {
     console.error("🔥 Error fetching all listings:", err);
@@ -130,10 +128,39 @@ async function getListingById(listingId) {
 async function deleteListing(listingId) {
   try {
     await listingsRef.doc(listingId).delete();
+    console.log(`✅ Listing ${listingId} deleted successfully`);
     return { success: true };
   } catch (err) {
     console.error("🔥 Error deleting listing:", err);
     return { success: false, error: err.message || err };
+  }
+}
+
+// -----------------------------------------------------
+// UPDATE LISTING BY ID
+// -----------------------------------------------------
+async function updateListing(listingId, updates) {
+  try {
+    const listingRef = listingsRef.doc(listingId);
+    const listingDoc = await listingRef.get();
+    
+    if (!listingDoc.exists) {
+      console.error(`❌ Listing ${listingId} not found for update`);
+      return { success: false, error: "Listing not found" };
+    }
+    
+    // Add updatedAt timestamp
+    const updateData = {
+      ...updates,
+      updatedAt: Date.now()
+    };
+    
+    await listingRef.update(updateData);
+    console.log(`✅ Listing ${listingId} updated successfully`);
+    return { success: true, listingId, updates: updateData };
+  } catch (error) {
+    console.error("❌ Error updating listing:", error);
+    return { success: false, error: error.message || error };
   }
 }
 
@@ -173,7 +200,10 @@ async function getUserProfile(userId) {
 
 async function saveUserLanguage(userId, lang) {
   try {
-    await usersRef.doc(userId).set({ preferredLanguage: lang }, { merge: true });
+    await usersRef.doc(userId).set({ 
+      preferredLanguage: lang,
+      lastUpdated: Date.now()
+    }, { merge: true });
     return true;
   } catch (err) {
     console.error("🔥 Error saving user language:", err);
@@ -186,11 +216,12 @@ module.exports = {
   db,
   addListing,
   getAllListings,
-  getTopListings, // ✅ ADDED
+  getTopListings,
   getUserListings,
   getListingById, 
   saveSavedListing, 
   deleteListing,
+  updateListing,  // ✅ ADDED
   getUserProfile,
   saveUserLanguage,
 };

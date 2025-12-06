@@ -81,6 +81,53 @@ async function sendMainMenu(sender) {
 }
 
 // =======================================================
+// MANAGE LISTINGS HELPERS
+// =======================================================
+
+async function sendListingWithActions(sender, listing) {
+  const listingText = 
+`📋 *Listing Details:*
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+  // Send buttons for Delete/Edit/Cancel
+  await messageService.sendReplyButtons(
+    sender,
+    listingText,
+    [
+      { id: `delete_${listing.id}`, title: "🗑️ Delete Listing" },
+      { id: `edit_${listing.id}`, title: "✏️ Edit Listing" },
+      { id: "cancel_manage", title: "⬅️ Back to List" }
+    ]
+  );
+}
+
+async function handleFieldSelection(sender, listing) {
+  // Send field selection buttons
+  await messageService.sendReplyButtons(
+    sender,
+    `✏️ *Edit Listing: ${listing.title || 'Untitled'}*\n\nSelect which field you want to edit:`,
+    [
+      { id: "edit_title", title: "📝 Title" },
+      { id: "edit_location", title: "📍 Location" },
+      { id: "edit_price", title: "💰 Price" },
+      { id: "edit_type", title: "🏠 Property Type" },
+      { id: "edit_bhk", title: "🛏️ BHK" },
+      { id: "edit_contact", title: "📞 Contact" },
+      { id: "edit_description", title: "📄 Description" },
+      { id: "edit_cancel", title: "❌ Cancel Edit" }
+    ]
+  );
+}
+
+// =======================================================
 // 🔥 MAIN MESSAGE HANDLER - PATCHED VERSION
 // =======================================================
 
@@ -274,34 +321,43 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
     case "manage_listings": {
       console.log("🔍 [WHATSAPP_BOT] manage_listings selected");
       
-      // PATCHED: Use your controller's handleManageListings
-      try {
-        await controllerHandleManageListings(sender);
-      } catch (error) {
-        console.error("❌ [WHATSAPP_BOT] Error in controllerHandleManageListings:", error);
-        
-        // Fallback to original logic
-        const list = await getUserListings(sender);
+      // PATCHED: Use enhanced manage listings with Delete/Edit buttons
+      const list = await getUserListings(sender);
 
-        if (!list || list.length === 0) {
-          await messageService.sendMessage(sender, "You have no listings to manage.");
-        } else {
-          const rows = list.map((l, i) => ({
-            id: `manage_${l.id}`,
-            title: `${i + 1}. ${l.title || "Untitled"}`,
-            description: `Price: ₹${l.price || "N/A"} • ${l.location || "N/A"}`
-          }));
+      if (!list || list.length === 0) {
+        await messageService.sendMessage(sender, "You have no listings to manage.");
+      } else {
+        // Create buttons for each listing
+        const listingRows = list.map((l, i) => {
+          const shortTitle = l.title && l.title.length > 25 
+            ? l.title.substring(0, 25) + '...' 
+            : l.title || 'Untitled Property';
+          
+          return {
+            id: `listing_${l.id}`,
+            title: `${shortTitle} - ₹${l.price ? l.price.toLocaleString('en-IN') : "N/A"}`,
+            description: `📍 ${l.location || 'Location not specified'} | 🏠 ${l.type || l.listingType || 'Property'}`
+          };
+        });
 
-          await messageService.sendList(
-            sender,
-            "📝 Manage Listings",
-            `Select a listing to view/delete.\nYou have ${list.length} active listings.`,
-            "Select",
-            [{ title: "Your Listings", rows }]
-          );
+        // Send interactive list with Delete/Edit options
+        await messageService.sendList(
+          sender,
+          "🏡 Manage Your Listings",
+          "Select a listing to delete or edit:",
+          "Select Listing",
+          [{ title: `Your Listings (${list.length})`, rows: listingRows }]
+        );
 
-          session.step = "awaiting_management_selection";
-        }
+        // Update session for interactive handling
+        session.step = "managing_listings";
+        session.manageListings = {
+          listings: list.reduce((acc, listing) => {
+            acc[listing.id] = listing;
+            return acc;
+          }, {}),
+          step: "awaiting_selection"
+        };
       }
       
       await saveSession(sender, session);
@@ -316,7 +372,346 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   }
 
   // ======================================================
-  // 🅵️ 8. Handle post listing details
+  // 🅾️ 8. MANAGE LISTINGS INTERACTIVE HANDLING
+  // ======================================================
+  if (session.step === "managing_listings" && command) {
+    const manageState = session.manageListings?.step;
+    
+    // Handle listing selection (from list)
+    if (manageState === "awaiting_selection" && command.startsWith("listing_")) {
+      console.log("🔍 [WHATSAPP_BOT] Listing selected for management");
+      
+      const listingId = command.replace('listing_', '');
+      const listing = session.manageListings?.listings?.[listingId];
+
+      if (!listing) {
+        await messageService.sendMessage(sender, "❌ Listing not found. Please try again.");
+        // Show list again
+        const list = await getUserListings(sender);
+        if (list && list.length > 0) {
+          const listingRows = list.map((l, i) => ({
+            id: `listing_${l.id}`,
+            title: `${l.title || 'Untitled'} - ₹${l.price || 'N/A'}`,
+            description: `📍 ${l.location || 'Location'} | 🏠 ${l.type || 'Property'}`
+          }));
+          
+          await messageService.sendList(
+            sender,
+            "🏡 Manage Your Listings",
+            "Select a listing to delete or edit:",
+            "Select Listing",
+            [{ title: `Your Listings (${list.length})`, rows: listingRows }]
+          );
+        }
+        return;
+      }
+
+      // Store selected listing
+      session.manageListings.selectedId = listingId;
+      session.manageListings.selectedListing = listing;
+      session.manageListings.step = "awaiting_action";
+      await saveSession(sender, session);
+
+      // Show listing with actions
+      await sendListingWithActions(sender, listing);
+      return;
+    }
+    
+    // Handle action selection (Delete/Edit)
+    if (manageState === "awaiting_action") {
+      if (command.startsWith("delete_")) {
+        // Show confirmation before deleting
+        await messageService.sendReplyButtons(
+          sender,
+          "⚠️ *Are you sure you want to delete this listing?*\nThis action cannot be undone.",
+          [
+            { id: "confirm_delete", title: "✅ Yes, Delete" },
+            { id: "cancel_delete", title: "❌ No, Keep It" }
+          ]
+        );
+        session.manageListings.step = "confirming_delete";
+        await saveSession(sender, session);
+        return;
+      }
+      
+      if (command.startsWith("edit_")) {
+        const listing = session.manageListings.selectedListing;
+        if (!listing) {
+          await messageService.sendMessage(sender, "❌ No listing selected for editing.");
+          return;
+        }
+
+        // Set up edit flow
+        session.editFlow = {
+          listingId: session.manageListings.selectedId,
+          original: listing,
+          step: "awaiting_field_selection",
+          updatedFields: {}
+        };
+        session.manageListings.step = "editing";
+        await saveSession(sender, session);
+
+        // Show field selection
+        await handleFieldSelection(sender, listing);
+        return;
+      }
+      
+      if (command === "cancel_manage") {
+        // Go back to listing list
+        session.step = "managing_listings";
+        session.manageListings.step = "awaiting_selection";
+        await saveSession(sender, session);
+        
+        // Show list again
+        const list = await getUserListings(sender);
+        if (list && list.length > 0) {
+          const listingRows = list.map((l, i) => ({
+            id: `listing_${l.id}`,
+            title: `${l.title || 'Untitled'} - ₹${l.price || 'N/A'}`,
+            description: `📍 ${l.location || 'Location'} | 🏠 ${l.type || 'Property'}`
+          }));
+          
+          await messageService.sendList(
+            sender,
+            "🏡 Manage Your Listings",
+            "Select a listing to delete or edit:",
+            "Select Listing",
+            [{ title: `Your Listings (${list.length})`, rows: listingRows }]
+          );
+        }
+        return;
+      }
+    }
+    
+    // Handle delete confirmation
+    if (manageState === "confirming_delete") {
+      if (command === "confirm_delete") {
+        const listingId = session.manageListings?.selectedId;
+        const listing = session.manageListings?.selectedListing;
+
+        if (!listingId || !listing) {
+          await messageService.sendMessage(sender, "❌ No listing selected for deletion.");
+          return;
+        }
+
+        try {
+          // Delete from Firestore
+          await db.collection("listings").doc(listingId).delete();
+          
+          await messageService.sendMessage(
+            sender,
+            `✅ Listing "${listing.title || 'Untitled'}" has been deleted successfully!`
+          );
+
+          // Reset session and show menu
+          delete session.manageListings;
+          session.step = "menu";
+          await saveSession(sender, session);
+
+          // Show main menu
+          return sendMainMenu(sender);
+        } catch (err) {
+          console.error("Error deleting listing:", err);
+          await messageService.sendMessage(sender, "❌ Failed to delete listing. Please try again.");
+          return;
+        }
+      }
+      
+      if (command === "cancel_delete") {
+        // Go back to action selection
+        const listing = session.manageListings.selectedListing;
+        if (listing) {
+          session.manageListings.step = "awaiting_action";
+          await saveSession(sender, session);
+          await sendListingWithActions(sender, listing);
+        }
+        return;
+      }
+    }
+  }
+
+  // ======================================================
+  // 🅿️ 9. EDIT FLOW HANDLING
+  // ======================================================
+  if (session.editFlow?.step && command) {
+    const editState = session.editFlow.step;
+    
+    // Handle field selection
+    if (editState === "awaiting_field_selection") {
+      if (command.startsWith("edit_") && command !== "edit_cancel" && command !== "edit_another") {
+        session.editFlow.editingField = command;
+        session.editFlow.step = "awaiting_field_value";
+        await saveSession(sender, session);
+
+        const fieldLabels = {
+          "edit_title": "title",
+          "edit_location": "location",
+          "edit_price": "price",
+          "edit_type": "type",
+          "edit_bhk": "bhk",
+          "edit_contact": "contact",
+          "edit_description": "description"
+        };
+
+        const fieldName = fieldLabels[command];
+        const currentValue = session.editFlow.original[fieldName] || 'Not set';
+
+        await messageService.sendMessage(
+          sender,
+          `Current ${fieldName}: *${currentValue}*\n\nPlease send the new value:`
+        );
+        return;
+      }
+      
+      if (command === "edit_cancel") {
+        // Cancel editing, go back to manage listings
+        delete session.editFlow;
+        session.manageListings.step = "awaiting_selection";
+        session.step = "managing_listings";
+        await saveSession(sender, session);
+        
+        // Show list again
+        const list = await getUserListings(sender);
+        if (list && list.length > 0) {
+          const listingRows = list.map((l, i) => ({
+            id: `listing_${l.id}`,
+            title: `${l.title || 'Untitled'} - ₹${l.price || 'N/A'}`,
+            description: `📍 ${l.location || 'Location'} | 🏠 ${l.type || 'Property'}`
+          }));
+          
+          await messageService.sendList(
+            sender,
+            "🏡 Manage Your Listings",
+            "Select a listing to delete or edit:",
+            "Select Listing",
+            [{ title: `Your Listings (${list.length})`, rows: listingRows }]
+          );
+        }
+        return;
+      }
+      
+      if (command === "edit_another") {
+        // Show field selection again
+        const listing = session.editFlow.original;
+        await handleFieldSelection(sender, listing);
+        return;
+      }
+      
+      if (command === "save_edits") {
+        const listingId = session.editFlow.listingId;
+        const updates = session.editFlow.updatedFields;
+
+        if (Object.keys(updates).length === 0) {
+          await messageService.sendMessage(sender, "❌ No changes were made.");
+        } else {
+          try {
+            // Update Firestore document
+            await db.collection("listings").doc(listingId).update({
+              ...updates,
+              updatedAt: Date.now()
+            });
+
+            await messageService.sendMessage(
+              sender,
+              `✅ Listing updated successfully!\n\nChanges made:\n${Object.entries(updates)
+                .map(([key, value]) => `• ${key}: ${value}`)
+                .join('\n')}`
+            );
+          } catch (err) {
+            console.error("Error updating listing:", err);
+            await messageService.sendMessage(sender, "❌ Failed to update listing. Please try again.");
+          }
+        }
+
+        // Clean up and return to menu
+        delete session.editFlow;
+        delete session.manageListings;
+        session.step = "menu";
+        await saveSession(sender, session);
+        return sendMainMenu(sender);
+      }
+      
+      if (command === "cancel_edits") {
+        // Discard changes
+        delete session.editFlow;
+        session.manageListings.step = "awaiting_selection";
+        session.step = "managing_listings";
+        await messageService.sendMessage(sender, "❌ All changes discarded.");
+        await saveSession(sender, session);
+        
+        // Show list again
+        const list = await getUserListings(sender);
+        if (list && list.length > 0) {
+          const listingRows = list.map((l, i) => ({
+            id: `listing_${l.id}`,
+            title: `${l.title || 'Untitled'} - ₹${l.price || 'N/A'}`,
+            description: `📍 ${l.location || 'Location'} | 🏠 ${l.type || 'Property'}`
+          }));
+          
+          await messageService.sendList(
+            sender,
+            "🏡 Manage Your Listings",
+            "Select a listing to delete or edit:",
+            "Select Listing",
+            [{ title: `Your Listings (${list.length})`, rows: listingRows }]
+          );
+        }
+        return;
+      }
+    }
+  }
+
+  // ======================================================
+  // 🆀 10. EDIT FIELD VALUE INPUT (TEXT-BASED)
+  // ======================================================
+  if (session.editFlow?.step === "awaiting_field_value" && msgBody && !metadata.type) {
+    const newValue = msgBody.toString().trim();
+    
+    if (newValue) {
+      const field = session.editFlow.editingField;
+      const fieldLabels = {
+        "edit_title": "title",
+        "edit_location": "location",
+        "edit_price": "price",
+        "edit_type": "type",
+        "edit_bhk": "bhk",
+        "edit_contact": "contact",
+        "edit_description": "description"
+      };
+
+      const fieldName = fieldLabels[field];
+      
+      // Special handling for price - convert to number
+      if (field === "edit_price") {
+        const numValue = parseInt(newValue.replace(/[^\d]/g, ''));
+        if (!isNaN(numValue)) {
+          session.editFlow.updatedFields[fieldName] = numValue;
+        } else {
+          session.editFlow.updatedFields[fieldName] = newValue;
+        }
+      } else {
+        session.editFlow.updatedFields[fieldName] = newValue;
+      }
+
+      session.editFlow.step = "awaiting_field_selection";
+      await saveSession(sender, session);
+
+      // Ask if user wants to edit more fields
+      await messageService.sendReplyButtons(
+        sender,
+        `✅ ${fieldName} updated! Do you want to edit another field?`,
+        [
+          { id: "edit_another", title: "✏️ Edit Another Field" },
+          { id: "save_edits", title: "💾 Save All Changes" },
+          { id: "cancel_edits", title: "❌ Discard Changes" }
+        ]
+      );
+    }
+    return;
+  }
+
+  // ======================================================
+  // 🅵️ 11. Handle post listing details
   // ======================================================
   if (session.step === "awaiting_post_details") {
     console.log("🔍 [WHATSAPP_BOT] Processing post listing details");
@@ -361,7 +756,7 @@ async function handleIncomingMessage(sender, msgBody, metadata = {}) {
   }
 
   // ======================================================
-  // 🅶️ 9. DEFAULT FALLBACK
+  // 🅶️ 12. DEFAULT FALLBACK
   // ======================================================
   console.log(`🔍 [WHATSAPP_BOT] Unknown command: "${command}", showing menu`);
   

@@ -67,22 +67,26 @@ const MENU_ROWS = [
   { 
     id: "view_listings", 
     title: "View Listings", 
-    description: "Browse and explore all available items, properties, or services posted by users in a clear, organized format." 
+    // Revised Description (Focus on Housing, Shortened)
+    description: "Browse available homes, apartments, or properties for rent or sale." 
   },
   { 
     id: "post_listing", 
     title: "Post Listing", 
-    description: "Quickly create and publish your own item, property, or service for others to see and interact with." 
+    // Revised Description (Focus on Housing, Shortened)
+    description: "Publish your home or property to attract potential buyers or renters." 
   },
   { 
     id: "manage_listings", 
     title: "Manage Listings", 
-    description: "Edit, update, or remove the listings you have created, and track their performance all from one dashboard." 
+    // Revised Description (Focus on Housing, Shortened)
+    description: "Edit, update, or remove your property listings." 
   },
   { 
     id: "change_language", 
     title: "Change Language", 
-    description: "Instantly switch the entire app interface to your preferred language for a more comfortable experience." 
+    // Revised Description (General, Shortened)
+    description: "Switch the app's interface to your preferred language." 
   },
 ];
 
@@ -244,7 +248,7 @@ Reply "next" for next listing.`;
 
 
 // ========================================
-// MANAGE USER LISTINGS (Unchanged)
+// MANAGE USER LISTINGS (Modified with Delete/Edit buttons)
 // ========================================
 async function handleManageListings(sender) {
   try {
@@ -254,27 +258,283 @@ async function handleManageListings(sender) {
       return sendMessage(sender, "You haven't posted any listings yet. Select *Post Listing* from the menu to add one!");
     }
 
-    let txt = "🏡 *Your Listings for Management*\n\n";
-    
-    listings.forEach((l, i) => {
-      txt += `*---------------------- Listing ${i + 1} ----------------------*\n`;
-      txt += `*ID:* ${l.id}\n`;
-      txt += `*Title:* ${l.title || "Untitled"}\n`;
-      txt += `*Location:* ${l.location || "Not provided"}\n`;
-      txt += `*Type:* ${l.listingType || l.type || "N/A"}\n`;
-      txt += `*Price:* ₹${l.price ? l.price.toLocaleString('en-IN') : "N/A"}\n\n`;
+    // Create buttons for each listing
+    const listingRows = listings.map((l, i) => {
+      const shortTitle = l.title && l.title.length > 25 
+        ? l.title.substring(0, 25) + '...' 
+        : l.title || 'Untitled Property';
+      
+      return {
+        id: `listing_${l.id}`, // Use Firestore document ID
+        title: `${shortTitle} - ₹${l.price ? l.price.toLocaleString('en-IN') : "N/A"}`,
+        description: `📍 ${l.location || 'Location not specified'} | 🏠 ${l.type || l.listingType || 'Property'}`
+      };
     });
 
-    await sendMessage(sender, txt);
+    // Send interactive list with Delete/Edit options
+    const sections = [{
+      title: `Your Listings (${listings.length})`,
+      rows: listingRows
+    }];
 
-    await sendMessage(
+    await sendList(
       sender,
-      "To *delete* a listing, reply with its *ID* (e.g., 'Delete ID-XYZ').\nTo go back, type *hi*."
+      "🏡 Manage Your Listings",
+      "Select a listing to delete or edit:",
+      "Select Listing",
+      sections
     );
+
+    // Update session state
+    const session = await getSession(sender);
+    session.step = "managing_listings";
+    session.manageListings = {
+      listings: listings.reduce((acc, listing) => {
+        acc[listing.id] = listing;
+        return acc;
+      }, {}),
+      step: "awaiting_selection"
+    };
+    await saveSession(sender, session);
 
   } catch (err) {
     console.error("Error in handleManageListings:", err);
     await sendMessage(sender, "❌ Unable to fetch your listings right now.");
+  }
+}
+
+// ========================================
+// HANDLE LISTING SELECTION FOR DELETE/EDIT
+// ========================================
+async function handleListingSelection(sender, selectedId, session) {
+  // Extract the listing ID from the selected option
+  // Format: "listing_DOCUMENT_ID"
+  const listingId = selectedId.replace('listing_', '');
+  const listing = session.manageListings?.listings?.[listingId];
+
+  if (!listing) {
+    await sendMessage(sender, "❌ Listing not found. Please try again.");
+    await handleManageListings(sender);
+    return;
+  }
+
+  // Store selected listing in session
+  session.manageListings.selectedId = listingId;
+  session.manageListings.selectedListing = listing;
+  session.manageListings.step = "awaiting_action";
+
+  // Send listing details with Delete/Edit buttons
+  const listingText = 
+`📋 *Listing Details:*
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+  // Send buttons for Delete/Edit/Cancel
+  await sendReplyButtons(
+    sender,
+    listingText,
+    [
+      { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+      { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+      { id: "cancel_manage", title: "⬅️ Back to List" }
+    ]
+  );
+
+  await saveSession(sender, session);
+}
+
+// ========================================
+// HANDLE DELETE CONFIRMATION
+// ========================================
+async function handleDeleteListing(sender, session) {
+  const listingId = session.manageListings?.selectedId;
+  const listing = session.manageListings?.selectedListing;
+
+  if (!listingId || !listing) {
+    await sendMessage(sender, "❌ No listing selected for deletion.");
+    await handleManageListings(sender);
+    return;
+  }
+
+  try {
+    // Delete from Firestore
+    await db.collection("listings").doc(listingId).delete();
+    
+    await sendMessage(
+      sender,
+      `✅ Listing "${listing.title || 'Untitled'}" has been deleted successfully!`
+    );
+
+    // Reset session
+    delete session.manageListings;
+    session.step = "menu";
+    await saveSession(sender, session);
+
+    // Show main menu
+    await sendMainMenuViaService(sender);
+  } catch (err) {
+    console.error("Error deleting listing:", err);
+    await sendMessage(sender, "❌ Failed to delete listing. Please try again.");
+  }
+}
+
+// ========================================
+// HANDLE EDIT LISTING
+// ========================================
+async function handleEditListing(sender, session) {
+  const listing = session.manageListings?.selectedListing;
+
+  if (!listing) {
+    await sendMessage(sender, "❌ No listing selected for editing.");
+    await handleManageListings(sender);
+    return;
+  }
+
+  // Store original listing and set up editing flow
+  session.editFlow = {
+    listingId: session.manageListings.selectedId,
+    original: listing,
+    step: "awaiting_field_selection",
+    updatedFields: {}
+  };
+
+  // Send field selection buttons
+  await sendReplyButtons(
+    sender,
+    `✏️ *Edit Listing: ${listing.title || 'Untitled'}*\n\nSelect which field you want to edit:`,
+    [
+      { id: "edit_title", title: "📝 Title" },
+      { id: "edit_location", title: "📍 Location" },
+      { id: "edit_price", title: "💰 Price" },
+      { id: "edit_type", title: "🏠 Property Type" },
+      { id: "edit_bhk", title: "🛏️ BHK" },
+      { id: "edit_contact", title: "📞 Contact" },
+      { id: "edit_description", title: "📄 Description" },
+      { id: "edit_cancel", title: "❌ Cancel Edit" }
+    ]
+  );
+
+  await saveSession(sender, session);
+}
+
+// ========================================
+// HANDLE FIELD EDITING
+// ========================================
+async function handleFieldEdit(sender, field, session) {
+  session.editFlow.editingField = field;
+  session.editFlow.step = "awaiting_field_value";
+  
+  const fieldLabels = {
+    "edit_title": "title",
+    "edit_location": "location",
+    "edit_price": "price",
+    "edit_type": "type",
+    "edit_bhk": "bhk",
+    "edit_contact": "contact",
+    "edit_description": "description"
+  };
+
+  const fieldName = fieldLabels[field];
+  const currentValue = session.editFlow.original[fieldName] || 'Not set';
+
+  await sendMessage(
+    sender,
+    `Current ${fieldName}: *${currentValue}*\n\nPlease send the new value:`
+  );
+
+  await saveSession(sender, session);
+}
+
+// ========================================
+// UPDATE EDITED FIELD
+// ========================================
+async function updateFieldValue(sender, newValue, session) {
+  const field = session.editFlow.editingField;
+  const fieldLabels = {
+    "edit_title": "title",
+    "edit_location": "location",
+    "edit_price": "price",
+    "edit_type": "type",
+    "edit_bhk": "bhk",
+    "edit_contact": "contact",
+    "edit_description": "description"
+  };
+
+  const fieldName = fieldLabels[field];
+  
+  // Special handling for price - convert to number
+  if (field === "edit_price") {
+    const numValue = parseInt(newValue.replace(/[^\d]/g, ''));
+    if (!isNaN(numValue)) {
+      session.editFlow.updatedFields[fieldName] = numValue;
+    } else {
+      session.editFlow.updatedFields[fieldName] = newValue;
+    }
+  } else {
+    session.editFlow.updatedFields[fieldName] = newValue;
+  }
+
+  session.editFlow.step = "awaiting_field_selection";
+
+  // Ask if user wants to edit more fields
+  await sendReplyButtons(
+    sender,
+    `✅ ${fieldName} updated! Do you want to edit another field?`,
+    [
+      { id: "edit_another", title: "✏️ Edit Another Field" },
+      { id: "save_edits", title: "💾 Save All Changes" },
+      { id: "cancel_edits", title: "❌ Discard Changes" }
+    ]
+  );
+
+  await saveSession(sender, session);
+}
+
+// ========================================
+// SAVE ALL EDITS
+// ========================================
+async function saveAllEdits(sender, session) {
+  const listingId = session.editFlow.listingId;
+  const updates = session.editFlow.updatedFields;
+
+  if (Object.keys(updates).length === 0) {
+    await sendMessage(sender, "❌ No changes were made.");
+    await handleManageListings(sender);
+    return;
+  }
+
+  try {
+    // Update Firestore document
+    await db.collection("listings").doc(listingId).update({
+      ...updates,
+      updatedAt: Date.now()
+    });
+
+    await sendMessage(
+      sender,
+      `✅ Listing updated successfully!\n\nChanges made:\n${Object.entries(updates)
+        .map(([key, value]) => `• ${key}: ${value}`)
+        .join('\n')}`
+    );
+
+    // Clean up session
+    delete session.editFlow;
+    delete session.manageListings;
+    session.step = "menu";
+    await saveSession(sender, session);
+
+    // Show main menu
+    await sendMainMenuViaService(sender);
+  } catch (err) {
+    console.error("Error updating listing:", err);
+    await sendMessage(sender, "❌ Failed to update listing. Please try again.");
   }
 }
 
