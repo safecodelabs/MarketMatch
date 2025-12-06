@@ -38,35 +38,316 @@ const {
 } = require("./src/services/messageService"); 
 const { db } = require("./database/firestore");
 
+// ✅ ADDED: Environment variables for Flow
+const WHATSAPP_FLOW_ID = process.env.WHATSAPP_FLOW_ID;
+const FLOW_MODE = process.env.FLOW_MODE || "draft"; // "draft" for testing, "published" for production
 
 // ========================================
-// FLOW SUBMISSION HANDLER (For Interactive Forms)
+// VALIDATE FLOW CONFIGURATION
+// ========================================
+function validateFlowConfig() {
+  console.log("🔧 [CONFIG] Validating Flow configuration...");
+  
+  if (!WHATSAPP_FLOW_ID) {
+    console.warn("⚠️ [CONFIG] WHATSAPP_FLOW_ID is not configured!");
+    console.warn("⚠️ [CONFIG] Please set WHATSAPP_FLOW_ID environment variable in Railway.");
+    return false;
+  }
+  
+  if (FLOW_MODE !== "draft" && FLOW_MODE !== "published") {
+    console.warn("⚠️ [CONFIG] FLOW_MODE should be 'draft' or 'published'");
+    return false;
+  }
+  
+  console.log(`✅ [CONFIG] Flow configured: ID=${WHATSAPP_FLOW_ID}, Mode=${FLOW_MODE}`);
+  return true;
+}
+
+// Validate on import
+validateFlowConfig();
+
+// ========================================
+// ENHANCED FLOW SUBMISSION HANDLER
 // ========================================
 async function handleFlowSubmission(metadata, sender) {
-  if (
-    metadata?.type === "interactive" &&
-    metadata?.interactive?.type === "flow_submission"
-  ) {
-    const data = metadata.interactive.data;
+  console.log("🔍 [FLOW DEBUG] Checking for flow submission...");
+  console.log("🔍 [FLOW DEBUG] Metadata type:", metadata?.type);
+  console.log("🔍 [FLOW DEBUG] Interactive type:", metadata?.interactive?.type);
+  
+  if (metadata?.type === "interactive" && metadata?.interactive?.type === "flow_submission") {
+    console.log("✅ [FLOW] Flow submission detected!");
+    console.log("🔧 [FLOW] Using Flow ID from env:", WHATSAPP_FLOW_ID);
     
-    await db.collection("listings").add({
-      user: sender, 
-      title: data.title,
-      type: data.listingType,
-      bhk: data.bhk,
-      location: data.location,
-      price: data.price,
-      contact: data.contact,
-      createdAt: Date.now()
-    });
+    try {
+      const data = metadata.interactive.data;
+      const flowReply = metadata.interactive.flow_reply;
+      
+      console.log("📋 [FLOW] Received data:", JSON.stringify(data, null, 2));
+      console.log("📋 [FLOW] Flow reply:", JSON.stringify(flowReply, null, 2));
+      
+      // Extract data from flow submission
+      // Map Flow field names to our database field names
+      const listingData = {
+        user: sender,
+        title: data.title || data.Title || data.property_title || "Untitled Property",
+        type: data.listingType || data.property_type || data.type || data.Property_Type || "Property",
+        bhk: data.bhk || data.BHK || data.bedrooms || "N/A",
+        location: data.location || data.Location || data.property_location || "Location not specified",
+        price: parseFloat(data.price || data.Price || data.monthly_rent || data.monthly_price || 0),
+        contact: data.contact || data.Contact || data.phone || data.Phone || "Not provided",
+        description: data.description || data.Description || data.additional_details || data.details || "No description provided",
+        createdAt: Date.now(),
+        timestamp: Date.now()
+      };
+      
+      // Clean and validate the data
+      if (!listingData.title || listingData.title === "Untitled Property") {
+        throw new Error("Title is required");
+      }
+      
+      if (!listingData.location || listingData.location === "Location not specified") {
+        throw new Error("Location is required");
+      }
+      
+      if (!listingData.price || listingData.price <= 0) {
+        throw new Error("Valid price is required");
+      }
+      
+      console.log("🏡 [FLOW] Processed listing data:", listingData);
+      
+      // Save to Firestore
+      const docRef = await db.collection("listings").add(listingData);
+      console.log("💾 [FLOW] Listing saved with ID:", docRef.id);
+      
+      // Send success message with details
+      const successMessage = 
+`🎉 *Listing Posted Successfully!*
 
-    await sendMessage(sender, "🎉 Your listing has been posted successfully!");
+📋 *Details:*
+*Title:* ${listingData.title}
+*Type:* ${listingData.type}
+*Location:* ${listingData.location}
+*Price:* ₹${listingData.price.toLocaleString('en-IN')}
+*Contact:* ${listingData.contact}
+${listingData.description ? `*Description:* ${listingData.description}` : ''}
+
+Your listing is now live and visible to all users!`;
+
+      await sendMessage(sender, successMessage);
+      
+      // Update session
+      const session = await getSession(sender);
+      session.step = "menu";
+      await saveSession(sender, session);
+      
+      // Send main menu
+      await sendMainMenuViaService(sender);
+      
+      return true;
+      
+    } catch (error) {
+      console.error("❌ [FLOW] Error processing flow submission:", error);
+      await sendMessage(
+        sender,
+        `❌ Sorry, there was an error saving your listing: ${error.message}\n\nPlease try again or use the text format.`
+      );
+      return true; // Still return true to indicate flow was handled
+    }
+  }
+  
+  // Also check for flow completion
+  if (metadata?.type === "interactive" && metadata?.interactive?.type === "flow_completion") {
+    console.log("✅ [FLOW] Flow completion detected");
     return true;
   }
+  
+  console.log("❌ [FLOW] Not a flow submission or completion");
   return false;
 }
 
+// ========================================
+// POST LISTING VIA WHATSAPP FLOW
+// ========================================
+async function handlePostListingFlow(sender) {
+  try {
+    console.log(`📋 [FLOW] Sending Post Listing Flow to ${sender}`);
+    
+    // Validate configuration first
+    if (!validateFlowConfig()) {
+      throw new Error("Flow configuration is invalid. Check environment variables in Railway.");
+    }
+    
+    // Get Flow ID from environment variables
+    const FLOW_ID = WHATSAPP_FLOW_ID;
+    
+    console.log(`🔧 [FLOW] Using Flow ID: ${FLOW_ID}, Mode: ${FLOW_MODE}`);
+    
+    // Generate a unique flow token
+    const flowToken = `flow_token_${Date.now()}_${sender.replace(/[^0-9]/g, '')}`;
+    
+    const flowPayload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: sender,
+      type: "interactive",
+      interactive: {
+        type: "flow",
+        header: {
+          type: "text",
+          text: "🏡 Post New Listing"
+        },
+        body: {
+          text: "Fill out this form to list your property. All fields are required."
+        },
+        footer: {
+          text: "MarketMatch AI"
+        },
+        action: {
+          name: "flow",
+          parameters: {
+            mode: FLOW_MODE, // "draft" or "published"
+            flow_message_version: "3",
+            flow_token: flowToken,
+            flow_id: FLOW_ID
+          }
+        }
+      }
+    };
 
+    console.log(`📤 [FLOW] Sending flow with ID: ${FLOW_ID}`);
+    
+    // Use sendMessage function
+    await sendMessage(sender, flowPayload);
+    
+    // Update session
+    const session = await getSession(sender);
+    session.step = "awaiting_flow_submission";
+    session.flowToken = flowToken; // Store for reference
+    await saveSession(sender, session);
+    
+    console.log(`✅ [FLOW] Flow sent successfully to ${sender} with token: ${flowToken}`);
+    
+  } catch (error) {
+    console.error("❌ [FLOW] Error sending flow:", error);
+    
+    // Fallback to text input if flow fails
+    await sendMessage(
+      sender,
+      "❌ Unable to load the listing form right now.\n\n" +
+      "Please send listing details in this format:\n" +
+      "*Example:* `2BHK Apartment, Noida Sector 52, 15000, +9199XXXXXXXX, Furnished`\n\n" +
+      "*Format:* Title, Location, Price, Contact, Description"
+    );
+    
+    const session = await getSession(sender);
+    session.step = "awaiting_post_details";
+    await saveSession(sender, session);
+  }
+}
+
+// ========================================
+// FALLBACK: TEXT-BASED LISTING PARSING (IMPROVED)
+// ========================================
+async function handleTextListingInput(sender, text, session) {
+  try {
+    console.log(`📝 [TEXT LISTING] Processing text input: ${text}`);
+    
+    // Split by commas or newlines
+    const parts = text.split(/[,|\n]/).map(part => part.trim()).filter(part => part);
+    
+    if (parts.length < 4) {
+      throw new Error("Please provide at least: Title, Location, Price, and Contact");
+    }
+    
+    // Try to identify fields intelligently
+    const listingData = {
+      user: sender,
+      title: parts[0], // First part is usually title
+      location: null,
+      price: null,
+      contact: null,
+      type: "Property", // Default
+      description: []
+    };
+    
+    // Analyze each part
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      
+      // Check for price (contains numbers)
+      const priceMatch = part.match(/(\d+[,\d]*)/);
+      if (priceMatch && !listingData.price) {
+        listingData.price = parseInt(priceMatch[1].replace(/,/g, ''));
+        continue;
+      }
+      
+      // Check for phone number
+      if (part.match(/[+0-9]{10,}/) && !listingData.contact) {
+        listingData.contact = part;
+        continue;
+      }
+      
+      // Check for BHK/type
+      if (part.match(/\b(1RK|1BHK|2BHK|3BHK|4BHK|PG|Villa|Apartment|House|Flat)\b/i) && !listingData.type) {
+        listingData.type = part;
+        continue;
+      }
+      
+      // If we haven't set location yet and this doesn't look like contact/price
+      if (!listingData.location && !part.match(/[+0-9]{10,}/) && !priceMatch) {
+        listingData.location = part;
+        continue;
+      }
+      
+      // Everything else goes to description
+      listingData.description.push(part);
+    }
+    
+    // Validate required fields
+    if (!listingData.title) throw new Error("Title is required");
+    if (!listingData.location) throw new Error("Location is required");
+    if (!listingData.price || listingData.price <= 0) throw new Error("Valid price is required");
+    if (!listingData.contact) throw new Error("Contact number is required");
+    
+    // Set description
+    listingData.description = listingData.description.join(", ") || "No additional details";
+    listingData.createdAt = Date.now();
+    
+    // Save to database
+    await db.collection("listings").add(listingData);
+    
+    const successMessage = 
+`🎉 *Listing Posted Successfully!*
+
+📋 *Details:*
+*Title:* ${listingData.title}
+*Location:* ${listingData.location}
+*Type:* ${listingData.type}
+*Price:* ₹${listingData.price.toLocaleString('en-IN')}
+*Contact:* ${listingData.contact}
+${listingData.description ? `*Description:* ${listingData.description}` : ''}`;
+    
+    await sendMessage(sender, successMessage);
+    
+    // Reset to menu
+    session.step = "menu";
+    await saveSession(sender, session);
+    await sendMainMenuViaService(sender);
+    
+    return true;
+    
+  } catch (error) {
+    console.error("❌ [TEXT LISTING] Error:", error);
+    await sendMessage(
+      sender,
+      `❌ Error: ${error.message}\n\n` +
+      "Please use this format:\n" +
+      "*Example:* `2BHK Apartment, Noida Sector 52, 15000, +9199XXXXXXXX, Furnished`\n\n" +
+      "*Or try:* /flow for the form interface"
+    );
+    return false;
+  }
+}
 
 // ========================================
 // LIST MESSAGE DATA
@@ -107,8 +388,6 @@ const MENU_ROWS = [
   },
 ];
 
-
-
 // ========================================
 // SEND LIST HELPERS
 // ========================================
@@ -134,8 +413,6 @@ async function sendMainMenuViaService(to) {
   );
 }
 
-
-
 // ========================================
 // PARSE LANGUAGE TYPED INPUT
 // ========================================
@@ -153,7 +430,6 @@ function parseLangFromText(text) {
 
   return null;
 }
-
 
 // ========================================
 // START/CONTINUE LISTING FLOW - EXTREME DEBUG VERSION
@@ -669,9 +945,8 @@ async function saveAllEdits(sender, session) {
   }
 }
 
-
 // ========================================
-// MAIN CONTROLLER - COMPLETELY FIXED VERSION
+// MAIN CONTROLLER - UPDATED WITH FLOW SUPPORT
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}) {
   console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
@@ -685,7 +960,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   // 0) PRIORITY: CHECK FLOW SUBMISSION
   // ===========================
   const flowHandled = await handleFlowSubmission(metadata, sender);
-  if (flowHandled) return;
+  if (flowHandled) return session;
 
   let replyId = null;
   
@@ -725,7 +1000,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   const greetings = ["hi", "hello", "hey", "start"];
   const isGreeting = greetings.includes(lower);
   const isNewUser = !user && !session.isInitialized;
-
+  
   // ===========================
   // 1) NEW USER INTRO
   // ===========================
@@ -1159,47 +1434,12 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 11) AWAITING LISTING DETAILS (TEXT-BASED POST)
+  // 11) TEXT-BASED LISTING INPUT (FALLBACK)
   // ==========================================
-  if (session.step === "awaiting_post_details") {
-    try {
-      const parts = msg.split(",").map(p => p.trim());
-      
-      if (parts.length < 5) {
-        throw new Error("Missing required details.");
-      }
-
-      const rawPrice = parts[3].replace(/[^\d]/g, '');
-      const price = parseInt(rawPrice);
-
-      const listing = {
-        user: sender,
-        title: `${parts[0]} - ${parts[2]} Listing`, 
-        listingType: parts[2],
-        location: parts[1], 
-        price: isNaN(price) ? rawPrice : price,
-        contact: parts[4],
-        description: parts.slice(5).join(", ") || "No additional details provided.",
-        createdAt: Date.now()
-      };
-
-      await db.collection("listings").add(listing);
-      
-      await sendMessage(sender, "🎉 Your property listing has been posted successfully and is now visible to others!");
-      
-      session.step = "menu";
-      await saveSession(sender, session);
-      await sendMainMenuViaService(sender);
-      return session;
-
-    } catch (err) {
-      console.error("Error processing listing details:", err);
-      await sendMessage(
-        sender,
-        "❌ I had trouble parsing those details. Please ensure you use the exact format:\nExample: *Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro*"
-      );
-      return session;
-    }
+  if (session.step === "awaiting_post_details" && text) {
+    console.log("📝 [CONTROLLER] Processing text-based listing input");
+    await handleTextListingInput(sender, text, session);
+    return session;
   }
   
   // ==========================================
@@ -1303,12 +1543,9 @@ What would you like to do with this saved listing?`;
 
     case "post_listing":
       console.log("📝 Menu: Post Listing selected");
-      await sendMessage(
-        sender,
-        "Please send the listing details in this exact format:\nExample: *Rahul, Noida Sector 56, 2BHK, 15000, +9199XXXXXXXX, Semi-furnished, near metro*"
-      );
-      session.step = "awaiting_post_details";
-      break;
+      // Use WhatsApp Flow for posting
+      await handlePostListingFlow(sender);
+      return session; // Return early since handlePostListingFlow handles session
 
     case "manage_listings":
       console.log("⚙️ Menu: Manage Listings selected");
@@ -1341,12 +1578,12 @@ What would you like to do with this saved listing?`;
   return session;
 }
 
-
-
 // ========================================
 module.exports = {
   handleIncomingMessage,
   handleShowListings,
   handleManageListings,
-  handleSavedListings // ✅ ADDED
+  handleSavedListings,
+  handlePostListingFlow, // Export for testing
+  handleFlowSubmission // Export for testing
 };
