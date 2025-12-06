@@ -64,10 +64,26 @@ const LANG_ROWS = [
 ];
 
 const MENU_ROWS = [
-  { id: "view_listings", title: "View Listings" },
-  { id: "post_listing", title: "Post Listing" },
-  { id: "manage_listings", title: "Manage Listings" },
-  { id: "change_language", title: "Change Language" },
+  { 
+    id: "view_listings", 
+    title: "View Listings", 
+    description: "Browse and explore all available items, properties, or services posted by users in a clear, organized format." 
+  },
+  { 
+    id: "post_listing", 
+    title: "Post Listing", 
+    description: "Quickly create and publish your own item, property, or service for others to see and interact with." 
+  },
+  { 
+    id: "manage_listings", 
+    title: "Manage Listings", 
+    description: "Edit, update, or remove the listings you have created, and track their performance all from one dashboard." 
+  },
+  { 
+    id: "change_language", 
+    title: "Change Language", 
+    description: "Instantly switch the entire app interface to your preferred language for a more comfortable experience." 
+  },
 ];
 
 
