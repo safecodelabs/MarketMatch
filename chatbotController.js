@@ -321,27 +321,41 @@ async function handleDeleteListing(sender, session) {
     return;
   }
 
+  console.log(`🔍 [CONTROLLER] Deleting listing: ${listingId}`);
+  console.log(`🔍 [CONTROLLER] Listing title: ${listing.title || 'Untitled'}`);
+
   try {
     const result = await deleteListing(listingId);
     
-    if (result.success) {
+    console.log(`🔍 [CONTROLLER] Delete result:`, result);
+    
+    if (result && result.success === true) {
       await sendMessage(
         sender,
         `✅ Listing "${listing.title || 'Untitled'}" has been deleted successfully!`
       );
 
+      // Clear flow data
       await clearFlowData(sender);
+      
+      // Get fresh session and reset to menu
       const newSession = await getSession(sender);
-      newSession.step = "menu";
-      await saveSession(sender, newSession);
+      if (newSession) {
+        newSession.step = "menu";
+        delete newSession.manageListings;
+        delete newSession.editFlow;
+        await saveSession(sender, newSession);
+      }
 
+      // Show main menu
       await sendMainMenuViaService(sender);
     } else {
-      await sendMessage(sender, "❌ Failed to delete listing. Please try again.");
+      console.error(`❌ [CONTROLLER] Delete failed, result:`, result);
+      await sendMessage(sender, `❌ Failed to delete listing: ${result?.error || 'Unknown error'}`);
     }
   } catch (err) {
-    console.error("Error deleting listing:", err);
-    await sendMessage(sender, "❌ Failed to delete listing. Please try again.");
+    console.error("❌ [CONTROLLER] Error in delete operation:", err);
+    await sendMessage(sender, "❌ Error deleting listing. Please try again.");
   }
 }
 

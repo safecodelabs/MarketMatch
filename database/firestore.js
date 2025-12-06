@@ -125,14 +125,77 @@ async function getListingById(listingId) {
 // -----------------------------------------------------
 // DELETE LISTING BY ID
 // -----------------------------------------------------
+// -----------------------------------------------------
+// DELETE LISTING BY ID - ENHANCED DEBUG VERSION
+// -----------------------------------------------------
 async function deleteListing(listingId) {
+  console.log(`🔍 [FIRESTORE] deleteListing called for ID: ${listingId}`);
+  console.log(`🔍 [FIRESTORE] listingId type: ${typeof listingId}`);
+  console.log(`🔍 [FIRESTORE] listingId value: "${listingId}"`);
+  
   try {
-    await listingsRef.doc(listingId).delete();
-    console.log(`✅ Listing ${listingId} deleted successfully`);
-    return { success: true };
+    // Validate and clean listingId
+    if (!listingId) {
+      console.error(`❌ [FIRESTORE] Empty listing ID`);
+      return { 
+        success: false, 
+        error: "Empty listing ID",
+        listingId: listingId 
+      };
+    }
+    
+    const cleanListingId = String(listingId).trim();
+    
+    console.log(`🔍 [FIRESTORE] Clean listing ID: "${cleanListingId}"`);
+    
+    // Get document reference
+    const docRef = listingsRef.doc(cleanListingId);
+    
+    console.log(`🔍 [FIRESTORE] Checking if document exists...`);
+    
+    // Check if document exists
+    const doc = await docRef.get();
+    
+    if (!doc.exists) {
+      console.warn(`⚠️ [FIRESTORE] Document ${cleanListingId} does not exist`);
+      return { 
+        success: false, 
+        error: "Document not found",
+        listingId: cleanListingId,
+        exists: false
+      };
+    }
+    
+    console.log(`🔍 [FIRESTORE] Document found, data:`, doc.data());
+    
+    // Delete the document
+    console.log(`🔍 [FIRESTORE] Attempting to delete document...`);
+    await docRef.delete();
+    
+    console.log(`✅ [FIRESTORE] Document ${cleanListingId} deleted successfully`);
+    
+    return { 
+      success: true, 
+      listingId: cleanListingId,
+      message: "Listing deleted successfully",
+      deletedAt: Date.now(),
+      existed: true
+    };
+    
   } catch (err) {
-    console.error("🔥 Error deleting listing:", err);
-    return { success: false, error: err.message || err };
+    console.error("🔥 [FIRESTORE] Error in deleteListing:", err);
+    console.error("🔥 [FIRESTORE] Error name:", err.name);
+    console.error("🔥 [FIRESTORE] Error message:", err.message);
+    console.error("🔥 [FIRESTORE] Error code:", err.code);
+    console.error("🔥 [FIRESTORE] Error stack:", err.stack);
+    
+    return { 
+      success: false, 
+      error: err.message || "Unknown error",
+      listingId: listingId,
+      code: err.code,
+      name: err.name
+    };
   }
 }
 
