@@ -123,9 +123,6 @@ async function getListingById(listingId) {
 }
 
 // -----------------------------------------------------
-// DELETE LISTING BY ID
-// -----------------------------------------------------
-// -----------------------------------------------------
 // DELETE LISTING BY ID - ENHANCED DEBUG VERSION
 // -----------------------------------------------------
 async function deleteListing(listingId) {
@@ -248,9 +245,123 @@ async function saveSavedListing(userId, listingId) {
   }
 }
 
-// -----------------------------------------------
+// -----------------------------------------------------
+// REMOVE SAVED LISTING FROM USER FAVORITES
+// -----------------------------------------------------
+async function removeSavedListing(userId, listingId) {
+  try {
+    // Use the same composite ID format for lookup
+    const docId = `${String(userId)}_${String(listingId)}`;
+    
+    const savedDoc = await savedRef.doc(docId).get();
+    
+    if (!savedDoc.exists) {
+      console.log(`⚠️ Saved listing ${docId} not found for removal`);
+      return { success: false, error: "Saved listing not found" };
+    }
+    
+    await savedRef.doc(docId).delete();
+    console.log(`✅ Saved listing ${docId} removed successfully`);
+    return { success: true };
+  } catch (err) {
+    console.error("🔥 Error removing saved listing:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+// -----------------------------------------------------
+// GET USER'S SAVED LISTINGS
+// -----------------------------------------------------
+async function getUserSavedListings(userId) {
+  try {
+    // Query saved collection for this user
+    const snapshot = await savedRef
+      .where("userId", "==", userId)
+      .orderBy("savedAt", "desc")
+      .get();
+    
+    if (snapshot.empty) {
+      console.log(`📭 No saved listings found for user ${userId}`);
+      return [];
+    }
+    
+    console.log(`🔍 Found ${snapshot.docs.length} saved items for user ${userId}`);
+    
+    // Get all listing IDs
+    const savedItems = snapshot.docs.map(doc => ({
+      savedId: doc.id,
+      ...doc.data()
+    }));
+    
+    const listingIds = savedItems.map(item => item.listingId);
+    
+    if (listingIds.length === 0) {
+      return [];
+    }
+    
+    // Fetch the actual listing data for each saved listing ID
+    const listingsPromises = listingIds.map(async (listingId, index) => {
+      try {
+        const listingDoc = await listingsRef.doc(listingId).get();
+        if (listingDoc.exists) {
+          const listingData = listingDoc.data();
+          return {
+            id: listingId,
+            ...listingData,
+            savedAt: savedItems[index]?.savedAt?.toDate?.() || null
+          };
+        }
+        return null;
+      } catch (error) {
+        console.error(`Error fetching listing ${listingId}:`, error);
+        return null;
+      }
+    });
+    
+    const listings = await Promise.all(listingsPromises);
+    
+    // Filter out null results (listings that might have been deleted)
+    const validListings = listings.filter(listing => listing !== null);
+    
+    console.log(`✅ Retrieved ${validListings.length} valid saved listings for user ${userId}`);
+    return validListings;
+    
+  } catch (err) {
+    console.error("🔥 Error getting user saved listings:", err);
+    return [];
+  }
+}
+
+// -----------------------------------------------------
+// CHECK IF LISTING IS ALREADY SAVED BY USER
+// -----------------------------------------------------
+async function isListingSaved(userId, listingId) {
+  try {
+    const docId = `${String(userId)}_${String(listingId)}`;
+    const savedDoc = await savedRef.doc(docId).get();
+    return savedDoc.exists;
+  } catch (err) {
+    console.error("🔥 Error checking if listing is saved:", err);
+    return false;
+  }
+}
+
+// -----------------------------------------------------
+// GET SAVED COUNT FOR A LISTING
+// -----------------------------------------------------
+async function getSavedCount(listingId) {
+  try {
+    const snapshot = await savedRef.where("listingId", "==", listingId).get();
+    return snapshot.size;
+  } catch (err) {
+    console.error("🔥 Error getting saved count:", err);
+    return 0;
+  }
+}
+
+// -----------------------------------------------------
 // USER PROFILE & LANGUAGE (Kept as provided)
-// -----------------------------------------------
+// -----------------------------------------------------
 async function getUserProfile(userId) {
   try {
     const doc = await usersRef.doc(userId).get();
@@ -274,6 +385,19 @@ async function saveUserLanguage(userId, lang) {
   }
 }
 
+// -----------------------------------------------------
+// UPDATE USER PROFILE WITH SAVED LISTINGS (LEGACY SUPPORT)
+// -----------------------------------------------------
+async function saveListingToUser(userId, listingId) {
+  try {
+    // This is for backward compatibility with the earlier implementation
+    return await saveSavedListing(userId, listingId);
+  } catch (err) {
+    console.error("🔥 Error in saveListingToUser:", err);
+    return { success: false, error: err.message };
+  }
+}
+
 // Export the necessary functions
 module.exports = {
   db,
@@ -281,10 +405,15 @@ module.exports = {
   getAllListings,
   getTopListings,
   getUserListings,
-  getListingById, 
-  saveSavedListing, 
+  getListingById,
+  saveSavedListing,
+  saveListingToUser, // For backward compatibility
+  removeSavedListing,
+  getUserSavedListings,
+  isListingSaved,
+  getSavedCount,
   deleteListing,
-  updateListing,  // ✅ ADDED
+  updateListing,
   getUserProfile,
   saveUserLanguage,
 };

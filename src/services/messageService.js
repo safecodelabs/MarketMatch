@@ -273,7 +273,7 @@ async function sendSimpleText(to, text) {
 }
 
 // -------------------------------------------------------------
-// 7) SEND LISTING CARD (Uses sendButtons) - PATCHED VERSION
+// 7) SEND LISTING CARD (Uses sendButtons) - UPDATED VERSION
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, currentIndex, totalCount) {
     console.log("🔄 [MESSAGE SERVICE] sendListingCard called");
@@ -300,13 +300,16 @@ async function sendListingCard(to, listing, currentIndex, totalCount) {
             : 'Price on request';
         const listingBedrooms = listing.bedrooms || listing.bhk || 'N/A';
         const listingType = listing.property_type || listing.type || 'Property';
+        const listingContact = listing.contact || 'Contact not provided';
+        const listingDescription = listing.description || 'No description available';
 
         console.log("🎨 Formatted listing:", {
             title: listingTitle,
             location: listingLocation,
             price: listingPrice,
             bedrooms: listingBedrooms,
-            type: listingType
+            type: listingType,
+            contact: listingContact
         });
 
         // 3. Construct the message body
@@ -322,19 +325,19 @@ Tap a button below to interact.`;
 
         console.log(`📝 Body text length: ${bodyText.length}/1024`);
 
-        // 4. Construct buttons - CRITICAL: Match controller's expected IDs
+        // 4. Construct buttons - MATCHING CONTROLLER'S EXPECTED IDs
         const buttons = [
             { 
-                id: `VIEW_DETAILS_${listingId.slice(0, 20)}`, // Must match controller's check
-                title: "View Details" 
+                id: `VIEW_DETAILS_${listingId.slice(0, 20)}`, 
+                title: "📄 View Details" 
             },
             { 
-                id: `SAVE_LISTING_${listingId.slice(0, 20)}`, // Must match controller's check
-                title: "Save Listing" 
+                id: `SAVE_LISTING_${listingId.slice(0, 20)}`, 
+                title: "❤️ Save" 
             },
             { 
-                id: "NEXT_LISTING", // Must match controller's check
-                title: "Next >>" 
+                id: "NEXT_LISTING", 
+                title: "⏭️ Next" 
             },
         ];
 
@@ -361,7 +364,7 @@ Tap a button below to interact.`;
         console.error("❌ [MESSAGE SERVICE] sendListingCard ERROR:", error.message);
         console.error("❌ Error details:", error);
         
-        // 7. FALLBACK
+        // 7. FALLBACK - Text version with Save option
         console.log("🔄 Falling back to text message...");
         
         const fallbackText = 
@@ -372,7 +375,7 @@ ${listing.title || 'Property Listing'}
 💰 ${listing.price || 'Price on request'}
 🛏️ ${listing.bedrooms || listing.bhk || 'N/A'} BHK
 
-Reply with:
+*Reply with:*
 • "next" - Next listing
 • "view" - View details
 • "save" - Save this listing`;
@@ -382,7 +385,98 @@ Reply with:
 }
 
 // -------------------------------------------------------------
-// 8) EXPORTS
+// 8) SEND SAVED LISTING CARD (For Saved Listings view)
+// -------------------------------------------------------------
+async function sendSavedListingCard(to, listing, index, total) {
+    console.log("❤️ [MESSAGE SERVICE] sendSavedListingCard called");
+    
+    try {
+        // Prepare display values
+        const listingTitle = cleanString(listing.title || listing.property_type || 'Saved Property', 40);
+        const listingLocation = cleanString(listing.location || 'Location not specified', 40);
+        const listingPrice = listing.price 
+            ? `₹${Number(listing.price).toLocaleString('en-IN')}` 
+            : 'Price on request';
+        const listingBedrooms = listing.bedrooms || listing.bhk || 'N/A';
+        const listingType = listing.property_type || listing.type || 'Property';
+        
+        // Saved at timestamp if available
+        let savedInfo = '';
+        if (listing.savedAt) {
+            const savedDate = new Date(listing.savedAt);
+            const timeAgo = getTimeAgo(savedDate);
+            savedInfo = `\n📅 Saved ${timeAgo}`;
+        }
+
+        const bodyText = 
+`❤️ *Saved Listing ${index + 1} of ${total}*
+
+*${listingTitle}*
+📍 ${listingLocation}
+💰 ${listingPrice}
+🛏️ ${listingBedrooms} BHK • ${listingType}${savedInfo}`;
+
+        const buttons = [
+            { 
+                id: `view_saved_${listing.id}`, 
+                title: "📄 View Details" 
+            },
+            { 
+                id: `remove_saved_${listing.id}`, 
+                title: "🗑️ Remove" 
+            },
+            { 
+                id: "next_saved", 
+                title: "⏭️ Next" 
+            },
+        ];
+
+        const headerText = '❤️ Saved Listing';
+
+        return await sendReplyButtons(to, bodyText, buttons, headerText);
+        
+    } catch (error) {
+        console.error("❌ sendSavedListingCard error:", error);
+        
+        // Fallback text
+        const fallbackText = 
+`❤️ Saved Listing ${index + 1} of ${total}
+${listing.title || 'Property'}
+
+Location: ${listing.location || 'N/A'}
+Price: ${listing.price || 'N/A'}
+
+Reply with:
+• "view" - View details
+• "remove" - Remove from saved`;
+
+        return await sendText(to, fallbackText);
+    }
+}
+
+// -------------------------------------------------------------
+// 9) HELPER FUNCTIONS
+// -------------------------------------------------------------
+function getTimeAgo(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffDays > 0) {
+        return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+    } else if (diffHours > 0) {
+        return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+    } else if (diffMins > 0) {
+        return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+    } else {
+        return 'just now';
+    }
+}
+
+// -------------------------------------------------------------
+// 10) EXPORTS
 // -------------------------------------------------------------
 module.exports = {
   sendMessage, 
@@ -391,5 +485,6 @@ module.exports = {
   sendList,
   sendReplyButtons, 
   sendSimpleText,
-  sendListingCard, 
+  sendListingCard,
+  sendSavedListingCard, // NEW: Export the new function
 };

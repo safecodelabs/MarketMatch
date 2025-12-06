@@ -81,16 +81,20 @@ async function clearFlowData(userId) {
     try {
         const session = await getSession(userId);
         if (session) {
-            // Clear flow-specific data but keep basic session
+            // Clear ALL flow-specific data
             delete session.editFlow;
             delete session.manageListings;
             delete session.manageFlow;
+            delete session.savedListingsFlow;  // ✅ ADDED: Clear saved listings flow
+            delete session.viewingSavedListings; // ✅ ADDED: Clear saved viewing state
             
             // Clear housing flow data but keep the structure
             if (session.housingFlow) {
                 delete session.housingFlow.listingData;
                 delete session.housingFlow.currentIndex;
                 delete session.housingFlow.currentListings;
+                delete session.housingFlow.savedListingIndex; // ✅ ADDED
+                delete session.housingFlow.savedListingsData; // ✅ ADDED
                 session.housingFlow.step = 'start';
             }
             
@@ -108,9 +112,97 @@ async function clearFlowData(userId) {
     }
 }
 
+// ✅ NEW: Clear saved listings flow data specifically
+async function clearSavedListingsFlow(userId) {
+    if (!userId) throw new Error('userId required');
+    
+    try {
+        const session = await getSession(userId);
+        if (session) {
+            // Clear only saved listings flow data
+            delete session.savedListingsFlow;
+            delete session.viewingSavedListings;
+            
+            if (session.housingFlow) {
+                delete session.housingFlow.savedListingIndex;
+                delete session.housingFlow.savedListingsData;
+            }
+            
+            // Save cleaned session
+            await saveSession(userId, session);
+            console.log(`✅ clearSavedListingsFlow: cleaned saved listings flow for ${userId}`);
+        }
+        return true;
+    } catch (err) {
+        console.error('❌ clearSavedListingsFlow error:', err?.message || err);
+        return false;
+    }
+}
+
+// ✅ NEW: Initialize saved listings flow
+async function initSavedListingsFlow(userId, listings) {
+    if (!userId) throw new Error('userId required');
+    
+    try {
+        const session = await getSession(userId);
+        if (session) {
+            session.savedListingsFlow = {
+                listings: listings.reduce((acc, listing) => {
+                    acc[listing.id] = listing;
+                    return acc;
+                }, {}),
+                step: "awaiting_selection"
+            };
+            session.step = "viewing_saved_listings";
+            await saveSession(userId, session);
+            console.log(`✅ initSavedListingsFlow: initialized for ${userId} with ${listings.length} listings`);
+        }
+        return true;
+    } catch (err) {
+        console.error('❌ initSavedListingsFlow error:', err?.message || err);
+        return false;
+    }
+}
+
+// ✅ NEW: Update saved listings session state
+async function updateSavedListingsSession(userId, updates) {
+    if (!userId) throw new Error('userId required');
+    
+    try {
+        const session = await getSession(userId);
+        if (session && session.savedListingsFlow) {
+            Object.assign(session.savedListingsFlow, updates);
+            await saveSession(userId, session);
+            console.log(`✅ updateSavedListingsSession: updated for ${userId}`);
+            return true;
+        }
+        return false;
+    } catch (err) {
+        console.error('❌ updateSavedListingsSession error:', err?.message || err);
+        return false;
+    }
+}
+
+// ✅ NEW: Check if user is in saved listings flow
+async function isInSavedListingsFlow(userId) {
+    if (!userId) return false;
+    
+    try {
+        const session = await getSession(userId);
+        return !!(session && (session.savedListingsFlow || session.step === "viewing_saved_listings"));
+    } catch (err) {
+        console.error('❌ isInSavedListingsFlow error:', err?.message || err);
+        return false;
+    }
+}
+
 module.exports = { 
     getSession, 
     saveSession, 
     deleteSession,
-    clearFlowData  // ✅ ADDED
+    clearFlowData,  // ✅ EXISTS
+    clearSavedListingsFlow,  // ✅ NEW
+    initSavedListingsFlow,   // ✅ NEW
+    updateSavedListingsSession, // ✅ NEW
+    isInSavedListingsFlow    // ✅ NEW
 };

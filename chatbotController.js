@@ -1,8 +1,19 @@
 // ========================================
-// IMPORTS
+// IMPORTS - UPDATED
 // ========================================
 const commandRouter = require("./src/bots/commandRouter");
-const { getSession, saveSession, clearFlowData } = require("./utils/sessionStore");
+// ✅ UPDATED: Added new session functions
+const { 
+  getSession, 
+  saveSession, 
+  clearFlowData,
+  clearSavedListingsFlow,
+  initSavedListingsFlow,
+  updateSavedListingsSession,
+  isInSavedListingsFlow 
+} = require("./utils/sessionStore");
+
+// ✅ UPDATED: Added Saved Listings functions
 const { 
   getUserProfile, 
   saveUserLanguage,
@@ -10,14 +21,20 @@ const {
   getUserListings,
   getListingById,
   deleteListing,
-  updateListing
+  updateListing,
+  saveListingToUser,
+  removeSavedListing,
+  getUserSavedListings,
+  isListingSaved
 } = require("./database/firestore");
 
+// ✅ UPDATED: Added sendSavedListingCard
 const { 
     sendMessage, 
     sendList, 
     sendReplyButtons, 
-    sendListingCard
+    sendListingCard,
+    sendSavedListingCard 
 } = require("./src/services/messageService"); 
 const { db } = require("./database/firestore");
 
@@ -77,6 +94,11 @@ const MENU_ROWS = [
     id: "manage_listings", 
     title: "Manage Listings", 
     description: "Edit, update, or remove your property listings." 
+  },
+  { 
+    id: "saved_listings", 
+    title: "Saved Listings", 
+    description: "View and manage properties you've saved for later." 
   },
   { 
     id: "change_language", 
@@ -210,7 +232,146 @@ Reply "next" for next listing.`;
   }
 }
 
+// ========================================
+// HANDLE SAVED LISTINGS
+// ========================================
+async function handleSavedListings(sender) {
+  try {
+    const savedListings = await getUserSavedListings(sender);
 
+    if (!savedListings || savedListings.length === 0) {
+      return sendMessage(
+        sender, 
+        "You haven't saved any listings yet.\n\n" +
+        "To save a listing:\n" +
+        "1. Go to *View Listings*\n" +
+        "2. Browse properties\n" +
+        "3. Tap the *❤️ Save* button on any listing"
+      );
+    }
+
+    const listingRows = savedListings.map((listing, index) => {
+      const shortTitle = listing.title && listing.title.length > 25 
+        ? listing.title.substring(0, 25) + '...' 
+        : listing.title || 'Untitled Property';
+      
+      return {
+        id: `saved_${listing.id}`,
+        title: `${index + 1}. ${shortTitle} - ₹${listing.price ? listing.price.toLocaleString('en-IN') : "N/A"}`,
+        description: `📍 ${listing.location || 'Location not specified'} | 🏠 ${listing.type || listing.listingType || 'Property'}`
+      };
+    });
+
+    const sections = [{
+      title: `Your Saved Listings (${savedListings.length})`,
+      rows: listingRows
+    }];
+
+    await sendList(
+      sender,
+      "❤️ Saved Listings",
+      "Select a listing to view or remove:",
+      "Select Listing",
+      sections
+    );
+
+    const session = await getSession(sender);
+    session.step = "viewing_saved_listings";
+    session.savedListingsFlow = {
+      listings: savedListings.reduce((acc, listing) => {
+        acc[listing.id] = listing;
+        return acc;
+      }, {}),
+      step: "awaiting_selection"
+    };
+    await saveSession(sender, session);
+
+  } catch (err) {
+    console.error("Error in handleSavedListings:", err);
+    await sendMessage(sender, "❌ Unable to fetch your saved listings right now.");
+  }
+}
+
+// ========================================
+// HANDLE SAVED LISTING SELECTION
+// ========================================
+async function handleSavedListingSelection(sender, selectedId, session) {
+  const listingId = selectedId.replace('saved_', '');
+  const listing = session.savedListingsFlow?.listings?.[listingId];
+
+  if (!listing) {
+    await sendMessage(sender, "❌ Saved listing not found. Please try again.");
+    await handleSavedListings(sender);
+    return;
+  }
+
+  session.savedListingsFlow.selectedId = listingId;
+  session.savedListingsFlow.selectedListing = listing;
+  session.savedListingsFlow.step = "awaiting_action";
+
+  const listingText = 
+`📋 Saved Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this saved listing?`;
+
+  await sendReplyButtons(
+    sender,
+    listingText,
+    [
+      { id: `remove_saved_${listingId}`, title: "🗑️ Remove from Saved" },
+      { id: `contact_saved_${listingId}`, title: "📞 Contact Owner" },
+      { id: "back_saved", title: "⬅️ Back to Saved List" }
+    ],
+    "Saved Listing Details"
+  );
+
+  await saveSession(sender, session);
+}
+
+// ========================================
+// HANDLE REMOVE SAVED LISTING
+// ========================================
+async function handleRemoveSavedListing(sender, session) {
+  const listingId = session.savedListingsFlow?.selectedId;
+  const listing = session.savedListingsFlow?.selectedListing;
+
+  if (!listingId || !listing) {
+    await sendMessage(sender, "❌ No saved listing selected.");
+    await handleSavedListings(sender);
+    return;
+  }
+
+  try {
+    const result = await removeSavedListing(sender, listingId);
+    
+    if (result && result.success === true) {
+      await sendMessage(
+        sender,
+        `✅ Listing "${listing.title || 'Untitled'}" has been removed from your saved listings.`
+      );
+
+      // Clear saved listings flow data
+      delete session.savedListingsFlow;
+      session.step = "menu";
+      await saveSession(sender, session);
+
+      // Show main menu
+      await sendMainMenuViaService(sender);
+    } else {
+      await sendMessage(sender, `❌ Failed to remove saved listing: ${result?.error || 'Unknown error'}`);
+    }
+  } catch (err) {
+    console.error("Error in remove saved listing operation:", err);
+    await sendMessage(sender, "❌ Error removing saved listing. Please try again.");
+  }
+}
 
 // ========================================
 // MANAGE USER LISTINGS
@@ -558,6 +719,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
   console.log("🔍 [CONTROLLER DEBUG] Manage listings step:", session.manageListings?.step);
   console.log("🔍 [CONTROLLER DEBUG] Edit flow step:", session.editFlow?.step);
+  console.log("🔍 [CONTROLLER DEBUG] Saved listings step:", session.savedListingsFlow?.step);
 
   const user = await getUserProfile(sender);
   const greetings = ["hi", "hello", "hey", "start"];
@@ -875,7 +1037,129 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 10) AWAITING LISTING DETAILS (TEXT-BASED POST)
+  // 10) SAVED LISTINGS INTERACTIVE HANDLING
+  // ==========================================
+
+  // Handle saved listing selection
+  if (msg.startsWith("saved_") && session.savedListingsFlow?.step === "awaiting_selection") {
+    console.log("🔍 [CONTROLLER] Saved listing selected:", msg);
+    await handleSavedListingSelection(sender, msg, session);
+    return session;
+  }
+
+  // Handle remove saved button click
+  if (msg.startsWith("remove_saved_") && session.savedListingsFlow?.step === "awaiting_action") {
+    console.log("🔍 [CONTROLLER] Remove saved button clicked:", msg);
+    
+    // Show confirmation
+    await sendReplyButtons(
+      sender,
+      "⚠️ Remove this listing from your saved list?",
+      [
+        { id: "confirm_remove_saved", title: "✅ Yes, Remove" },
+        { id: "cancel_remove_saved", title: "❌ No, Keep It" }
+      ],
+      "Confirm Remove"
+    );
+    
+    session.savedListingsFlow.step = "confirming_remove";
+    await saveSession(sender, session);
+    return session;
+  }
+
+  // Handle remove confirmation
+  if (msg === "confirm_remove_saved" && session.savedListingsFlow?.step === "confirming_remove") {
+    console.log("🔍 [CONTROLLER] Confirm remove saved action");
+    await handleRemoveSavedListing(sender, session);
+    return session;
+  }
+
+  // Handle remove cancellation
+  if (msg === "cancel_remove_saved" && session.savedListingsFlow?.step === "confirming_remove") {
+    console.log("🔍 [CONTROLLER] Cancel remove saved action");
+    session.savedListingsFlow.step = "awaiting_action";
+    await saveSession(sender, session);
+    
+    const listing = session.savedListingsFlow.selectedListing;
+    if (listing) {
+      const listingText = 
+`📋 Saved Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this saved listing?`;
+
+      await sendReplyButtons(
+        sender,
+        listingText,
+        [
+          { id: `remove_saved_${session.savedListingsFlow.selectedId}`, title: "🗑️ Remove from Saved" },
+          { id: `contact_saved_${session.savedListingsFlow.selectedId}`, title: "📞 Contact Owner" },
+          { id: "back_saved", title: "⬅️ Back to Saved List" }
+        ],
+        "Saved Listing Details"
+      );
+    }
+    return session;
+  }
+
+  // Handle contact owner
+  if (msg.startsWith("contact_saved_") && session.savedListingsFlow?.step === "awaiting_action") {
+    console.log("🔍 [CONTROLLER] Contact owner button clicked");
+    const listingId = msg.replace('contact_saved_', '');
+    const listing = session.savedListingsFlow.selectedListing;
+    
+    if (listing && listing.contact) {
+      await sendMessage(
+        sender,
+        `📞 Contact the owner of "${listing.title || 'Untitled'}":\n\n` +
+        `*Contact:* ${listing.contact}\n\n` +
+        `You can call or message them directly.`
+      );
+    } else {
+      await sendMessage(sender, "❌ Contact information is not available for this listing.");
+    }
+    
+    // Show the listing details again
+    const listingText = 
+`📋 Saved Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this saved listing?`;
+
+    await sendReplyButtons(
+      sender,
+      listingText,
+      [
+        { id: `remove_saved_${session.savedListingsFlow.selectedId}`, title: "🗑️ Remove from Saved" },
+        { id: `contact_saved_${session.savedListingsFlow.selectedId}`, title: "📞 Contact Owner" },
+        { id: "back_saved", title: "⬅️ Back to Saved List" }
+      ],
+      "Saved Listing Details"
+    );
+    return session;
+  }
+
+  // Handle back to saved list
+  if (msg === "back_saved" && session.savedListingsFlow?.step === "awaiting_action") {
+    console.log("🔍 [CONTROLLER] Back to saved list");
+    await handleSavedListings(sender);
+    return session;
+  }
+  
+  // ==========================================
+  // 11) AWAITING LISTING DETAILS (TEXT-BASED POST)
   // ==========================================
   if (session.step === "awaiting_post_details") {
     try {
@@ -919,7 +1203,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 11) INTERACTIVE LISTING ACTIONS
+  // 12) INTERACTIVE LISTING ACTIONS
   // ==========================================
   if (session.step === "awaiting_listing_action" && replyId) {
     console.log(`🔄 Handling listing action: ${msg}`);
@@ -980,7 +1264,23 @@ What would you like to do with this listing?`;
     
     if (msg.startsWith("SAVE_LISTING_")) {
       console.log("💾 Save button clicked");
-      await sendMessage(sender, `Listing *${currentListing.title || 'Property'}* saved to your favorites! ❤️`);
+      const listingId = msg.replace('SAVE_LISTING_', '');
+      
+      // Save the listing to user's saved listings
+      const result = await saveListingToUser(sender, listingId);
+      
+      if (result.success) {
+        await sendMessage(
+          sender, 
+          `✅ Listing *${currentListing.title || 'Property'}* has been saved to your favorites! ❤️\n\n` +
+          `You can view all your saved listings from the main menu.`
+        );
+      } else if (result.error === 'Listing already saved') {
+        await sendMessage(sender, `⚠️ This listing is already in your saved listings.`);
+      } else {
+        await sendMessage(sender, `❌ Could not save the listing. Please try again.`);
+      }
+      
       await handleShowListings(sender, session);
       return session;
     }
@@ -991,7 +1291,7 @@ What would you like to do with this listing?`;
   }
 
   // ===========================
-  // 12) MENU COMMAND HANDLING
+  // 13) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
@@ -1014,6 +1314,11 @@ What would you like to do with this listing?`;
       console.log("⚙️ Menu: Manage Listings selected");
       await handleManageListings(sender);
       return session; // Return early since handleManageListings handles session
+
+    case "saved_listings":
+      console.log("❤️ Menu: Saved Listings selected");
+      await handleSavedListings(sender);
+      return session; // Return early since handleSavedListings handles session
 
     case "change_language":
       console.log("🌐 Menu: Change Language selected");
@@ -1042,5 +1347,6 @@ What would you like to do with this listing?`;
 module.exports = {
   handleIncomingMessage,
   handleShowListings,
-  handleManageListings
+  handleManageListings,
+  handleSavedListings // ✅ ADDED
 };
