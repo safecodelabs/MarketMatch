@@ -168,6 +168,9 @@ Your listing is now live and visible to all users!`;
 // ========================================
 // POST LISTING VIA WHATSAPP FLOW
 // ========================================
+// ========================================
+// POST LISTING VIA WHATSAPP FLOW - FIXED VERSION
+// ========================================
 async function handlePostListingFlow(sender) {
   try {
     console.log(`📋 [FLOW] Sending Post Listing Flow to ${sender}`);
@@ -208,13 +211,23 @@ async function handlePostListingFlow(sender) {
             mode: FLOW_MODE, // "draft" or "published"
             flow_message_version: "3",
             flow_token: flowToken,
-            flow_id: FLOW_ID
+            flow_id: FLOW_ID,
+            flow_cta: "Create Listing" // ✅ ADD THIS LINE - CRITICAL!
           }
         }
       }
     };
 
+    // ✅ ADDITIONAL: If using published mode, you might need flow_action
+    if (FLOW_MODE === "published") {
+      flowPayload.interactive.action.parameters.flow_action = "navigate";
+      flowPayload.interactive.action.parameters.flow_action_payload = {
+        screen: "WELCOME_SCREEN" // Make sure this matches your Flow's starting screen ID
+      };
+    }
+
     console.log(`📤 [FLOW] Sending flow with ID: ${FLOW_ID}`);
+    console.log(`📤 [FLOW] Payload:`, JSON.stringify(flowPayload, null, 2));
     
     // Use sendMessage function
     await sendMessage(sender, flowPayload);
@@ -1000,7 +1013,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   const greetings = ["hi", "hello", "hey", "start"];
   const isGreeting = greetings.includes(lower);
   const isNewUser = !user && !session.isInitialized;
-  
+
   // ===========================
   // 1) NEW USER INTRO
   // ===========================
