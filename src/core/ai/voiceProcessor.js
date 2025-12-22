@@ -27,7 +27,7 @@ try {
     };
 }
 
-const languageStrings = require('../../utils/languageStrings');
+const languageStrings = require('../../../utils/languageStrings');
 
 class VoiceProcessor {
     constructor() {
