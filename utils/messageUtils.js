@@ -24,4 +24,44 @@ function getMissingInfo(intent, text) {
   return missing;
 }
 
-module.exports = { detectIntent, getMissingInfo };
+/**
+ * Send interactive buttons to a user
+ * @param {Object} client - WhatsApp client
+ * @param {string} to - Recipient number
+ * @param {string} text - Message text
+ * @param {Array<string>} buttons - Array of button labels
+ * @returns {Promise<Object>} - Result of sending
+ */
+async function sendInteractiveButtons(client, to, text, buttons) {
+  try {
+    console.log(`📤 [DEBUG] sendInteractiveButtons called for ${to}`);
+    console.log(`📤 [DEBUG] Buttons:`, buttons);
+    
+    // Create button objects
+    const buttonObjects = buttons.map((btn, index) => ({
+      type: 'reply',
+      reply: {
+        id: `btn_${index + 1}`,
+        title: btn
+      }
+    }));
+    
+    // Send interactive message
+    const result = await client.sendMessage(to, {
+      text: text,
+      buttons: buttonObjects
+    });
+    
+    console.log(`✅ Interactive buttons sent successfully (ID: ${result.id})`);
+    return result;
+  } catch (error) {
+    console.error(`❌ Error sending interactive buttons:`, error);
+    throw error;
+  }
+}
+
+module.exports = { 
+  detectIntent, 
+  getMissingInfo,
+  sendInteractiveButtons 
+};
