@@ -10,13 +10,23 @@ const { handleIncomingMessage } = require("../chatbotController");
 const voiceService = require("../src/services/voiceService");
 const messageService = require("../src/services/messageService");
 
+// Log level control
+const LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
+const levels = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
+
+function log(level, ...args) {
+  if (levels[level] <= levels[LOG_LEVEL]) {
+    console.log(`[${level}] Webhook:`, ...args);
+  }
+}
+
 // Fix: Sometimes WhatsApp sends raw buffer instead of JSON
 router.use((req, res, next) => {
   if (req.is("application/json") && Buffer.isBuffer(req.body)) {
     try {
       req.body = JSON.parse(req.body.toString());
     } catch (err) {
-      console.error("❌ JSON Parse Error:", err);
+      log('ERROR', 'JSON Parse Error');
     }
   }
   next();
@@ -27,34 +37,40 @@ router.use((req, res, next) => {
 // =======================================================
 router.post("/", async (req, res) => {
   try {
-    // Log for debugging
-    console.log(
-      "📩 Webhook Body:",
-      JSON.stringify(req.body?.entry?.[0] || req.body).slice(0, 1800)
-    );
-
     const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
 
     // Skip typing indicators, delivery receipts, etc.
     if (!value || !value.messages || value.messages.length === 0) {
-      console.log("ℹ️ Not a message webhook — ignored.");
+      // Don't log status updates to reduce log volume
+      if (value?.statuses) {
+        // Optional: log every 10th status update
+        const statusCount = (global.statusLogCount = (global.statusLogCount || 0) + 1);
+        if (statusCount % 10 === 0) {
+          log('DEBUG', `Status update: ${value.statuses[0]?.status}`);
+        }
+      }
       return res.sendStatus(200);
     }
 
     const message = value.messages[0];
     const sender = message.from;
-    const phoneNumberId = value.metadata?.phone_number_id;
+    
+    // Log minimal webhook info
+    if (message.type !== 'audio') { // Audio logs handled separately
+      log('INFO', `${message.type} from ${sender.substring(0, 10)}...`);
+    }
 
-    let extractedText = ""; // what we pass to the bot
-    let messageMetadata = { ...message }; // Store message with metadata
+    let extractedText = "";
+    let messageMetadata = { ...message };
 
     // =======================================================
     // 📝 NORMAL TEXT MESSAGE
     // =======================================================
     if (message.type === "text") {
       extractedText = message.text.body.trim();
+      log('DEBUG', `Text: "${extractedText.substring(0, 50)}${extractedText.length > 50 ? '...' : ''}"`);
     }
 
     // =======================================================
@@ -63,44 +79,38 @@ router.post("/", async (req, res) => {
     else if (message.type === "interactive") {
       const interactive = message.interactive;
 
-      // button press
       if (interactive.button_reply) {
-        extractedText =
-          interactive.button_reply.id || interactive.button_reply.title;
+        extractedText = interactive.button_reply.id || interactive.button_reply.title;
+      } else if (interactive.list_reply) {
+        extractedText = interactive.list_reply.id || interactive.list_reply.title;
       }
-
-      // list selection
-      else if (interactive.list_reply) {
-        extractedText =
-          interactive.list_reply.id || interactive.list_reply.title;
-      }
+      log('DEBUG', `Interactive: ${extractedText}`);
     }
 
     // =======================================================
     // 🧱 FLOW / FORM SUBMISSION (WhatsApp Flows)
     // =======================================================
     else if (message.type === "button") {
-      // Some flow callbacks come here
       extractedText = message.button.payload || "";
+      log('DEBUG', `Button: ${extractedText}`);
     }
 
     else if (message.type === "interactive_response") {
-      // Newer meta format
       extractedText = message.interactive_response.id || "";
+      log('DEBUG', `Interactive Response: ${extractedText}`);
     }
 
     // =======================================================
-    // 🎤 AUDIO / VOICE MESSAGE HANDLING
+    // 🎤 AUDIO / VOICE MESSAGE HANDLING (OPTIMIZED)
     // =======================================================
     else if (message.type === "audio" || message.type === "voice") {
-      console.log("🎤 Audio message received from:", sender);
+      log('INFO', `Audio from ${sender.substring(0, 10)}...`);
       
       const audioUrl = message.audio?.url || message.voice?.url;
       const isVoice = message.audio?.voice || message.voice || true;
       
       if (!audioUrl) {
-        console.error("❌ No audio URL found in message");
-        // Still send a response to user
+        log('ERROR', 'No audio URL');
         await messageService.sendMessage(
           sender,
           "🎤 I received your voice message but couldn't process it. Please try sending it again."
@@ -108,20 +118,19 @@ router.post("/", async (req, res) => {
         return res.sendStatus(200);
       }
       
-      console.log("🔗 Audio URL:", audioUrl.substring(0, 100) + "...");
+      // Log URL minimally
+      log('DEBUG', `Audio URL: ${audioUrl.split('?')[0]}?mid=...`);
       
-      // Send immediate processing message
-      try {
-        await messageService.sendMessage(
-          sender,
-          "🎤 I received your voice message! Processing it now..."
-        );
-      } catch (err) {
-        console.error("❌ Error sending processing message:", err);
-      }
+      // Send immediate response WITHOUT waiting
+      messageService.sendMessage(
+        sender,
+        "🎤 I received your voice message! Processing it now..."
+      ).catch(err => {
+        log('WARN', 'Failed to send processing message');
+      });
       
       // Mark as voice message for chatbot
-      extractedText = "voice_note"; // Special keyword to trigger voice processing
+      extractedText = "voice_note";
       
       // Store enhanced audio metadata
       messageMetadata.audioMetadata = {
@@ -132,30 +141,23 @@ router.post("/", async (req, res) => {
         timestamp: message.timestamp || Date.now()
       };
       
-      console.log("✅ Audio message processed, triggering voice mode");
+      log('INFO', 'Audio metadata stored');
     }
 
     // =======================================================
-    // 📸 IMAGE MESSAGE (Optional - for future)
+    // 📸 IMAGE / DOCUMENT MESSAGES (Minimal logging)
     // =======================================================
-    else if (message.type === "image") {
-      console.log("📸 Image message received from:", sender);
-      await messageService.sendMessage(
+    else if (message.type === "image" || message.type === "document") {
+      log('INFO', `${message.type} from ${sender.substring(0, 10)}...`);
+      
+      // Send response without logging errors
+      messageService.sendMessage(
         sender,
-        "📸 I received your image! For now, please send text or voice messages."
-      );
-      return res.sendStatus(200);
-    }
-
-    // =======================================================
-    // 📄 DOCUMENT MESSAGE (Optional - for future)
-    // =======================================================
-    else if (message.type === "document") {
-      console.log("📄 Document message received from:", sender);
-      await messageService.sendMessage(
-        sender,
-        "📄 I received your document! For now, please send text or voice messages."
-      );
+        message.type === "image" 
+          ? "📸 I received your image! For now, please send text or voice messages."
+          : "📄 I received your document! For now, please send text or voice messages."
+      ).catch(() => { /* silent fail */ });
+      
       return res.sendStatus(200);
     }
 
@@ -163,48 +165,47 @@ router.post("/", async (req, res) => {
     // ❌ UNSUPPORTED MESSAGE TYPE
     // =======================================================
     else {
-      console.log("⚠️ Unsupported message type:", message.type);
-      // Send helpful response for unsupported types
-      await messageService.sendMessage(
+      log('WARN', `Unsupported type: ${message.type} from ${sender.substring(0, 10)}...`);
+      
+      // Send response without logging errors
+      messageService.sendMessage(
         sender,
         `⚠️ I received a ${message.type} message. Currently, I support text, voice messages, and interactive buttons.`
-      );
+      ).catch(() => { /* silent fail */ });
+      
       return res.sendStatus(200);
     }
 
     // Normalize text
     extractedText = (extractedText || "").toLowerCase();
 
-    console.log(
-      `💬 Incoming | from=${sender} | type=${message.type} | text="${extractedText}"`
-    );
+    // Log final processing info
+    log('DEBUG', `Final: ${sender.substring(0, 10)} | ${message.type} | "${extractedText.substring(0, 30)}"`);
 
     // =======================================================
-    // 🔥 PASS TO BOT WITH ENHANCED METADATA
+    // 🔥 PASS TO BOT (Non-blocking for voice to avoid timeouts)
     // =======================================================
-    // Pass null for client (bot will handle it internally if needed)
-    // Pass the enhanced metadata with audio info if available
-    await handleIncomingMessage(sender, extractedText, messageMetadata, null);
+    if (message.type === "audio" || message.type === "voice") {
+      // Process voice asynchronously to avoid webhook timeout
+      handleIncomingMessage(sender, extractedText, messageMetadata, null)
+        .catch(err => {
+          log('ERROR', `Voice processing failed: ${err.message}`);
+          // Send error message to user
+          messageService.sendMessage(
+            sender,
+            "❌ Sorry, I encountered an error processing your voice message. Please try again."
+          ).catch(() => { /* silent fail */ });
+        });
+    } else {
+      // Process text/interactive messages normally
+      await handleIncomingMessage(sender, extractedText, messageMetadata, null);
+    }
 
-    // We ALWAYS respond 200 immediately to WhatsApp
+    // Always respond 200 immediately to WhatsApp
     return res.sendStatus(200);
     
   } catch (err) {
-    console.error("❌ Webhook Handler Error:", err);
-    
-    // Try to send error message to user if possible
-    try {
-      if (req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from) {
-        const sender = req.body.entry[0].changes[0].value.messages[0].from;
-        await messageService.sendMessage(
-          sender,
-          "❌ Sorry, I encountered an error processing your message. Please try again."
-        );
-      }
-    } catch (innerErr) {
-      console.error("❌ Failed to send error message:", innerErr);
-    }
-    
+    log('ERROR', `Handler error: ${err.message}`);
     return res.sendStatus(500);
   }
 });
@@ -221,15 +222,15 @@ router.get("/", (req, res) => {
 
   if (mode && token) {
     if (mode === "subscribe" && token === verifyToken) {
-      console.log("✅ Webhook verified successfully!");
+      log('INFO', 'Webhook verified');
       return res.status(200).send(challenge);
     } else {
-      console.error("❌ Webhook verification failed");
+      log('ERROR', 'Webhook verification failed');
       return res.sendStatus(403);
     }
   }
 
-  console.error("❌ Missing verification parameters");
+  log('ERROR', 'Missing verification parameters');
   return res.sendStatus(400);
 });
 

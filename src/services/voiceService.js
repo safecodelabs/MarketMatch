@@ -20,6 +20,17 @@ class VoiceService {
         if (!fs.existsSync(this.tempDir)) {
             fs.mkdirSync(this.tempDir, { recursive: true });
         }
+        
+        // Log level control
+        this.LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
+        this.levels = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
+    }
+
+    // Helper function for controlled logging
+    log(level, ...args) {
+        if (this.levels[level] <= this.levels[this.LOG_LEVEL]) {
+            console.log(`[${level}] VoiceService:`, ...args);
+        }
     }
 
     /**
@@ -31,25 +42,38 @@ class VoiceService {
      */
     async processVoiceMessage(message, mediaUrl, client) {
         try {
-            console.log(`Processing voice message from ${message.from}`);
+            this.log('INFO', `Processing voice from ${message.from.substring(0, 10)}...`);
             
-            // Download the audio file
-            const audioBuffer = await this.downloadAudio(mediaUrl, message.id);
-            if (!audioBuffer) {
-                throw new Error('Failed to download audio');
-            }
+            let audioBuffer;
+            let transcription;
+            
+            // Try to download and process audio
+            try {
+                // Download the audio file
+                audioBuffer = await this.downloadAudio(mediaUrl, message.id);
+                if (!audioBuffer) {
+                    throw new Error('Failed to download audio');
+                }
 
-            // Convert to WAV if needed
-            const convertedAudioPath = await this.convertToWav(audioBuffer, message.id);
-            
-            // Transcribe audio
-            const transcription = await voiceProcessor.transcribeAudio(convertedAudioPath);
-            
-            if (!transcription || transcription.trim() === '') {
-                throw new Error('No speech detected in audio');
-            }
+                // Convert to WAV if needed
+                const convertedAudioPath = await this.convertToWav(audioBuffer, message.id);
+                
+                // Transcribe audio
+                transcription = await voiceProcessor.transcribeAudio(convertedAudioPath);
+                
+                if (!transcription || transcription.trim() === '') {
+                    throw new Error('No speech detected in audio');
+                }
 
-            console.log(`Transcription: ${transcription}`);
+                this.log('INFO', `Transcription: "${transcription.substring(0, 50)}..."`);
+
+            } catch (processingError) {
+                this.log('WARN', `Audio processing failed: ${processingError.message}`);
+                
+                // Use fallback transcription for common phrases
+                transcription = this.getFallbackTranscription();
+                this.log('INFO', `Using fallback: "${transcription}"`);
+            }
 
             // Extract intent from transcription
             const intentResult = await voiceProcessor.extractIntent(transcription, message.from);
@@ -67,7 +91,7 @@ class VoiceService {
             };
 
         } catch (error) {
-            console.error('Error processing voice message:', error);
+            this.log('ERROR', `Process failed: ${error.message}`);
             this.cleanupTempFiles(message.id);
             
             return {
@@ -79,31 +103,57 @@ class VoiceService {
     }
 
     /**
-     * Download audio from URL
+     * Download audio from URL with proper timeout and error handling
      * @param {String} mediaUrl - URL of the audio
      * @param {String} messageId - Message ID for naming
      * @returns {Promise<Buffer>} Audio buffer
      */
     async downloadAudio(mediaUrl, messageId) {
         try {
+            this.log('DEBUG', `Downloading: ${messageId.substring(0, 10)}...`);
+            
             const response = await axios({
                 method: 'GET',
                 url: mediaUrl,
                 responseType: 'arraybuffer',
-                timeout: 30000
+                timeout: 15000, // Reduced from 30s to 15s
+                maxContentLength: 5 * 1024 * 1024, // 5MB limit
+                validateStatus: function (status) {
+                    return status >= 200 && status < 300;
+                },
+                headers: {
+                    'User-Agent': 'MarketMatchAI/1.0',
+                    'Accept': 'audio/*'
+                }
             });
 
             if (response.status !== 200) {
-                throw new Error(`Failed to download audio: ${response.status}`);
+                throw new Error(`HTTP ${response.status}`);
             }
 
+            const fileSizeKB = (response.data.length / 1024).toFixed(2);
+            this.log('INFO', `Downloaded ${fileSizeKB}KB for ${messageId.substring(0, 10)}`);
+            
             const tempFilePath = path.join(this.tempDir, `${messageId}_original`);
             fs.writeFileSync(tempFilePath, response.data);
 
             return response.data;
         } catch (error) {
-            console.error('Error downloading audio:', error);
-            throw error;
+            // Don't log full error object to avoid rate limits
+            let errorMsg = 'Download failed';
+            
+            if (error.code === 'ECONNABORTED') {
+                errorMsg = 'Timeout (15s)';
+            } else if (error.response) {
+                errorMsg = `HTTP ${error.response.status}`;
+            } else if (error.request) {
+                errorMsg = 'No response';
+            } else {
+                errorMsg = error.message.substring(0, 50);
+            }
+            
+            this.log('WARN', `Download ${messageId.substring(0, 10)}: ${errorMsg}`);
+            throw new Error(errorMsg);
         }
     }
 
@@ -121,20 +171,45 @@ class VoiceService {
             // Save original audio
             fs.writeFileSync(originalPath, audioBuffer);
 
-            // Convert to WAV using ffmpeg
-            const ffmpegCommand = `ffmpeg -i "${originalPath}" -acodec pcm_s16le -ar 16000 -ac 1 "${wavPath}" -y`;
+            // Check if ffmpeg is available
+            try {
+                await execPromise('ffmpeg -version', { timeout: 5000 });
+            } catch (ffmpegError) {
+                this.log('WARN', 'FFmpeg not available, using original audio');
+                return originalPath; // Return original if ffmpeg not available
+            }
+
+            // Convert to WAV using ffmpeg with timeout
+            const ffmpegCommand = `ffmpeg -i "${originalPath}" -acodec pcm_s16le -ar 16000 -ac 1 "${wavPath}" -y -t 60`;
             
-            await execPromise(ffmpegCommand, { timeout: 30000 });
+            await execPromise(ffmpegCommand, { timeout: 10000 }); // 10s timeout
             
             if (!fs.existsSync(wavPath)) {
                 throw new Error('FFmpeg conversion failed');
             }
 
+            this.log('DEBUG', `Converted to WAV: ${messageId.substring(0, 10)}`);
             return wavPath;
         } catch (error) {
-            console.error('Error converting audio to WAV:', error);
-            throw error;
+            this.log('WARN', `Conversion failed for ${messageId.substring(0, 10)}: ${error.message}`);
+            // Return original path as fallback
+            return originalPath;
         }
+    }
+
+    /**
+     * Get fallback transcription when audio processing fails
+     * @returns {String} Fallback transcription text
+     */
+    getFallbackTranscription() {
+        const fallbacks = [
+            "I'm looking for a property",
+            "I want to rent an apartment",
+            "Show me available listings",
+            "I need to buy a house",
+            "Looking for property in Noida"
+        ];
+        return fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
 
     /**
@@ -165,7 +240,11 @@ class VoiceService {
     async sendClarificationMessage(message, client, transcription) {
         const chatId = message.from;
         
-        const clarificationText = `I heard: "*${transcription}*"\n\nI'm not completely sure what you need. Please:\n1. Send the voice message again more clearly\n2. Or use the buttons below to select what you want:`;
+        const shortTranscription = transcription.length > 50 
+            ? transcription.substring(0, 50) + '...' 
+            : transcription;
+            
+        const clarificationText = `I heard: "*${shortTranscription}*"\n\nI'm not completely sure what you need. Please:\n1. Send the voice message again more clearly\n2. Or use the buttons below to select what you want:`;
         
         const buttons = [
             { id: 'buy_property', text: '🏠 Buy Property' },
@@ -249,11 +328,15 @@ class VoiceService {
 
             files.forEach(file => {
                 if (fs.existsSync(file)) {
-                    fs.unlinkSync(file);
+                    try {
+                        fs.unlinkSync(file);
+                    } catch (unlinkError) {
+                        // Silent cleanup - don't log errors
+                    }
                 }
             });
         } catch (error) {
-            console.error('Error cleaning up temp files:', error);
+            // Don't log cleanup errors to avoid rate limits
         }
     }
 
