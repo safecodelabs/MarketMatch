@@ -1361,9 +1361,81 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES
   // ===========================
-  if (client && voiceService.isVoiceMessage(metadata)) {
-    console.log("🎤 [VOICE] Detected voice message");
-    return await handleVoiceMessage(sender, metadata, client);
+  // ===========================
+  // 0) PRIORITY: CHECK FOR VOICE MESSAGES
+  // ===========================
+  if (metadata?.type === "audio" || metadata?.type === "voice") {
+    console.log("🎤 [VOICE] Audio message detected in metadata");
+    
+    // Get session
+    let session = (await getSession(sender)) || { 
+      step: "start",
+      isInitialized: false,
+      awaitingLang: false
+    };
+    
+    // Check if we have audio metadata from webhook
+    const audioUrl = metadata.audioMetadata?.url || metadata.audio?.url || metadata.voice?.url;
+    
+    if (!audioUrl) {
+      console.error("🎤 [VOICE] No audio URL found");
+      await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
+    
+    console.log("🎤 [VOICE] Processing audio URL:", audioUrl.substring(0, 100) + "...");
+    
+    // Send processing message
+    await sendMessage(sender, "🎤 Processing your voice message...");
+    
+    try {
+      // Process the voice message
+      const processingResult = await voiceService.processVoiceMessage(
+        { 
+          from: sender, 
+          id: metadata.id || Date.now().toString(),
+          body: audioUrl
+        },
+        audioUrl,
+        client
+      );
+      
+      if (!processingResult.success) {
+        console.error("🎤 [VOICE] Processing failed:", processingResult.error);
+        await sendMessage(sender, `❌ Error: ${processingResult.error}\n\nPlease try again or type your request.`);
+        session.step = "menu";
+        await saveSession(sender, session);
+        return session;
+      }
+      
+      console.log("🎤 [VOICE] Transcription:", processingResult.transcription);
+      console.log("🎤 [VOICE] Intent:", processingResult.intent);
+      
+      // Handle intent confirmation
+      await voiceService.handleIntentConfirmation(processingResult, client);
+      
+      // Store voice context
+      session.voiceContext = {
+        originalTranscription: processingResult.transcription,
+        intent: processingResult.intent,
+        entities: processingResult.entities,
+        confidence: processingResult.confidence,
+        timestamp: Date.now()
+      };
+      session.step = "awaiting_voice_confirmation";
+      
+      await saveSession(sender, session);
+      return session;
+      
+    } catch (error) {
+      console.error("🎤 [VOICE] Error processing voice:", error);
+      await sendMessage(sender, "❌ Sorry, I couldn't process your voice. Please type your request.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
   }
 
   // ===========================
@@ -1993,17 +2065,60 @@ What would you like to do with this saved listing?`;
     case "voice_note":
     case "voice":
     case "speak":
-      await sendMessage(
-        sender,
-        "🎤 *Voice Message Mode*\n\n" +
-        "You can now send a voice message in any language!\n\n" +
-        "Examples:\n" +
-        "• 'I'm looking for a 2BHK in Noida'\n" +
-        "• 'I want to rent a house in Delhi'\n" +
-        "• 'Show me properties under 50 lakhs'\n\n" +
-        "Just tap and hold the microphone button and speak your request!"
-      );
-      session.step = "awaiting_voice";
+      console.log("🎤 Menu: Voice note command received");
+      
+      // Check if we have audio metadata (coming from webhook with voice message)
+      if (metadata?.audioMetadata?.url) {
+        console.log("🎤 Found audio metadata, processing voice message...");
+        
+        const audioUrl = metadata.audioMetadata.url;
+        await sendMessage(sender, "🎤 Processing your voice message...");
+        
+        try {
+          const processingResult = await voiceService.processVoiceMessage(
+            { 
+              from: sender, 
+              id: metadata.id || Date.now().toString(),
+              body: audioUrl
+            },
+            audioUrl,
+            client
+          );
+          
+          if (processingResult.success) {
+            await voiceService.handleIntentConfirmation(processingResult, client);
+            
+            session.voiceContext = {
+              originalTranscription: processingResult.transcription,
+              intent: processingResult.intent,
+              entities: processingResult.entities,
+              confidence: processingResult.confidence
+            };
+            session.step = "awaiting_voice_confirmation";
+          } else {
+            await sendMessage(sender, `❌ ${processingResult.error}`);
+            session.step = "menu";
+          }
+        } catch (error) {
+          console.error("🎤 Voice processing error:", error);
+          await sendMessage(sender, "❌ Couldn't process voice. Please type your request.");
+          session.step = "menu";
+        }
+      } else {
+        // No audio metadata - user typed "voice" command
+        await sendMessage(
+          sender,
+          "🎤 *Voice Message Mode*\n\n" +
+          "You can now send a voice message in any language!\n\n" +
+          "Examples:\n" +
+          "• 'I'm looking for a 2BHK in Noida'\n" +
+          "• 'I want to rent a house in Delhi'\n" +
+          "• 'Show me properties under 50 lakhs'\n\n" +
+          "Just tap and hold the microphone button and speak your request!"
+        );
+        session.step = "awaiting_voice";
+      }
+      
       await saveSession(sender, session);
       return session;
 
