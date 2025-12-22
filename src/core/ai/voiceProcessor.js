@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const constants = require('../../utils/constants');
-const languageStrings = require('../../utils/languageStrings');
+const constants = require('../../../utils/constants');
+const languageStrings = require('../../../utils/languageStrings');
 
 class VoiceProcessor {
     constructor() {
