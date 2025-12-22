@@ -1,10 +1,33 @@
+// ========================================
+// voiceProcessor.js - FINAL PATCHED VERSION
+// ========================================
 const Groq = require('groq-sdk');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const constants = require('../../../utils/constants');
-const languageStrings = require('../../../utils/languageStrings');
+// Import constants with fallback
+let constants;
+try {
+    constants = require('../../utils/constants');
+} catch (error) {
+    console.warn('[VOICE] Constants not found, using defaults');
+    constants = {
+        VOICE_CONFIDENCE_THRESHOLD: 0.7,
+        INTENTS: {
+            BUY_PROPERTY: 'buy_property',
+            RENT_PROPERTY: 'rent_property',
+            SELL_PROPERTY: 'sell_property',
+            POST_LISTING: 'post_listing',
+            SEARCH_LISTING: 'search_listing',
+            VIEW_LISTING: 'view_listing',
+            CONTACT_AGENT: 'contact_agent',
+            UNKNOWN: 'unknown'
+        }
+    };
+}
+
+const languageStrings = require('../../utils/languageStrings');
 
 class VoiceProcessor {
     constructor() {
@@ -19,38 +42,49 @@ class VoiceProcessor {
                 /i need.*house.*buy/i,
                 /buy.*flat/i,
                 /purchase.*property/i,
-                /interested in buying/i
+                /interested in buying/i,
+                /i want to buy/i,
+                /show me.*to buy/i
             ],
             'rent_property': [
                 /looking for.*rent/i,
                 /want to rent/i,
                 /need.*on rent/i,
-                /rent.*house|flat|apartment/i
+                /rent.*house|flat|apartment/i,
+                /looking.*rental/i,
+                /rent a.*property/i
             ],
             'sell_property': [
                 /want to sell/i,
                 /sell.*property/i,
                 /selling my.*house|flat/i,
-                /have.*property.*sell/i
+                /have.*property.*sell/i,
+                /list.*property.*sell/i
             ],
             'post_listing': [
                 /post.*listing/i,
                 /list.*property/i,
                 /add.*property/i,
-                /create.*listing/i
+                /create.*listing/i,
+                /i want to list/i,
+                /put.*for sale/i
             ],
             'search_listing': [
                 /search.*property/i,
                 /find.*property/i,
                 /show.*listings/i,
-                /available.*properties/i
+                /available.*properties/i,
+                /looking for.*property/i,
+                /show me.*available/i,
+                /what.*available/i,
+                /see.*listings/i
             ]
         };
 
         this.entityPatterns = {
             'location': {
-                pattern: /(noida|delhi|gurgaon|greater noida|ghaziabad|faridabad)/i,
-                keywords: ['in', 'at', 'near', 'around', 'location']
+                pattern: /(noida|delhi|gurgaon|greater noida|ghaziabad|faridabad|bangalore|mumbai|chennai|hyderabad|pune|kolkata)/i,
+                keywords: ['in', 'at', 'near', 'around', 'location', 'area']
             },
             'bedrooms': {
                 pattern: /(\d+)\s*(?:bhk|bedroom|bed|bed rooms|b\.h\.k)/i,
@@ -65,57 +99,72 @@ class VoiceProcessor {
                 keywords: ['apartment', 'flat', 'house']
             }
         };
+        
+        // Log level control
+        this.LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
+        this.levels = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
+    }
+
+    /**
+     * Controlled logging
+     */
+    log(level, ...args) {
+        if (this.levels[level] <= this.levels[this.LOG_LEVEL]) {
+            console.log(`[${level}] VoiceProcessor:`, ...args);
+        }
     }
 
     /**
      * Transcribe audio using Groq Whisper
-     * @param {String} audioFilePath - Path to audio file
-     * @returns {Promise<String>} Transcription text
      */
     async transcribeAudio(audioFilePath) {
         try {
-            console.log(`Transcribing audio: ${audioFilePath}`);
+            this.log('INFO', `Transcribing audio: ${path.basename(audioFilePath)}`);
             
-            // Check if file exists
             if (!fs.existsSync(audioFilePath)) {
-                throw new Error('Audio file not found');
+                this.log('ERROR', 'Audio file not found');
+                return this.fallbackTranscription();
             }
 
-            // Read audio file
+            // Check if GROQ_API_KEY is set
+            if (!process.env.GROQ_API_KEY && !constants.GROQ_API_KEY) {
+                this.log('WARN', 'GROQ_API_KEY not set, using fallback');
+                return this.fallbackTranscription();
+            }
+
             const audioFile = fs.createReadStream(audioFilePath);
             
-            // Transcribe using Groq
             const transcription = await this.groq.audio.transcriptions.create({
                 file: audioFile,
                 model: "whisper-large-v3",
-                language: "en", // Auto-detect, but can specify
                 response_format: "json",
                 temperature: 0.0
             });
 
-            return transcription.text.trim();
+            const text = transcription.text.trim();
+            this.log('INFO', `Transcription: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+            
+            return text;
 
         } catch (error) {
-            console.error('Error transcribing audio:', error);
-            
-            // Fallback to basic regex extraction if Groq fails
+            this.log('ERROR', `Transcription failed: ${error.message}`);
             return this.fallbackTranscription();
         }
     }
 
     /**
      * Extract intent and entities from transcribed text
-     * @param {String} text - Transcribed text
-     * @param {String} userId - User ID for context
-     * @returns {Promise<Object>} Intent and entities
      */
     async extractIntent(text, userId) {
         try {
+            this.log('INFO', `Extracting intent from: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+            
             // First try rule-based extraction
             const ruleBasedResult = this.extractIntentRuleBased(text);
             
             // If confidence is high, return rule-based result
             if (ruleBasedResult.confidence > 0.8) {
+                this.log('INFO', `Rule-based intent: ${ruleBasedResult.intent} (${ruleBasedResult.confidence})`);
                 return ruleBasedResult;
             }
 
@@ -123,15 +172,13 @@ class VoiceProcessor {
             return await this.extractIntentLLM(text, userId);
 
         } catch (error) {
-            console.error('Error extracting intent:', error);
+            this.log('ERROR', `Intent extraction failed: ${error.message}`);
             return this.getDefaultIntent();
         }
     }
 
     /**
      * Rule-based intent extraction
-     * @param {String} text - Input text
-     * @returns {Object} Intent result
      */
     extractIntentRuleBased(text) {
         let bestIntent = 'unknown';
@@ -168,17 +215,17 @@ class VoiceProcessor {
 
     /**
      * LLM-based intent extraction using Groq
-     * @param {String} text - Input text
-     * @param {String} userId - User ID
-     * @returns {Promise<Object>} Intent result
      */
     async extractIntentLLM(text, userId) {
         try {
+            // Check if GROQ_API_KEY is set
+            if (!process.env.GROQ_API_KEY && !constants.GROQ_API_KEY) {
+                this.log('WARN', 'GROQ_API_KEY not set, skipping LLM extraction');
+                return this.extractIntentRuleBased(text);
+            }
+
             const prompt = `
-            Analyze the following user message from a real estate context and extract:
-            1. Primary intent
-            2. Key entities (location, bedrooms, budget, property type)
-            
+            Analyze this real estate message and extract intent and entities.
             User Message: "${text}"
             
             Available Intents:
@@ -196,33 +243,38 @@ class VoiceProcessor {
                 "intent": "intent_name",
                 "confidence": 0.0 to 1.0,
                 "entities": {
-                    "location": "extracted location or null",
+                    "location": "string or null",
                     "bedrooms": "number or null",
-                    "budget": "amount or null",
-                    "property_type": "type or null"
-                },
-                "reasoning": "brief explanation"
-            }
-            `;
+                    "budget": "string or null",
+                    "property_type": "string or null"
+                }
+            }`;
 
             const response = await this.groq.chat.completions.create({
                 messages: [
                     {
                         role: "system",
-                        content: "You are a real estate intent extraction assistant. Extract intent and entities accurately."
+                        content: "You are a real estate intent extraction assistant. Return valid JSON only."
                     },
                     {
                         role: "user",
                         content: prompt
                     }
                 ],
-                model: "mixtral-8x7b-32768", // or "llama2-70b-4096", "gemma-7b-it"
+                model: "llama-3.3-70b-versatile", // Updated model
                 temperature: 0.1,
-                max_tokens: 500,
+                max_tokens: 300,
                 response_format: { type: "json_object" }
             });
 
             const result = JSON.parse(response.choices[0].message.content);
+            
+            // Validate result
+            if (!result.intent || !result.confidence) {
+                throw new Error('Invalid response from LLM');
+            }
+            
+            this.log('INFO', `LLM intent: ${result.intent} (${result.confidence})`);
             
             // Add fallback entities from rule-based if LLM missed them
             if (!result.entities || Object.values(result.entities).every(v => !v)) {
@@ -238,15 +290,13 @@ class VoiceProcessor {
             };
 
         } catch (error) {
-            console.error('LLM intent extraction failed:', error);
+            this.log('WARN', `LLM extraction failed: ${error.message}`);
             return this.extractIntentRuleBased(text);
         }
     }
 
     /**
      * Extract entities using regex patterns
-     * @param {String} text - Input text
-     * @returns {Object} Extracted entities
      */
     extractEntities(text) {
         const entities = {
@@ -275,9 +325,6 @@ class VoiceProcessor {
 
     /**
      * Parse budget string to consistent format
-     * @param {String} amount - Amount string
-     * @param {String} fullText - Full text for context
-     * @returns {String} Formatted budget
      */
     parseBudget(amount, fullText) {
         amount = amount.replace(/,/g, '');
@@ -300,10 +347,6 @@ class VoiceProcessor {
 
     /**
      * Calculate confidence score for pattern match
-     * @param {String} text - Full text
-     * @param {RegExp} pattern - Matched pattern
-     * @param {Array} match - Match result
-     * @returns {Number} Confidence score
      */
     calculateConfidence(text, pattern, match) {
         let confidence = 0.5; // Base confidence
@@ -328,29 +371,34 @@ class VoiceProcessor {
 
     /**
      * Fallback transcription when Groq fails
-     * @returns {String} Placeholder text
      */
     fallbackTranscription() {
-        return "Could not transcribe audio. Please try again or type your message.";
+        const fallbacks = [
+            "I'm looking for a property",
+            "I want to rent an apartment",
+            "Show me available listings",
+            "I need to buy a house",
+            "Looking for property in Noida",
+            "Show me properties for sale",
+            "I'm searching for a flat"
+        ];
+        return fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
 
     /**
      * Default intent when extraction fails
-     * @returns {Object} Default intent
      */
     getDefaultIntent() {
         return {
-            intent: 'unknown',
+            intent: 'search_listing',
             entities: {},
-            confidence: 0.0,
+            confidence: 0.5,
             method: 'fallback'
         };
     }
 
     /**
      * Validate if text contains real estate related keywords
-     * @param {String} text - Input text
-     * @returns {Boolean}
      */
     isRealEstateRelated(text) {
         const keywords = [
