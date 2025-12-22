@@ -1,7 +1,9 @@
 // ========================================
-// IMPORTS - UPDATED
+// IMPORTS - UPDATED WITH VOICE SUPPORT
 // ========================================
 const commandRouter = require("./src/bots/commandRouter");
+const voiceService = require("./src/services/voiceService"); // NEW: Voice service
+
 // ✅ UPDATED: Added new session functions
 const { 
   getSession, 
@@ -25,7 +27,8 @@ const {
   saveListingToUser,
   removeSavedListing,
   getUserSavedListings,
-  isListingSaved
+  isListingSaved,
+  searchListingsByCriteria // NEW: For voice search results
 } = require("./database/firestore");
 
 // ✅ UPDATED: Added sendSavedListingCard
@@ -34,7 +37,8 @@ const {
     sendList, 
     sendReplyButtons, 
     sendListingCard,
-    sendSavedListingCard 
+    sendSavedListingCard,
+    sendInteractiveButtons // NEW: For voice confirmation
 } = require("./src/services/messageService"); 
 const { db } = require("./database/firestore");
 
@@ -65,6 +69,394 @@ function validateFlowConfig() {
 
 // Validate on import
 validateFlowConfig();
+
+// ========================================
+// VOICE MESSAGE HANDLING FUNCTIONS
+// ========================================
+
+/**
+ * Handle incoming voice messages
+ * @param {String} sender - User phone number
+ * @param {Object} metadata - Message metadata with voice info
+ * @param {Object} client - WhatsApp client
+ * @returns {Promise<Object>} Updated session
+ */
+async function handleVoiceMessage(sender, metadata, client) {
+  try {
+    console.log("🎤 [VOICE] Processing voice message from:", sender);
+    
+    // Check if it's a voice message
+    if (!voiceService.isVoiceMessage(metadata)) {
+      console.log("🎤 [VOICE] Not a voice message");
+      return null;
+    }
+    
+    // Get session
+    let session = (await getSession(sender)) || { 
+      step: "start",
+      isInitialized: false,
+      awaitingLang: false
+    };
+    
+    // Update session to show we're processing voice
+    session.step = "processing_voice";
+    await saveSession(sender, session);
+    
+    // Send processing message
+    await sendMessage(sender, "🎤 Processing your voice message... Please wait a moment.");
+    
+    // Get media URL from metadata
+    const mediaUrl = metadata.body || metadata.mediaUrl;
+    if (!mediaUrl) {
+      await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
+    
+    // Process the voice message
+    const processingResult = await voiceService.processVoiceMessage(
+      { from: sender, id: metadata.id || Date.now().toString() },
+      mediaUrl,
+      client
+    );
+    
+    if (!processingResult.success) {
+      await sendMessage(sender, `❌ Error processing voice: ${processingResult.error}\n\nPlease try again or type your request.`);
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
+    
+    // Handle the intent with confirmation buttons
+    await voiceService.handleIntentConfirmation(processingResult, client);
+    
+    // Store voice processing context in session
+    session.voiceContext = {
+      originalTranscription: processingResult.transcription,
+      intent: processingResult.intent,
+      entities: processingResult.entities,
+      confidence: processingResult.confidence,
+      timestamp: Date.now()
+    };
+    session.step = "awaiting_voice_confirmation";
+    
+    await saveSession(sender, session);
+    return session;
+    
+  } catch (error) {
+    console.error("🎤 [VOICE] Error handling voice message:", error);
+    await sendMessage(sender, "❌ Sorry, I couldn't process your voice message. Please try typing your request.");
+    return null;
+  }
+}
+
+/**
+ * Handle voice intent confirmation responses
+ * @param {String} sender - User phone number
+ * @param {String} response - User's response (button click)
+ * @param {Object} session - Current session
+ * @returns {Promise<Object>} Updated session
+ */
+async function handleVoiceConfirmation(sender, response, session) {
+  try {
+    console.log("🎤 [VOICE] Handling confirmation response:", response);
+    
+    const voiceContext = session.voiceContext;
+    if (!voiceContext) {
+      await sendMessage(sender, "❌ Voice context lost. Please start over.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
+    
+    const { intent, entities, originalTranscription } = voiceContext;
+    
+    if (response.startsWith("confirm_")) {
+      // User confirmed - proceed with the intent
+      const confirmedIntent = response.replace("confirm_", "");
+      
+      if (confirmedIntent === intent) {
+        await sendMessage(sender, `✅ Got it! Processing: "${originalTranscription}"`);
+        await executeVoiceIntent(sender, intent, entities, session);
+      } else {
+        await sendMessage(sender, "❌ Intent mismatch. Please try again.");
+        session.step = "menu";
+      }
+      
+    } else if (response === "try_again") {
+      // User wants to try voice again
+      await sendMessage(sender, "🔄 Please send your voice message again.");
+      session.step = "awaiting_voice";
+      delete session.voiceContext;
+      
+    } else if (response === "use_buttons") {
+      // User wants to use buttons instead
+      await sendMessage(sender, "📋 Switching to menu options...");
+      session.step = "menu";
+      delete session.voiceContext;
+      await sendMainMenuViaService(sender);
+      
+    } else {
+      await sendMessage(sender, "I didn't understand that response. Please use the buttons provided.");
+      // Show confirmation buttons again
+      await voiceService.sendConfirmationButtons(
+        { from: sender },
+        null, // client not needed for re-sending
+        intent,
+        entities,
+        originalTranscription
+      );
+    }
+    
+    await saveSession(sender, session);
+    return session;
+    
+  } catch (error) {
+    console.error("🎤 [VOICE] Error handling confirmation:", error);
+    await sendMessage(sender, "❌ Error processing your response. Please try again.");
+    session.step = "menu";
+    await saveSession(sender, session);
+    return session;
+  }
+}
+
+/**
+ * Execute the confirmed voice intent
+ * @param {String} sender - User phone number
+ * @param {String} intent - Extracted intent
+ * @param {Object} entities - Extracted entities
+ * @param {Object} session - Current session
+ */
+async function executeVoiceIntent(sender, intent, entities, session) {
+  console.log("🎤 [VOICE] Executing intent:", intent, "with entities:", entities);
+  
+  switch (intent) {
+    case "buy_property":
+    case "rent_property":
+    case "search_listing":
+      await handleVoiceSearch(sender, intent, entities, session);
+      break;
+      
+    case "post_listing":
+      await sendMessage(sender, "🎤 Voice listing post detected. Switching to listing form...");
+      await handlePostListingFlow(sender);
+      break;
+      
+    case "view_listing":
+      await sendMessage(sender, "🎤 To view specific listing details, please use the 'View Listings' option from the menu.");
+      session.step = "menu";
+      await sendMainMenuViaService(sender);
+      break;
+      
+    case "contact_agent":
+      await sendMessage(sender, "🎤 For contacting agents, please use the contact information provided in individual listings.");
+      session.step = "menu";
+      await sendMainMenuViaService(sender);
+      break;
+      
+    default:
+      await sendMessage(sender, "🎤 I understood your request but need more details. Please use the menu options.");
+      session.step = "menu";
+      await sendMainMenuViaService(sender);
+      break;
+  }
+  
+  // Clear voice context after execution
+  delete session.voiceContext;
+  await saveSession(sender, session);
+}
+
+/**
+ * Handle voice-based property search
+ * @param {String} sender - User phone number
+ * @param {String} intent - Search intent (buy/rent)
+ * @param {Object} entities - Search criteria
+ * @param {Object} session - Current session
+ */
+async function handleVoiceSearch(sender, intent, entities, session) {
+  try {
+    console.log("🎤 [VOICE SEARCH] Searching with criteria:", entities);
+    
+    // Build search criteria from entities
+    const searchCriteria = {
+      type: intent === "buy_property" ? "Sale" : "Rent",
+      location: entities.location || null,
+      bedrooms: entities.bedrooms || null,
+      maxPrice: entities.budget ? parseBudgetToNumber(entities.budget) : null
+    };
+    
+    await sendMessage(sender, `🔍 Searching for ${intent === 'buy_property' ? 'properties to buy' : 'properties to rent'}...`);
+    
+    // Search listings
+    const listings = await searchListingsByCriteria(searchCriteria);
+    
+    if (!listings || listings.length === 0) {
+      await sendMessage(
+        sender,
+        `❌ No listings found for your criteria.\n\n` +
+        `Try adjusting your search:\n` +
+        `• Different location\n` +
+        `• Different budget\n` +
+        `• Fewer bedrooms\n\n` +
+        `Or use the "View Listings" option to browse all available properties.`
+      );
+      session.step = "menu";
+      await saveSession(sender, session);
+      return;
+    }
+    
+    // Show top 3 listings as requested
+    const topListings = listings.slice(0, 3);
+    
+    await sendMessage(
+      sender,
+      `✅ Found ${listings.length} properties. Here are the top ${topListings.length}:`
+    );
+    
+    // Send each listing
+    for (let i = 0; i < topListings.length; i++) {
+      const listing = topListings[i];
+      await sendListingCard(
+        sender, 
+        { 
+          id: listing.id,
+          title: listing.title || listing.type || "Property",
+          location: listing.location || "Not specified",
+          price: listing.price || "N/A",
+          bedrooms: listing.bhk || "N/A",
+          property_type: listing.type || "Property",
+          description: listing.description || "No description",
+          contact: listing.contact || "Contact not provided"
+        }, 
+        i, 
+        topListings.length
+      );
+      
+      // Small delay between cards
+      if (i < topListings.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    // Update session for listing browsing
+    session.step = "awaiting_listing_action";
+    session.housingFlow = {
+      currentIndex: 0,
+      listingData: {
+        listings: topListings,
+        totalCount: topListings.length
+      }
+    };
+    
+    await saveSession(sender, session);
+    
+    // Ask if user wants to see more or search differently
+    await sendReplyButtons(
+      sender,
+      "Would you like to:",
+      [
+        { id: "voice_see_more", title: "🔍 See More Listings" },
+        { id: "voice_refine_search", title: "🎤 Refine Search" },
+        { id: "voice_main_menu", title: "🏠 Main Menu" }
+      ],
+      "Search Options"
+    );
+    
+  } catch (error) {
+    console.error("🎤 [VOICE SEARCH] Error:", error);
+    await sendMessage(
+      sender,
+      "❌ Error searching for properties. Please try the 'View Listings' option from the menu."
+    );
+    session.step = "menu";
+    await saveSession(sender, session);
+  }
+}
+
+/**
+ * Parse budget string to number
+ * @param {String} budget - Budget string (e.g., "₹50 Lakh", "1.2 Crore")
+ * @returns {Number} Budget in numeric format
+ */
+function parseBudgetToNumber(budget) {
+  if (!budget) return null;
+  
+  const budgetStr = budget.toString().toLowerCase();
+  
+  // Extract number
+  const numberMatch = budgetStr.match(/(\d+(?:\.\d+)?)/);
+  if (!numberMatch) return null;
+  
+  const number = parseFloat(numberMatch[1]);
+  
+  // Check for lakh/crore
+  if (budgetStr.includes('lakh') || budgetStr.includes('lac')) {
+    return number * 100000; // Convert lakh to actual number
+  } else if (budgetStr.includes('crore') || budgetStr.includes('cr')) {
+    return number * 10000000; // Convert crore to actual number
+  }
+  
+  return number; // Assume it's already in correct format
+}
+
+/**
+ * Handle voice search option responses
+ */
+async function handleVoiceSearchOptions(sender, msg, session) {
+  switch (msg) {
+    case "voice_see_more":
+      // Show next set of listings
+      const listings = session.housingFlow?.listingData?.listings || [];
+      const allListings = await searchListingsByCriteria(session.voiceContext?.entities || {});
+      
+      if (allListings && allListings.length > listings.length) {
+        // Show next 3 listings
+        const nextIndex = listings.length;
+        const nextListings = allListings.slice(nextIndex, nextIndex + 3);
+        
+        for (let i = 0; i < nextListings.length; i++) {
+          const listing = nextListings[i];
+          await sendListingCard(sender, listing, i, nextListings.length);
+          if (i < nextListings.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+        
+        // Update session with combined listings
+        session.housingFlow.listingData.listings = [...listings, ...nextListings];
+        session.housingFlow.listingData.totalCount = session.housingFlow.listingData.listings.length;
+        
+        await saveSession(sender, session);
+      } else {
+        await sendMessage(sender, "🎤 That's all the listings matching your criteria!");
+      }
+      break;
+      
+    case "voice_refine_search":
+      await sendMessage(
+        sender,
+        "🎤 Please send another voice message with your refined search criteria.\n\n" +
+        "Examples:\n" +
+        "• 'Change to 3BHK'\n" +
+        "• 'Budget 80 lakhs'\n" +
+        "• 'In Gurgaon instead'"
+      );
+      session.step = "awaiting_voice";
+      delete session.voiceContext;
+      break;
+      
+    case "voice_main_menu":
+      session.step = "menu";
+      delete session.voiceContext;
+      delete session.housingFlow;
+      await saveSession(sender, session);
+      await sendMainMenuViaService(sender);
+      break;
+  }
+  
+  return session;
+}
 
 // ========================================
 // ENHANCED FLOW SUBMISSION HANDLER
@@ -167,9 +559,6 @@ Your listing is now live and visible to all users!`;
 
 // ========================================
 // POST LISTING VIA WHATSAPP FLOW
-// ========================================
-// ========================================
-// POST LISTING VIA WHATSAPP FLOW - FIXED VERSION
 // ========================================
 async function handlePostListingFlow(sender) {
   try {
@@ -959,9 +1348,9 @@ async function saveAllEdits(sender, session) {
 }
 
 // ========================================
-// MAIN CONTROLLER - UPDATED WITH FLOW SUPPORT
+// MAIN CONTROLLER - UPDATED WITH VOICE SUPPORT
 // ========================================
-async function handleIncomingMessage(sender, text = "", metadata = {}) {
+async function handleIncomingMessage(sender, text = "", metadata = {}, client = null) {
   console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
   console.log("🔍 [CONTROLLER DEBUG] Input - sender:", sender);
   console.log("🔍 [CONTROLLER DEBUG] Input - text:", text);
@@ -970,10 +1359,21 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   if (!sender) return;
 
   // ===========================
-  // 0) PRIORITY: CHECK FLOW SUBMISSION
+  // 0) PRIORITY: CHECK FOR VOICE MESSAGES
+  // ===========================
+  if (client && voiceService.isVoiceMessage(metadata)) {
+    console.log("🎤 [VOICE] Detected voice message");
+    return await handleVoiceMessage(sender, metadata, client);
+  }
+
+  // ===========================
+  // 1) PRIORITY: CHECK FLOW SUBMISSION
   // ===========================
   const flowHandled = await handleFlowSubmission(metadata, sender);
-  if (flowHandled) return session;
+  if (flowHandled) {
+    const session = await getSession(sender);
+    return session;
+  }
 
   let replyId = null;
   
@@ -1005,9 +1405,21 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
 
   console.log("🔍 [CONTROLLER DEBUG] Session state:", JSON.stringify(session, null, 2));
   console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
-  console.log("🔍 [CONTROLLER DEBUG] Manage listings step:", session.manageListings?.step);
-  console.log("🔍 [CONTROLLER DEBUG] Edit flow step:", session.editFlow?.step);
-  console.log("🔍 [CONTROLLER DEBUG] Saved listings step:", session.savedListingsFlow?.step);
+
+  // ===========================
+  // 2) CHECK FOR VOICE CONFIRMATION RESPONSES
+  // ===========================
+  if (session.step === "awaiting_voice_confirmation" && replyId) {
+    console.log("🎤 [VOICE] Processing confirmation response");
+    return await handleVoiceConfirmation(sender, msg, session);
+  }
+
+  // ===========================
+  // 3) CHECK FOR VOICE SEARCH OPTIONS
+  // ===========================
+  if (msg.startsWith("voice_")) {
+    return await handleVoiceSearchOptions(sender, msg, session);
+  }
 
   const user = await getUserProfile(sender);
   const greetings = ["hi", "hello", "hey", "start"];
@@ -1015,7 +1427,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   const isNewUser = !user && !session.isInitialized;
 
   // ===========================
-  // 1) NEW USER INTRO
+  // 4) NEW USER INTRO
   // ===========================
   if (isGreeting && isNewUser) {
     await sendMessage(
@@ -1033,7 +1445,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   }
 
   // ===========================
-  // 2) EXISTING USER GREETING
+  // 5) EXISTING USER GREETING
   // ===========================
   if (isGreeting && !isNewUser) {
     session.housingFlow.listingData = null;
@@ -1045,7 +1457,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   }
 
   // ===========================
-  // 3) LANGUAGE SELECTION
+  // 6) LANGUAGE SELECTION
   // ===========================
   if (session.housingFlow?.awaitingLangSelection) {
     const parsed = parseLangFromText(msg);
@@ -1071,7 +1483,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   }
   
   // ==========================================
-  // 4) MANAGE LISTINGS INTERACTIVE HANDLING
+  // 7) MANAGE LISTINGS INTERACTIVE HANDLING
   // ==========================================
   
   // Handle listing selection from manage listings
@@ -1082,7 +1494,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}) {
   }
   
   // ==========================================
-  // 5) DELETE FLOW HANDLING
+  // 8) DELETE FLOW HANDLING
   // ==========================================
   
   // Handle delete button click (shows confirmation)
@@ -1150,7 +1562,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 6) EDIT FLOW HANDLING
+  // 9) EDIT FLOW HANDLING
   // ==========================================
   
   // Handle edit button click (starts edit flow)
@@ -1197,7 +1609,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 7) EDIT FIELD SELECTION HANDLING
+  // 10) EDIT FIELD SELECTION HANDLING
   // ==========================================
   
   // Handle edit flow field selection
@@ -1307,7 +1719,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 8) EDIT FIELD VALUE INPUT (TEXT-BASED)
+  // 11) EDIT FIELD VALUE INPUT (TEXT-BASED)
   // ==========================================
   if (session.editFlow?.step === "awaiting_field_value" && text) {
     console.log("🔍 [CONTROLLER] Field value received:", text);
@@ -1316,7 +1728,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 9) CANCEL MANAGE (Back button)
+  // 12) CANCEL MANAGE (Back button)
   // ==========================================
   if (msg === "cancel_manage" && session.manageListings?.step === "awaiting_action") {
     console.log("🔍 [CONTROLLER] Back to listing list");
@@ -1325,7 +1737,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 10) SAVED LISTINGS INTERACTIVE HANDLING
+  // 13) SAVED LISTINGS INTERACTIVE HANDLING
   // ==========================================
 
   // Handle saved listing selection
@@ -1447,7 +1859,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 11) TEXT-BASED LISTING INPUT (FALLBACK)
+  // 14) TEXT-BASED LISTING INPUT (FALLBACK)
   // ==========================================
   if (session.step === "awaiting_post_details" && text) {
     console.log("📝 [CONTROLLER] Processing text-based listing input");
@@ -1456,7 +1868,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 12) INTERACTIVE LISTING ACTIONS
+  // 15) INTERACTIVE LISTING ACTIONS
   // ==========================================
   if (session.step === "awaiting_listing_action" && replyId) {
     console.log(`🔄 Handling listing action: ${msg}`);
@@ -1544,7 +1956,7 @@ What would you like to do with this saved listing?`;
   }
 
   // ===========================
-  // 13) MENU COMMAND HANDLING
+  // 16) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
@@ -1578,6 +1990,23 @@ What would you like to do with this saved listing?`;
       await sendLanguageListViaService(sender);
       return session;
 
+    case "voice_note":
+    case "voice":
+    case "speak":
+      await sendMessage(
+        sender,
+        "🎤 *Voice Message Mode*\n\n" +
+        "You can now send a voice message in any language!\n\n" +
+        "Examples:\n" +
+        "• 'I'm looking for a 2BHK in Noida'\n" +
+        "• 'I want to rent a house in Delhi'\n" +
+        "• 'Show me properties under 50 lakhs'\n\n" +
+        "Just tap and hold the microphone button and speak your request!"
+      );
+      session.step = "awaiting_voice";
+      await saveSession(sender, session);
+      return session;
+
     default:
       // Default: show menu
       console.log(`❓ Unknown command: ${lower}, showing menu`);
@@ -1598,5 +2027,7 @@ module.exports = {
   handleManageListings,
   handleSavedListings,
   handlePostListingFlow, // Export for testing
-  handleFlowSubmission // Export for testing
+  handleFlowSubmission, // Export for testing
+  handleVoiceMessage, // NEW: Export for testing
+  handleVoiceConfirmation // NEW: Export for testing
 };

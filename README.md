@@ -1,57 +1,145 @@
-marketmatchai/
-├── src/
-│   ├── api/                     # Route entrypoints
-│   │   ├── index.js             # Main router
-│   │   ├── jobs.js              # /jobs
-│   │   ├── cars.js              # /cars
-│   │   ├── housing.js           # /housing
-│   │   ├── services.js          # /local services
-│   │   ├── users.js             # /profile, auth
-│   │   └── admin.js             # /moderation tools
+marketplace-ai-bot/
+├── 📂 config/                    # All configurations
+│   ├── environment/
+│   │   ├── development.js
+│   │   ├── production.js
+│   │   └── staging.js
+│   ├── database.js              # DB connections
+│   ├── whatsapp.js              # WhatsApp API config
+│   ├── ai-services.js           # AI/ML service configs
+│   └── payments.js              # Payment gateway configs
 │
-│   ├── bots/
-│   │   ├── whatsappBot.js       # Main webhook logic
-│   │   ├── messageParser.js     # Parse user input
-│   │   ├── commandRouter.js     # Match input → action
-│   │   └── templates/           # Prewritten bot responses
+├── 📂 src/
+│   │
+│   ├── 📂 core/                 # CORE PLATFORM (Shared)
+│   │   ├── 📂 auth/
+│   │   │   ├── authMiddleware.js
+│   │   │   ├── roleManager.js
+│   │   │   └── sessionHandler.js
+│   │   │
+│   │   ├── 📂 ai/
+│   │   │   ├── intentClassifier/
+│   │   │   │   ├── IntentClassifier.js
+│   │   │   │   ├── trainingData/
+│   │   │   │   │   ├── housing.json
+│   │   │   │   │   ├── jobs.json
+│   │   │   │   │   └── services.json
+│   │   │   │   └── modelManager.js
+│   │   │   │
+│   │   │   ├── nlpProcessor.js
+│   │   │   └── recommendationEngine.js
+│   │   │
+│   │   ├── 📂 messaging/
+│   │   │   ├── messageRouter.js
+│   │   │   ├── templateManager.js
+│   │   │   └── notificationEngine.js
+│   │   │
+│   │   ├── 📂 database/
+│   │   │   ├── models/
+│   │   │   │   ├── User.js
+│   │   │   │   ├── Conversation.js
+│   │   │   │   └── PlatformAnalytics.js
+│   │   │   ├── migrations/
+│   │   │   └── seeders/
+│   │   │
+│   │   └── 📂 shared/
+│   │       ├── validators/
+│   │       ├── utils/
+│   │       ├── constants/
+│   │       └── errors/
+│   │
+│   ├── 📂 modules/              # BUSINESS VERTICALS (Plugins)
+│   │   │
+│   │   ├── 📂 housing/          # MODULE 1
+│   │   │   ├── 📂 consumer/     # Home seekers/renters
+│   │   │   │   ├── controllers/
+│   │   │   │   ├── services/
+│   │   │   │   ├── flows/
+│   │   │   │   └── views/ (WhatsApp templates)
+│   │   │   │
+│   │   │   ├── 📂 business/     # Realtors/Brokers
+│   │   │   │   ├── adminController.js
+│   │   │   │   ├── analyticsService.js
+│   │   │   │   ├── bulkUploadService.js
+│   │   │   │   └── dashboardFlows/
+│   │   │   │
+│   │   │   ├── 📂 shared/
+│   │   │   │   ├── models/
+│   │   │   │   │   ├── Property.js
+│   │   │   │   │   ├── PropertyAnalytics.js
+│   │   │   │   │   └── Lead.js
+│   │   │   │   ├── validators/
+│   │   │   │   └── constants.js
+│   │   │   │
+│   │   │   └── index.js         # Module entry point
+│   │   │
+│   │   ├── 📂 jobs/             # MODULE 2
+│   │   │   ├── 📂 seeker/
+│   │   │   ├── 📂 employer/
+│   │   │   ├── 📂 shared/
+│   │   │   └── index.js
+│   │   │
+│   │   ├── 📂 services/         # MODULE 3
+│   │   │   ├── 📂 customer/
+│   │   │   ├── 📂 provider/
+│   │   │   ├── 📂 shared/
+│   │   │   └── index.js
+│   │   │
+│   │   ├── 📂 marketplace/      # MODULE 4
+│   │   │   ├── 📂 buyer/
+│   │   │   ├── 📂 seller/
+│   │   │   ├── 📂 shared/
+│   │   │   └── index.js
+│   │   │
+│   │   └── 📂 moduleManager/    # Module loader & router
+│   │       ├── ModuleLoader.js
+│   │       ├── ModuleRouter.js
+│   │       └── dependencyInjector.js
+│   │
+│   ├── 📂 gateways/             # External API integrations
+│   │   ├── whatsapp/
+│   │   │   ├── WhatsAppClient.js
+│   │   │   ├── flowManager.js
+│   │   │   └── webhookHandler.js
+│   │   │
+│   │   ├── payment/
+│   │   │   ├── StripeGateway.js
+│   │   │   └── RazorpayGateway.js
+│   │   │
+│   │   └── thirdParty/
+│   │       ├── googleMaps.js
+│   │       ├── emailService.js
+│   │       └── smsService.js
+│   │
+│   ├── 📂 api/                  # REST/GraphQL APIs (if needed)
+│   │   ├── routes/
+│   │   ├── controllers/
+│   │   └── middleware/
+│   │
+│   └── 📂 workers/              # Background jobs
+│       ├── notificationWorker.js
+│       ├── analyticsWorker.js
+│       └── cleanupWorker.js
 │
-│   ├── categories/              # Category logic (modular)
-│   │   ├── jobs.js
-│   │   ├── cars.js
-│   │   ├── housing.js
-│   │   ├── services.js
-│   │   └── clothing.js
+├── 📂 tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
 │
-│   ├── controllers/             # Business logic per route
-│   │   ├── jobsController.js
-│   │   ├── carsController.js
-│   │   ├── usersController.js
-│   │   └── housingController.js
+├── 📂 scripts/                  # Deployment & maintenance
+│   ├── deploy/
+│   ├── database/
+│   └── monitoring/
 │
-│   ├── firebase/
-│   │   ├── firebaseConfig.js    # Init Firebase App + Firestore
-│   │   └── auth.js              # Session validation
+├── 📂 docs/                     # Documentation
+│   ├── api/
+│   ├── modules/
+│   └── architecture/
 │
-│   ├── services/                # Shared services
-│   │   ├── whatsappService.js
-│   │   ├── searchService.js     # Filter/search helpers
-│   │   ├── favoritesService.js
-│   │   ├── notificationService.js
-│   │   └── paymentService.js    # (future)
-│
-│   ├── middlewares/
-│   │   └── verifyToken.js
-│
-│   ├── utils/
-│   │   ├── logger.js
-│   │   ├── formatter.js
-│   │   └── idGenerator.js
-│
-│   └── index.js                # Main server entry
-│
-├── .env                        # Firebase + WhatsApp creds
-├── .gitignore
 ├── package.json
+├── docker-compose.yml
+├── Dockerfile
+├── .env.example
 └── README.md
 
 
