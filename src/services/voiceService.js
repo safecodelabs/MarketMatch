@@ -6,7 +6,7 @@ const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
 
-const voiceProcessor = require('../../core/ai/voiceProcessor');
+const voiceProcessor = require('../core/ai/voiceProcessor');
 const messageUtils = require('../../utils/messageUtils');
 const constants = require('../../utils/constants');
 
