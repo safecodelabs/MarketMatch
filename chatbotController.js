@@ -53,7 +53,7 @@ const WHATSAPP_FLOW_ID = process.env.WHATSAPP_FLOW_ID;
 const FLOW_MODE = process.env.FLOW_MODE || "draft"; // "draft" for testing, "published" for production
 
 // ✅ ADDED: Multi-language support for urban help
-const multiLanguage = require("../../utils/multiLanguage");
+const multiLanguage = require("./utils/multiLanguage");
 
 // ========================================
 // GLOBAL CLIENT HANDLING (NEW)
