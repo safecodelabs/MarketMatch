@@ -51,31 +51,156 @@ function detectLanguageByScript(text = "") {
   if (!text) return "en";
   if (/[ऀ-ॿ]/.test(text)) return "hi";
   if (/[஀-௿]/.test(text)) return "ta";
+  if (/[ઁ-૿]/.test(text)) return "gu";
+  if (/[ಀ-೿]/.test(text)) return "kn";
   return "en";
 }
 
+// ✅ UPDATED: Added urban help intent categories
 function mapToIntentCategory(intentName, userText = "") {
   if (intentName && typeof intentName === "string") {
     const k = intentName.toString().trim().toLowerCase();
+    
+    // Property-related intents
     if (["buy_house", "browse_housing", "post_listing", "sell_house"].includes(k)) return k;
+    
+    // Urban help intents
+    if (["urban_help", "service_request", "need_service", "find_service"].includes(k)) return "urban_help";
+    
+    // Specific service intents
+    const lowerText = userText.toLowerCase();
+    if (k === "unknown") {
+      // Check if it's an urban help request
+      const urbanHelpKeywords = [
+        'electrician', 'plumber', 'maid', 'carpenter', 'cleaner', 
+        'technician', 'driver', 'painter', 'naukrani', 'househelp',
+        'service', 'repair', 'chahiye', 'required', 'needed'
+      ];
+      
+      if (urbanHelpKeywords.some(keyword => lowerText.includes(keyword))) {
+        return "urban_help";
+      }
+    }
   }
+  
   // last fallback: simple keyword fallback
   const fb = fallbackDetectIntent(userText);
-  return fb === "housing" ? "buy_house" : "unknown";
+  if (fb === "housing") return "buy_house";
+  if (fb === "service") return "urban_help";
+  return "unknown";
+}
+
+// ✅ ADDED: Check if text is urban help request
+function isUrbanHelpRequest(text = "") {
+  if (!text) return false;
+  const lowerText = text.toLowerCase();
+  
+  const urbanHelpKeywords = [
+    'electrician', 'plumber', 'maid', 'carpenter', 'cleaner', 
+    'technician', 'driver', 'painter', 'naukrani', 'househelp',
+    'service', 'repair', 'chahiye', 'required', 'needed',
+    'mechanic', 'welder', 'gardener', 'security', 'cook',
+    'मिस्त्री', 'प्लंबर', 'नौकरानी', 'बढ़ई', 'ड्राइवर',
+    'மின்தொழிலாளி', 'குழாய்த்தொழிலாளி', 'வேலைக்காரி', 'தச்சர்', 'ஓட்டுநர்'
+  ];
+  
+  return urbanHelpKeywords.some(keyword => lowerText.includes(keyword));
+}
+
+// ✅ ADDED: Extract urban help entities
+function extractUrbanHelpEntities(text = "") {
+  const entities = {
+    category: null,
+    location: null,
+    timing: null,
+    details: ""
+  };
+  
+  const lowerText = text.toLowerCase();
+  
+  // Extract category
+  const categories = {
+    'electrician': ['electrician', 'wiring', 'electrical', 'fuse', 'light', 'switch', 'मिस्त्री', 'மின்தொழிலாளி'],
+    'plumber': ['plumber', 'pipe', 'water', 'leak', 'tap', 'bathroom', 'toilet', 'प्लंबर', 'குழாய்த்தொழிலாளி'],
+    'maid': ['maid', 'househelp', 'cleaning', 'cook', 'naukrani', 'housekeeping', 'नौकरानी', 'வேலைக்காரி'],
+    'carpenter': ['carpenter', 'woodwork', 'furniture', 'repair', 'door', 'window', 'बढ़ई', 'தச்சர்'],
+    'cleaner': ['cleaner', 'cleaning', 'deep clean', 'house cleaning', 'सफाई', 'சுத்தம்'],
+    'technician': ['technician', 'ac repair', 'appliance repair', 'tv repair'],
+    'driver': ['driver', 'chauffeur', 'car driver', 'permanent driver', 'ड्राइवर', 'ஓட்டுநர்'],
+    'painter': ['painter', 'painting', 'wall', 'color', 'house painting', 'पेंटर', 'ஓவியர்']
+  };
+  
+  for (const [category, keywords] of Object.entries(categories)) {
+    if (keywords.some(keyword => lowerText.includes(keyword))) {
+      entities.category = category;
+      break;
+    }
+  }
+  
+  // Extract location
+  const locations = ['noida', 'gurgaon', 'delhi', 'gurugram', 'greater noida', 'ghaziabad', 'faridabad'];
+  for (const location of locations) {
+    if (lowerText.includes(location)) {
+      entities.location = location.charAt(0).toUpperCase() + location.slice(1);
+      break;
+    }
+  }
+  
+  // Extract timing
+  if (lowerText.includes('now') || lowerText.includes('immediate') || lowerText.includes('urgent')) {
+    entities.timing = 'immediate';
+  } else if (lowerText.includes('tomorrow') || lowerText.includes('next week')) {
+    entities.timing = 'future';
+  }
+  
+  // Extract details (remaining text)
+  entities.details = text.trim();
+  
+  return entities;
 }
 
 async function classify(message) {
   if (!message || !message.trim()) {
-    return { intent: "unknown", category: "unknown", entities: {}, missing: [], language: "en" };
+    return { 
+      intent: "unknown", 
+      category: "unknown", 
+      entities: {}, 
+      missing: [], 
+      language: "en" 
+    };
+  }
+
+  // ✅ UPDATED: Check if it's an urban help request first
+  const isUrbanHelp = isUrbanHelpRequest(message);
+  
+  // Use simpler classification for urban help to avoid LLM costs
+  if (isUrbanHelp) {
+    const urbanEntities = extractUrbanHelpEntities(message);
+    return {
+      intent: "urban_help_request",
+      category: "urban_help",
+      entities: {
+        ...urbanEntities,
+        raw_text: message,
+        contact: extractPhone(message)
+      },
+      missing: !urbanEntities.category ? ['category'] : (!urbanEntities.location ? ['location'] : []),
+      language: detectLanguageByScript(message),
+      confidence: 0.8
+    };
   }
 
   const prompt = `
 You are an assistant that extracts intent and structured entities from a user's short message for a marketplace.
 User message may be in ANY language. Do NOT translate the message.
 TASK:
-1. Detect the user's intent. Allowed outputs: buy_house, sell_house, post_listing, browse_housing, unknown.
+1. Detect the user's intent. Allowed outputs: 
+   - Property intents: buy_house, sell_house, post_listing, browse_housing
+   - Urban help intents: urban_help, service_request
+   - Other: unknown
 2. Extract entities if present. Output keys:
-   property_type, city, locality, budget, bhk, contact, name, details
+   - For property: property_type, city, locality, budget, bhk, contact, name, details
+   - For urban help: service_category, service_location, service_timing, contact, details
 3. Suggest OPTIONAL fields that might refine the search; return them in array "missing".
 4. Detect the user's language as a two-letter code in "language".
 5. Return STRICT JSON only.
@@ -90,12 +215,18 @@ User message: """${message.replace(/`/g, "'")}"""
     } catch (e) {
       // LLM call failed — fallback to heuristic
       const fb = fallbackDetectIntent(message) || "unknown";
+      const category = fb === "housing" ? "buy_house" : "unknown";
+      
       return {
         intent: "fallback",
-        category: fb === "housing" ? "buy_house" : "unknown",
-        entities: { raw_text: message, contact: extractPhone(message) },
+        category: category,
+        entities: { 
+          raw_text: message, 
+          contact: extractPhone(message) 
+        },
         missing: [],
-        language: detectLanguageByScript(message)
+        language: detectLanguageByScript(message),
+        confidence: 0.5
       };
     }
 
@@ -106,46 +237,82 @@ User message: """${message.replace(/`/g, "'")}"""
     } catch (err) {
       // LLM returned non-JSON — fallback to heuristics
       const fb = fallbackDetectIntent(message) || "unknown";
+      const category = fb === "housing" ? "buy_house" : "unknown";
+      
       return {
         intent: "fallback",
-        category: fb === "housing" ? "buy_house" : "unknown",
-        entities: { raw_text: message, contact: extractPhone(message) },
+        category: category,
+        entities: { 
+          raw_text: message, 
+          contact: extractPhone(message) 
+        },
         missing: [],
-        language: detectLanguageByScript(message)
+        language: detectLanguageByScript(message),
+        confidence: 0.5
       };
     }
 
     const rawEntities = parsed.entities || {};
-    const entities = {
-      property_type: rawEntities.property_type || rawEntities.type || "",
-      city: rawEntities.city || rawEntities.location || "",
-      locality: rawEntities.locality || "",
-      budget: rawEntities.budget || "",
-      bhk: rawEntities.bhk || "",
-      contact: rawEntities.contact || extractPhone(message) || rawEntities.contact || "",
-      name: rawEntities.name || "",
-      details: rawEntities.details || "",
-      raw_text: message
-    };
+    const intentRaw = (parsed.intent || "unknown").toString();
+    
+    // ✅ UPDATED: Handle different entity structures based on intent
+    let entities = {};
+    
+    if (intentRaw.includes('urban_help') || intentRaw.includes('service')) {
+      // Urban help entities
+      entities = {
+        category: rawEntities.service_category || rawEntities.category || "",
+        location: rawEntities.service_location || rawEntities.location || "",
+        timing: rawEntities.service_timing || "",
+        contact: rawEntities.contact || extractPhone(message) || "",
+        details: rawEntities.details || "",
+        raw_text: message
+      };
+    } else {
+      // Property entities
+      entities = {
+        property_type: rawEntities.property_type || rawEntities.type || "",
+        city: rawEntities.city || rawEntities.location || "",
+        locality: rawEntities.locality || "",
+        budget: rawEntities.budget || "",
+        bhk: rawEntities.bhk || "",
+        contact: rawEntities.contact || extractPhone(message) || "",
+        name: rawEntities.name || "",
+        details: rawEntities.details || "",
+        raw_text: message
+      };
+    }
 
     const budgetNum = parseBudget(entities.budget);
     if (budgetNum) entities.budget = budgetNum;
 
-    const intentRaw = (parsed.intent || "unknown").toString();
     const category = mapToIntentCategory(intentRaw, message);
     const missing = Array.isArray(parsed.missing) ? parsed.missing : [];
     const language = parsed.language || detectLanguageByScript(message);
 
-    return { intent: intentRaw, category, entities, missing, language };
+    return { 
+      intent: intentRaw, 
+      category, 
+      entities, 
+      missing, 
+      language,
+      confidence: 0.9
+    };
   } catch (err) {
     console.error("classify error:", err?.message || err);
     const fb = fallbackDetectIntent(message) || "unknown";
+    const category = fb === "housing" ? "buy_house" : "unknown";
+    
     return {
       intent: "error",
-      category: fb === "housing" ? "buy_house" : "unknown",
-      entities: { raw_text: message, contact: extractPhone(message) },
+      category: category,
+      entities: { 
+        raw_text: message, 
+        contact: extractPhone(message) 
+      },
       missing: [],
-      language: detectLanguageByScript(message)
+      language: detectLanguageByScript(message),
+      confidence: 0.3
     };
   }
 }
@@ -214,22 +381,37 @@ function searchListings(listings = [], entities = {}, opts = {}) {
 
 async function generateFollowUpQuestion({ missing = [], entities = {}, language = "en" } = {}) {
   if (!Array.isArray(missing) || missing.length === 0) return "";
+  
+  // ✅ UPDATED: Different questions for urban help vs property
+  const isUrbanHelp = entities.category || entities.service_category;
+  
   const prompt = `
 You are a concise, polite WhatsApp assistant that asks ONE short follow-up question.
 User language hint: ${language}
 User partial query (extracted): ${JSON.stringify(entities)}
 Missing refinements: ${JSON.stringify(missing)}
+${isUrbanHelp ? 'This is about urban help services.' : 'This is about property listing.'}
 Write ONE short natural question (in user's language) that invites optional clarification — do NOT demand or make it sound mandatory.
 Return only the question (single line).
   `.trim();
+  
   try {
     const res = await askAI(prompt, { temperature: 0.2, max_tokens: 80 });
     return res ? res.toString().trim().split("\n")[0] : "";
   } catch (err) {
     console.warn("generateFollowUpQuestion fallback:", err?.message || err);
     // fallback simple question
-    if (missing.includes("city")) return "Which city or area are you looking in?";
-    if (missing.includes("budget")) return "Do you have a budget range in mind?";
+    if (isUrbanHelp) {
+      if (missing.includes("category") || missing.includes("service_category")) {
+        return "What type of service do you need?";
+      }
+      if (missing.includes("location") || missing.includes("service_location")) {
+        return "Where do you need the service?";
+      }
+    } else {
+      if (missing.includes("city")) return "Which city or area are you looking in?";
+      if (missing.includes("budget")) return "Do you have a budget range in mind?";
+    }
     return "Can you share more details?";
   }
 }
@@ -242,6 +424,7 @@ async function generatePropertyReply({ entities = {}, listings = [], language = 
     contact: l.contact || "",
     desc: l.description || l.details || ""
   }));
+  
   const prompt = `
 You are a helpful real-estate assistant composing a WhatsApp response in the user's language (${language}).
 User query (extracted): ${JSON.stringify(entities)}
@@ -254,6 +437,7 @@ Task:
 - IMPORTANT: Do NOT invent or change listing data.
 Return only the message text.
   `.trim();
+  
   try {
     const out = await askAI(prompt, { temperature: 0.2, max_tokens: 700 });
     return out ? out.toString().trim() : "";
@@ -264,14 +448,54 @@ Return only the message text.
   }
 }
 
+// ✅ ADDED: Generate urban help reply
+async function generateUrbanHelpReply({ entities = {}, providers = [], language = "en", maxResults = 5 } = {}) {
+  const small = providers.slice(0, maxResults).map(p => ({
+    name: p.name || p.service_type || "Service Provider",
+    service: p.category || p.service || "",
+    location: p.location || p.area || "",
+    rating: p.rating || "",
+    experience: p.experience || "",
+    contact: p.contact || "",
+    availability: p.availability || ""
+  }));
+  
+  const prompt = `
+You are a helpful urban help services assistant composing a WhatsApp response in the user's language (${language}).
+User query (extracted): ${JSON.stringify(entities)}
+Service providers found (JSON): ${JSON.stringify(small, null, 2)}
+Task:
+- Write a concise conversational reply in the user's language.
+- Confirm the service type and location requested.
+- Summarize the available service providers (numbered) with name/service/rating/contact.
+- Be polite and helpful.
+- IMPORTANT: Do NOT invent or change provider data.
+Return only the message text.
+  `.trim();
+  
+  try {
+    const out = await askAI(prompt, { temperature: 0.2, max_tokens: 500 });
+    return out ? out.toString().trim() : "";
+  } catch (err) {
+    console.warn("generateUrbanHelpReply fallback:", err?.message || err);
+    // fallback to simple summary
+    return small.map((s, i) => 
+      `${i+1}. ${s.name} (${s.service})\nLocation: ${s.location}\nRating: ${s.rating || "N/A"}\nContact: ${s.contact || "Contact not available"}`
+    ).join("\n\n");
+  }
+}
+
 module.exports = {
   askAI,
   classify,
   searchListings,
   generateFollowUpQuestion,
   generatePropertyReply,
+  generateUrbanHelpReply, // ✅ NEW: Urban help reply generator
   detectLanguageByScript,
   parseBudget,
   extractPhone,
-  normalizeText
+  normalizeText,
+  isUrbanHelpRequest, // ✅ NEW: Helper function
+  extractUrbanHelpEntities // ✅ NEW: Urban help entity extractor
 };

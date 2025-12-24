@@ -112,7 +112,7 @@ class VoiceService {
     }
 
     /**
-     * Process incoming voice message with AI enhancement
+     * Process incoming voice message - UPDATED: Transcription only, no intent extraction
      */
     async processVoiceMessage(message, mediaUrl, client) {
         try {
@@ -121,65 +121,67 @@ class VoiceService {
             let audioBuffer = null;
             let transcription = "";
             
-            // Try to download audio
+            // Try to download audio with authentication
             try {
-                audioBuffer = await this.downloadAudio(mediaUrl, message.id);
+                audioBuffer = await this.downloadAudioWithAuth(mediaUrl, message.id);
+                if (!audioBuffer) {
+                    return {
+                        success: false,
+                        error: 'Could not download audio. Please send the voice message again.',
+                        userMessage: message
+                    };
+                }
             } catch (downloadError) {
-                this.log('WARN', `Download skipped: ${downloadError.message}`);
+                this.log('ERROR', `Download failed: ${downloadError.message}`);
+                return {
+                    success: false,
+                    error: 'Voice message download failed. Please try again.',
+                    userMessage: message
+                };
             }
             
-            // Transcribe audio
+            // Transcribe audio - NO FALLBACK TEXT
             if (audioBuffer) {
                 try {
                     const convertedAudioPath = await this.convertToWav(audioBuffer, message.id);
                     transcription = await voiceProcessor.transcribeAudio(convertedAudioPath);
                     
-                    if (!transcription || transcription.trim() === '') {
-                        throw new Error('No speech detected');
+                    // IMPORTANT: Check if transcription is null or empty
+                    if (!transcription || transcription.trim() === '' || transcription === 'null') {
+                        this.log('WARN', 'No speech detected in audio');
+                        return {
+                            success: false,
+                            error: 'No speech detected. Please speak clearly and try again.',
+                            userMessage: message
+                        };
                     }
                     
-                    this.log('INFO', `Transcription: "${transcription.substring(0, 100)}${transcription.length > 100 ? '...' : ''}"`);
+                    this.log('INFO', `✅ Raw Transcription: "${transcription}"`);
+                    
                 } catch (transcribeError) {
-                    this.log('WARN', `Transcription failed: ${transcribeError.message}`);
-                    transcription = this.getFallbackTranscription();
+                    this.log('ERROR', `Transcription failed: ${transcribeError.message}`);
+                    return {
+                        success: false,
+                        error: 'Could not transcribe voice message. Please try again or type your request.',
+                        userMessage: message
+                    };
                 }
             } else {
-                transcription = this.getFallbackTranscription();
-                this.log('INFO', `Using fallback: "${transcription}"`);
+                // No fallback text - ask user to try again
+                return {
+                    success: false,
+                    error: 'Could not process voice message. Please try again.',
+                    userMessage: message
+                };
             }
 
-            // Extract intent using AI processor - Now with urban help support
-            const intentResult = await voiceProcessor.extractIntent(transcription, message.from);
-            
-            // Enhance with urban help detection if needed
-            if (intentResult.intent === 'service_request' || this.isUrbanHelpRequest(transcription)) {
-                // Try to extract urban help specific info
-                const urbanHelpResult = await voiceProcessor.extractUrbanHelpIntent(transcription, message.from);
-                if (urbanHelpResult.intent === 'urban_help_request' && urbanHelpResult.confidence > 0.6) {
-                    intentResult.intent = 'urban_help_request';
-                    intentResult.entities = { ...intentResult.entities, ...urbanHelpResult.entities };
-                    intentResult.missingInfo = urbanHelpResult.missingInfo;
-                }
-            }
-            
-            // Set user language
-            if (intentResult.language) {
-                multiLanguage.setUserLanguage(message.from, intentResult.language);
-            }
-            
-            // Clean up temp files
-            this.cleanupTempFiles(message.id);
-
+            // IMPORTANT: Return ONLY the transcription for confirmation
+            // Don't extract intent yet - wait for user confirmation
             return {
                 success: true,
-                transcription: transcription,
-                intent: intentResult.intent,
-                entities: intentResult.entities,
-                confidence: intentResult.confidence,
-                language: intentResult.language,
-                missingInfo: intentResult.missingInfo || [],
-                method: intentResult.method,
-                userMessage: message
+                transcription: transcription,  // Just the raw transcription
+                userMessage: message,
+                needsConfirmation: true  // Flag to indicate we need user confirmation
             };
 
         } catch (error) {
@@ -188,9 +190,178 @@ class VoiceService {
             
             return {
                 success: false,
-                error: 'Voice processing error',
+                error: 'Voice processing error. Please try again.',
                 userMessage: message
             };
+        }
+    }
+
+    /**
+     * NEW: Download audio with proper authentication
+     */
+    async downloadAudioWithAuth(mediaUrl, messageId) {
+        try {
+            this.log('DEBUG', `Downloading with auth: ${messageId.substring(0, 10)}...`);
+            
+            // WhatsApp media requires access token
+            const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+            if (!accessToken) {
+                this.log('ERROR', 'WhatsApp access token not configured');
+                return null;
+            }
+            
+            const response = await axios({
+                method: 'GET',
+                url: mediaUrl,
+                responseType: 'arraybuffer',
+                timeout: 15000,
+                maxContentLength: 15 * 1024 * 1024,
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'User-Agent': 'GlossDrive-Bot/1.0',
+                    'Accept': 'audio/*'
+                }
+            });
+
+            if (response.status !== 200) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const fileSizeKB = (response.data.length / 1024).toFixed(2);
+            this.log('INFO', `✅ Downloaded ${fileSizeKB}KB audio`);
+            
+            return response.data;
+        } catch (error) {
+            const errorCode = error.response?.status || error.code || 'Unknown';
+            this.log('ERROR', `Download failed [${errorCode}]: ${error.message}`);
+            
+            // Try alternative approach without auth (some WhatsApp URLs might work without)
+            return await this.tryDirectDownload(mediaUrl, messageId);
+        }
+    }
+
+    /**
+     * NEW: Alternative download method (direct)
+     */
+    async tryDirectDownload(mediaUrl, messageId) {
+        try {
+            this.log('INFO', 'Trying direct download without auth...');
+            
+            const response = await axios({
+                method: 'GET',
+                url: mediaUrl,
+                responseType: 'arraybuffer',
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'audio/*'
+                }
+            });
+            
+            if (response.status !== 200) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const buffer = await response.data;
+            this.log('INFO', `✅ Direct download successful: ${buffer.length} bytes`);
+            return buffer;
+        } catch (error) {
+            this.log('ERROR', `Direct download also failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * NEW: Send transcription confirmation to user
+     */
+    async sendTranscriptionConfirmation(phoneNumber, transcription, client) {
+        try {
+            const userLang = multiLanguage.getUserLanguage(phoneNumber) || 'en';
+            
+            let confirmationMessage = '';
+            if (userLang === 'hi') {
+                confirmationMessage = `🎤 मैंने सुना: "*${transcription}"*\n\nक्या यह सही है?\n\nजवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें`;
+            } else if (userLang === 'ta') {
+                confirmationMessage = `🎤 நான் கேட்டேன்: "*${transcription}"*\n\nஇது சரியானதா?\n\nபதில்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்`;
+            } else {
+                confirmationMessage = `🎤 I heard: "*${transcription}"*\n\nIs this correct?\n\nReply with:\n✅ *Yes* - if correct\n🔄 *No* - to try again\n📝 *Type* - to type instead`;
+            }
+            
+            await this.sendMessage(client, phoneNumber, confirmationMessage);
+            return true;
+            
+        } catch (error) {
+            this.log('ERROR', `Failed to send confirmation: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * NEW: Process confirmed transcription (after user confirms)
+     */
+    async processConfirmedTranscription(phoneNumber, confirmedTranscription, client) {
+        try {
+            this.log('INFO', `Processing confirmed transcription: "${confirmedTranscription}"`);
+            
+            // Now extract intent from the confirmed text
+            const intentResult = await voiceProcessor.extractIntent(confirmedTranscription, phoneNumber);
+            
+            // Set user language
+            if (intentResult.language) {
+                multiLanguage.setUserLanguage(phoneNumber, intentResult.language);
+            }
+            
+            this.log('INFO', `Intent: ${intentResult.intent}, Confidence: ${intentResult.confidence}`);
+            
+            // Return result for further processing
+            return {
+                success: true,
+                transcription: confirmedTranscription,
+                intent: intentResult.intent,
+                entities: intentResult.entities,
+                confidence: intentResult.confidence,
+                language: intentResult.language,
+                missingInfo: intentResult.missingInfo || [],
+                method: intentResult.method,
+                userMessage: { from: phoneNumber }
+            };
+            
+        } catch (error) {
+            this.log('ERROR', `Failed to process confirmed transcription: ${error.message}`);
+            return {
+                success: false,
+                error: 'Failed to process your request. Please try again.'
+            };
+        }
+    }
+
+    /**
+     * NEW: Extract intent after confirmation (wrapper for existing handleIntentConfirmation)
+     */
+    async extractIntentAfterConfirmation(phoneNumber, transcription, session, client) {
+        try {
+            // First, process the confirmed transcription
+            const processingResult = await this.processConfirmedTranscription(phoneNumber, transcription, client);
+            
+            if (!processingResult.success) {
+                throw new Error(processingResult.error || 'Failed to process transcription');
+            }
+            
+            // Now use existing handleIntentConfirmation with the confirmed result
+            await this.handleIntentConfirmation(
+                phoneNumber,
+                session,
+                processingResult.transcription,
+                processingResult.intent,
+                processingResult.confidence,
+                client
+            );
+            
+            return processingResult;
+            
+        } catch (error) {
+            this.log('ERROR', `Intent extraction failed: ${error.message}`);
+            throw error;
         }
     }
 
@@ -1170,12 +1341,17 @@ class VoiceService {
         ];
     }
 
-    // ========================================
-    // EXISTING METHODS (keep as is)
-    // ========================================
+    /**
+     * Get fallback transcription - UPDATED: Return null instead of random text
+     */
+    getFallbackTranscription() {
+        // Return null to trigger proper error handling
+        console.warn('[VOICE] Transcription failed - returning null');
+        return null;
+    }
 
     /**
-     * Download audio from URL
+     * Download audio from URL - KEPT FOR BACKWARD COMPATIBILITY
      */
     async downloadAudio(mediaUrl, messageId) {
         try {
@@ -1241,25 +1417,6 @@ class VoiceService {
             this.log('WARN', `Conversion failed: ${error.message}`);
             return originalPath;
         }
-    }
-
-    /**
-     * Get fallback transcription
-     */
-    getFallbackTranscription() {
-        const fallbacks = [
-            "I'm looking for a property",
-            "I want to rent an apartment",
-            "Need electrician in Greater Noida",
-            "Looking for 2 ton steel",
-            "Show me available listings",
-            "I need to buy a house",
-            "Looking for property in Noida",
-            "मुझे इलेक्ट्रीशियन चाहिए",
-            "प्लंबर की जरूरत है",
-            "नौकरानी चाहिए दिल्ली में"
-        ];
-        return fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
 
     /**

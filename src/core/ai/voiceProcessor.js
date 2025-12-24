@@ -180,13 +180,13 @@ class VoiceProcessor {
             
             if (!fs.existsSync(audioFilePath)) {
                 this.log('ERROR', 'Audio file not found');
-                return this.fallbackTranscription();
+                return null; // Return null instead of fallback
             }
 
             // Check if GROQ_API_KEY is set
             if (!process.env.GROQ_API_KEY && !constants.GROQ_API_KEY) {
-                this.log('WARN', 'GROQ_API_KEY not set, using fallback');
-                return this.fallbackTranscription();
+                this.log('WARN', 'GROQ_API_KEY not set');
+                return null; // Return null instead of fallback
             }
 
             const audioFile = fs.createReadStream(audioFilePath);
@@ -206,7 +206,7 @@ class VoiceProcessor {
 
         } catch (error) {
             this.log('ERROR', `Transcription failed: ${error.message}`);
-            return this.fallbackTranscription();
+            return null; // Return null instead of fallback
         }
     }
 
@@ -682,23 +682,12 @@ class VoiceProcessor {
     }
 
     /**
-     * Fallback transcription when Groq fails
+     * Fallback transcription when Groq fails - UPDATED: Return null instead of random text
      */
     fallbackTranscription() {
-        const fallbacks = [
-            "I'm looking for a property",
-            "I want to rent an apartment",
-            "Need electrician in Greater Noida",
-            "Looking for 2 ton steel",
-            "Show me available listings",
-            "I need to buy a house",
-            "Looking for property in Noida",
-            "मुझे इलेक्ट्रीशियन चाहिए",
-            "प्लंबर की जरूरत है",
-            "नौकरानी चाहिए दिल्ली में",
-            "Carpenter required in Gurgaon"
-        ];
-        return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        // Return null to trigger proper error handling
+        console.warn('[VOICE] Transcription failed - returning null');
+        return null;
     }
 
     /**

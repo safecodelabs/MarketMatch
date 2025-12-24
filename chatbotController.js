@@ -1078,7 +1078,7 @@ function extractUrbanHelpFromText(text) {
 }
 
 // ========================================
-// UPDATED MAIN CONTROLLER - WITH URBAN HELP SUPPORT
+// UPDATED MAIN CONTROLLER - WITH URBAN HELP SUPPORT AND VOICE CONFIRMATION FLOW
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}, client = null) {
   console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
@@ -1098,97 +1098,91 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   if (!sender) return;
 
   // ===========================
-  // 0) PRIORITY: CHECK FOR VOICE MESSAGES
+  // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW
   // ===========================
-  if (metadata?.type === "audio" || metadata?.type === "voice") {
-    console.log("🎤 [VOICE] Audio message detected in metadata");
-    
-    // Get session
-    let session = (await getSession(sender)) || { 
-      step: "start",
-      isInitialized: false,
-      awaitingLang: false
-    };
-    
-    // Check if we have audio metadata from webhook
-    const audioUrl = metadata.audioMetadata?.url || metadata.audio?.url || metadata.voice?.url;
-    
-    if (!audioUrl) {
-      console.error("🎤 [VOICE] No audio URL found");
-      await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
-      session.step = "menu";
-      await saveSession(sender, session);
-      return session;
-    }
-    
-    console.log("🎤 [VOICE] Processing audio URL:", audioUrl.substring(0, 100) + "...");
-    
-    // Send processing message
-    await sendMessage(sender, "🎤 Processing your voice message...");
-    
-    try {
-      // Process the voice message
-      const processingResult = await voiceService.processVoiceMessage(
-        { 
-          from: sender, 
-          id: metadata.id || Date.now().toString(),
-          body: audioUrl
-        },
-        audioUrl,
-        effectiveClient
-      );
+  if (metadata?.type === "audio" || metadata?.type === "voice" || text === 'voice_note') {
+      console.log("🎤 [VOICE] Audio message detected");
       
-      if (!processingResult.success) {
-        console.error("🎤 [VOICE] Processing failed:", processingResult.error);
-        await sendMessage(sender, `❌ Error: ${processingResult.error}\n\nPlease try again or type your request.`);
+      // Get session
+      let session = (await getSession(sender)) || { 
+        step: "start",
+        isInitialized: false,
+        awaitingLang: false,
+        state: 'initial'
+      };
+      
+      // Check if we have audio URL from metadata
+      const audioUrl = metadata.audio?.url || metadata.url || metadata.audioMetadata?.url || metadata.voice?.url;
+      
+      if (!audioUrl) {
+        console.error("🎤 [VOICE] No audio URL found");
+        await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
         session.step = "menu";
+        session.state = 'initial';
         await saveSession(sender, session);
         return session;
       }
       
-      console.log("🎤 [VOICE] Transcription:", processingResult.transcription);
-      console.log("🎤 [VOICE] Intent:", processingResult.intent);
+      console.log("🎤 [VOICE] Processing audio URL:", audioUrl.substring(0, 100) + "...");
       
-      // Check if it's an urban help request
-      if (processingResult.intent === 'urban_help_request' || 
-          processingResult.entities?.category ||
-          isUrbanHelpRequest(processingResult.transcription)) {
-        
-        await handleUrbanHelpVoiceIntent(sender, session, processingResult, effectiveClient);
-        
-      } else {
-        // Handle property-related intents
-        await voiceService.handleIntentConfirmation(
-          sender, // phoneNumber
-          session, // session
-          processingResult.transcription, // transcription
-          processingResult.intent, // intent
-          processingResult.confidence, // confidence
-          effectiveClient // client
+      // Send processing message
+      await sendMessage(sender, "🎤 Processing your voice message...");
+      
+      try {
+        // 1. Process voice for transcription ONLY
+        const voiceResult = await voiceService.processVoiceMessage(
+          { 
+            from: sender, 
+            id: metadata.id || Date.now().toString(),
+            body: audioUrl
+          },
+          audioUrl,
+          effectiveClient
         );
         
-        // Store voice context
-        session.voiceContext = {
-          originalTranscription: processingResult.transcription,
-          intent: processingResult.intent,
-          entities: processingResult.entities,
-          confidence: processingResult.confidence,
-          timestamp: Date.now()
-        };
-        session.step = "awaiting_voice_confirmation";
+        if (!voiceResult.success) {
+          // Send error message
+          await sendMessage(sender, 
+            voiceResult.error || "Could not process voice message. Please try again or type your request.");
+          session.step = "menu";
+          session.state = 'initial';
+          await saveSession(sender, session);
+          return session;
+        }
+        
+        // 2. Store transcription in session
+        session.rawTranscription = voiceResult.transcription;
+        session.state = 'awaiting_confirmation';
+        session.step = 'awaiting_confirmation';
+        session.timestamp = Date.now();
+        await saveSession(sender, session);
+        
+        // 3. Send confirmation message with EXACT transcription
+        const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+        
+        let confirmationMessage = '';
+        if (userLang === 'hi') {
+          confirmationMessage = `🎤 मैंने सुना: "*${voiceResult.transcription}"*\n\nक्या यह सही है?\n\nजवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें`;
+        } else if (userLang === 'ta') {
+          confirmationMessage = `🎤 நான் கேட்டேன்: "*${voiceResult.transcription}"*\n\nஇது சரியானதா?\n\nபதில்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்`;
+        } else {
+          confirmationMessage = `🎤 I heard: "*${voiceResult.transcription}"*\n\nIs this correct?\n\nReply with:\n✅ *Yes* - if correct\n🔄 *No* - to try again\n📝 *Type* - to type instead`;
+        }
+        
+        await sendMessage(sender, confirmationMessage);
+        
+        await saveSession(sender, session);
+        return session;
+        
+      } catch (error) {
+        console.error("🎤 [VOICE] Error processing voice:", error);
+        await sendMessage(sender, "❌ Sorry, I couldn't process your voice. Please type your request.");
+        session.step = "menu";
+        session.state = 'initial';
+        await saveSession(sender, session);
+        return session;
       }
-      
-      await saveSession(sender, session);
-      return session;
-      
-    } catch (error) {
-      console.error("🎤 [VOICE] Error processing voice:", error);
-      await sendMessage(sender, "❌ Sorry, I couldn't process your voice. Please type your request.");
-      session.step = "menu";
-      await saveSession(sender, session);
-      return session;
     }
-  }
 
   // ===========================
   // 1) PRIORITY: CHECK FLOW SUBMISSION
@@ -1218,6 +1212,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // Get session
   let session = (await getSession(sender)) || { 
     step: "start",
+    state: 'initial',
     housingFlow: { 
       step: "start", 
       data: {},
@@ -1229,9 +1224,84 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
 
   console.log("🔍 [CONTROLLER DEBUG] Session state:", JSON.stringify(session, null, 2));
   console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
+  console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
   // ===========================
-  // 2) CHECK FOR URBAN HELP CONFIRMATION RESPONSES
+  // 2) CHECK FOR VOICE CONFIRMATION RESPONSES (SIMPLIFIED FLOW)
+  // ===========================
+  if (session.state === 'awaiting_confirmation') {
+    console.log("🎤 [VOICE] Processing confirmation response:", msg);
+    
+    const userResponse = lower.trim();
+    
+    if (userResponse.includes('yes') || userResponse.includes('correct') || userResponse.includes('✅') || userResponse.includes('हां') || userResponse.includes('ஆம்')) {
+      // User confirmed transcription is correct
+      const confirmedText = session.rawTranscription;
+      
+      await sendMessage(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
+      
+      // Now process the confirmed text for intent
+      // Check if it's an urban help request
+      if (isUrbanHelpRequest(confirmedText)) {
+        // Extract urban help info
+        const extractedInfo = extractUrbanHelpFromText(confirmedText);
+        const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+        
+        if (extractedInfo.category && extractedInfo.location) {
+          // We have both category and location, search immediately
+          await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);
+        } else {
+          // Need more info
+          await handleUrbanHelpTextRequest(sender, confirmedText, session, effectiveClient);
+        }
+      } else {
+        // Process property-related intent
+        await voiceService.extractIntentAfterConfirmation(sender, confirmedText, session, effectiveClient);
+      }
+      
+      // Reset session
+      session.state = 'initial';
+      delete session.rawTranscription;
+      session.step = 'menu';
+      await saveSession(sender, session);
+      
+    } else if (userResponse.includes('no') || userResponse.includes('try again') || userResponse.includes('🔄') || userResponse.includes('नहीं') || userResponse.includes('இல்லை')) {
+      // User wants to try again
+      await sendMessage(sender, "🔄 No problem! Please send your voice message again.");
+      session.state = 'initial';
+      session.step = 'menu';
+      delete session.rawTranscription;
+      await saveSession(sender, session);
+      
+    } else if (userResponse.includes('type') || userResponse.includes('📝') || userResponse.includes('टाइप') || userResponse.includes('தட்டச்சு')) {
+      // User wants to type
+      await sendMessage(sender, "📝 Please type what you're looking for:");
+      session.state = 'awaiting_text_input';
+      session.step = 'awaiting_text_input';
+      delete session.rawTranscription;
+      await saveSession(sender, session);
+      
+    } else {
+      // Unexpected response
+      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+      
+      let errorMessage = '';
+      if (userLang === 'hi') {
+        errorMessage = "कृपया जवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें";
+      } else if (userLang === 'ta') {
+        errorMessage = "தயவு செய்து பதிலளிக்கவும்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்";
+      } else {
+        errorMessage = "Please reply with:\n✅ *Yes* - if I heard correctly\n🔄 *No* - to try again\n📝 *Type* - to type instead";
+      }
+      
+      await sendMessage(sender, errorMessage);
+    }
+    
+    return session;
+  }
+
+  // ===========================
+  // 3) CHECK FOR URBAN HELP CONFIRMATION RESPONSES
   // ===========================
   if (session.step.startsWith("awaiting_urban_help_") && replyId) {
     console.log("🔧 [URBAN HELP] Processing response:", msg);
@@ -1239,7 +1309,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // 3) CHECK FOR VOICE CONFIRMATION RESPONSES
+  // 4) CHECK FOR VOICE CONFIRMATION RESPONSES (OLD FLOW)
   // ===========================
   if (session.step === "awaiting_voice_confirmation" && replyId) {
     console.log("🎤 [VOICE] Processing confirmation response");
@@ -1247,7 +1317,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // 4) CHECK FOR VOICE SEARCH OPTIONS
+  // 5) CHECK FOR VOICE SEARCH OPTIONS
   // ===========================
   if (msg.startsWith("voice_")) {
     return await handleVoiceSearchOptions(sender, msg, session, effectiveClient);
@@ -1259,7 +1329,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   const isNewUser = !user && !session.isInitialized;
 
   // ===========================
-  // 5) NEW USER INTRO
+  // 6) NEW USER INTRO
   // ===========================
   if (isGreeting && isNewUser) {
     await sendMessage(
@@ -1277,19 +1347,20 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // 6) EXISTING USER GREETING
+  // 7) EXISTING USER GREETING
   // ===========================
   if (isGreeting && !isNewUser) {
     session.housingFlow.listingData = null;
     session.housingFlow.currentIndex = 0;
     session.step = "menu";
+    session.state = 'initial';
     await saveSession(sender, session);
     await sendMainMenuViaService(sender);
     return session;
   }
 
   // ===========================
-  // 7) LANGUAGE SELECTION
+  // 8) LANGUAGE SELECTION
   // ===========================
   if (session.housingFlow?.awaitingLangSelection) {
     const parsed = parseLangFromText(msg);
@@ -1303,6 +1374,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
 
       session.housingFlow.awaitingLangSelection = false;
       session.step = "menu";
+      session.state = 'initial';
       await saveSession(sender, session);
 
       await sendMainMenuViaService(sender);
@@ -1315,7 +1387,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ===========================
-  // 8) URBAN HELP TEXT INPUT
+  // 9) URBAN HELP TEXT INPUT
   // ===========================
   if (session.step === "awaiting_urban_help_text" && text) {
     console.log("🔧 [URBAN HELP] Processing text input:", text);
@@ -1324,7 +1396,55 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ===========================
-  // 9) URBAN HELP CATEGORY SELECTION
+  // 10) TEXT INPUT AFTER VOICE CONFIRMATION
+  // ===========================
+  if (session.state === 'awaiting_text_input' && text) {
+    console.log("📝 [TEXT INPUT] Processing text after voice fallback:", text);
+    
+    // Check if it's an urban help request
+    if (isUrbanHelpRequest(text)) {
+      await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
+    } else {
+      // Process as property-related request
+      await sendMessage(sender, `🔍 Processing your request: *"${text}"*`);
+      
+      // Try to extract intent from text
+      const processingResult = {
+        transcription: text,
+        intent: null,
+        entities: {},
+        confidence: 1.0
+      };
+      
+      // Check for property keywords
+      if (text.toLowerCase().includes('buy') || text.toLowerCase().includes('purchase') || text.toLowerCase().includes('sale')) {
+        processingResult.intent = 'buy_property';
+      } else if (text.toLowerCase().includes('rent') || text.toLowerCase().includes('lease')) {
+        processingResult.intent = 'rent_property';
+      } else if (text.toLowerCase().includes('post') || text.toLowerCase().includes('list') || text.toLowerCase().includes('sell')) {
+        processingResult.intent = 'post_listing';
+      } else if (text.toLowerCase().includes('view') || text.toLowerCase().includes('see') || text.toLowerCase().includes('browse')) {
+        processingResult.intent = 'view_listing';
+      }
+      
+      if (processingResult.intent) {
+        await sendMessage(sender, `✅ I understand you want to ${processingResult.intent.replace('_', ' ')}.`);
+        await executeVoiceIntent(sender, processingResult.intent, processingResult.entities, session, effectiveClient);
+      } else {
+        await sendMessage(sender, "🤔 I'm not sure what you're looking for. Please use the menu options below.");
+        await sendMainMenuViaService(sender);
+      }
+    }
+    
+    // Reset session
+    session.state = 'initial';
+    session.step = 'menu';
+    await saveSession(sender, session);
+    return session;
+  }
+  
+  // ===========================
+  // 11) URBAN HELP CATEGORY SELECTION
   // ===========================
   if (msg.startsWith("text_category_") && session.step === "awaiting_urban_help_category") {
     const category = msg.replace("text_category_", "");
@@ -1345,7 +1465,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ===========================
-  // 10) URBAN HELP LOCATION INPUT
+  // 12) URBAN HELP LOCATION INPUT
   // ===========================
   if (session.step === "awaiting_urban_help_location" && text) {
     const urbanContext = session.urbanHelpContext || {};
@@ -1363,7 +1483,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ==========================================
-  // 11) MANAGE LISTINGS INTERACTIVE HANDLING
+  // 13) MANAGE LISTINGS INTERACTIVE HANDLING
   // ==========================================
   
   // Handle listing selection from manage listings
@@ -1374,7 +1494,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ==========================================
-  // 12) DELETE FLOW HANDLING
+  // 14) DELETE FLOW HANDLING
   // ==========================================
   
   // Handle delete button click (shows confirmation)
@@ -1442,7 +1562,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 13) EDIT FLOW HANDLING
+  // 15) EDIT FLOW HANDLING
   // ==========================================
   
   // Handle edit button click (starts edit flow)
@@ -1489,7 +1609,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 14) EDIT FIELD SELECTION HANDLING
+  // 16) EDIT FIELD SELECTION HANDLING
   // ==========================================
   
   // Handle edit flow field selection
@@ -1599,7 +1719,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 15) EDIT FIELD VALUE INPUT (TEXT-BASED)
+  // 17) EDIT FIELD VALUE INPUT (TEXT-BASED)
   // ==========================================
   if (session.editFlow?.step === "awaiting_field_value" && text) {
     console.log("🔍 [CONTROLLER] Field value received:", text);
@@ -1608,7 +1728,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 16) CANCEL MANAGE (Back button)
+  // 18) CANCEL MANAGE (Back button)
   // ==========================================
   if (msg === "cancel_manage" && session.manageListings?.step === "awaiting_action") {
     console.log("🔍 [CONTROLLER] Back to listing list");
@@ -1617,7 +1737,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 17) SAVED LISTINGS INTERACTIVE HANDLING
+  // 19) SAVED LISTINGS INTERACTIVE HANDLING
   // ==========================================
 
   // Handle saved listing selection
@@ -1739,7 +1859,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 18) TEXT-BASED LISTING INPUT (FALLBACK)
+  // 20) TEXT-BASED LISTING INPUT (FALLBACK)
   // ==========================================
   if (session.step === "awaiting_post_details" && text) {
     console.log("📝 [CONTROLLER] Processing text-based listing input");
@@ -1748,7 +1868,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 19) INTERACTIVE LISTING ACTIONS
+  // 21) INTERACTIVE LISTING ACTIONS
   // ==========================================
   if (session.step === "awaiting_listing_action" && replyId) {
     console.log(`🔄 Handling listing action: ${msg}`);
@@ -1761,6 +1881,7 @@ What would you like to do with this saved listing?`;
       console.log("❌ Lost track of current listing, resetting to menu");
       await sendMessage(sender, "Sorry, I lost track of the current listing. Please try searching again.");
       session.step = "menu";
+      session.state = 'initial';
       await saveSession(sender, session);
       return session;
     }
@@ -1772,6 +1893,7 @@ What would you like to do with this saved listing?`;
       if (!listingData || !listingData.listings) {
         await sendMessage(sender, "No listings data found. Please search again.");
         session.step = "menu";
+        session.state = 'initial';
         await saveSession(sender, session);
         return session;
       }
@@ -1836,12 +1958,13 @@ What would you like to do with this saved listing?`;
   }
 
   // ===========================
-  // 20) MENU COMMAND HANDLING
+  // 22) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
       console.log("🏠 Menu: View Listings selected");
       session.step = "awaiting_listing_action"; 
+      session.state = 'initial';
       await saveSession(sender, session);
       await handleShowListings(sender, session); 
       return session;
@@ -1874,6 +1997,7 @@ What would you like to do with this saved listing?`;
       console.log("🌐 Menu: Change Language selected");
       session.housingFlow.awaitingLangSelection = true;
       session.step = "awaiting_language";
+      session.state = 'initial';
       await saveSession(sender, session);
       await sendLanguageListViaService(sender);
       return session;
@@ -1902,40 +2026,39 @@ What would you like to do with this saved listing?`;
           );
           
           if (processingResult.success) {
-            // Check if it's an urban help request
-            if (processingResult.intent === 'urban_help_request' || 
-                processingResult.entities?.category ||
-                isUrbanHelpRequest(processingResult.transcription)) {
-              
-              await handleUrbanHelpVoiceIntent(sender, session, processingResult, effectiveClient);
-              
+            // Store transcription in session for confirmation
+            session.rawTranscription = processingResult.transcription;
+            session.state = 'awaiting_confirmation';
+            session.step = 'awaiting_confirmation';
+            session.timestamp = Date.now();
+            await saveSession(sender, session);
+            
+            // Send confirmation with EXACT transcription
+            const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+            
+            let confirmationMessage = '';
+            if (userLang === 'hi') {
+              confirmationMessage = `🎤 मैंने सुना: "*${processingResult.transcription}"*\n\nक्या यह सही है?\n\nजवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें`;
+            } else if (userLang === 'ta') {
+              confirmationMessage = `🎤 நான் கேட்டேன்: "*${processingResult.transcription}"*\n\nஇது சரியானதா?\n\nபதில்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்`;
             } else {
-              // Handle property-related intents
-              await voiceService.handleIntentConfirmation(
-                sender, // phoneNumber
-                session, // session
-                processingResult.transcription, // transcription
-                processingResult.intent, // intent
-                processingResult.confidence, // confidence
-                effectiveClient // client
-              );
-              
-              session.voiceContext = {
-                originalTranscription: processingResult.transcription,
-                intent: processingResult.intent,
-                entities: processingResult.entities,
-                confidence: processingResult.confidence
-              };
-              session.step = "awaiting_voice_confirmation";
+              confirmationMessage = `🎤 I heard: "*${processingResult.transcription}"*\n\nIs this correct?\n\nReply with:\n✅ *Yes* - if correct\n🔄 *No* - to try again\n📝 *Type* - to type instead`;
             }
+            
+            await sendMessage(sender, confirmationMessage);
+            
           } else {
             await sendMessage(sender, `❌ ${processingResult.error}`);
             session.step = "menu";
+            session.state = 'initial';
+            await saveSession(sender, session);
           }
         } catch (error) {
           console.error("🎤 Voice processing error:", error);
           await sendMessage(sender, "❌ Couldn't process voice. Please type your request.");
           session.step = "menu";
+          session.state = 'initial';
+          await saveSession(sender, session);
         }
       } else {
         // No audio metadata - user typed "voice" command
@@ -1951,9 +2074,10 @@ What would you like to do with this saved listing?`;
           "Just tap and hold the microphone button and speak your request!"
         );
         session.step = "awaiting_voice";
+        session.state = 'initial';
+        await saveSession(sender, session);
       }
       
-      await saveSession(sender, session);
       return session;
 
     default:
@@ -1969,6 +2093,7 @@ What would you like to do with this saved listing?`;
       await sendMessage(sender, "I didn't understand that. Choose an option or type *hi* to restart.");
       await sendMainMenuViaService(sender);
       session.step = "menu";
+      session.state = 'initial';
       break;
   }
 
@@ -2036,6 +2161,7 @@ async function handleUrbanHelpMenu(sender, session, client) {
   );
   
   session.step = "awaiting_urban_help_choice";
+  session.state = 'initial';
   await saveSession(sender, session);
 }
 
@@ -2097,6 +2223,7 @@ async function handleShowListings(sender, session) {
     if (!effectiveClient) {
       await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
       session.step = "menu";
+      session.state = 'initial';
       await saveSession(sender, session);
       return session;
     }
@@ -2123,6 +2250,7 @@ async function handleShowListings(sender, session) {
         );
         
         session.step = "menu";
+        session.state = 'initial';
         await saveSession(sender, session);
         await sendMainMenuViaService(sender);
         return session;
@@ -2156,6 +2284,7 @@ async function handleShowListings(sender, session) {
     if (!currentListing) {
       await sendMessage(sender, "❌ Could not load listing details. Please try again.");
       session.step = "menu";
+      session.state = 'initial';
       await saveSession(sender, session);
       await sendMainMenuViaService(sender);
       return session;
@@ -2193,6 +2322,7 @@ async function handleShowListings(sender, session) {
     await sendMessage(sender, "❌ Sorry, I couldn't load the listings. Please try again.");
     
     session.step = "menu";
+    session.state = 'initial';
     await saveSession(sender, session);
     await sendMainMenuViaService(sender);
     
@@ -2260,6 +2390,7 @@ async function handleManageListings(sender) {
         listings: userListings
       };
       session.step = "managing_listings";
+      session.state = 'initial';
       await saveSession(sender, session);
     }
     
@@ -2331,6 +2462,7 @@ async function handleSavedListings(sender) {
         listings: savedListings
       };
       session.step = "viewing_saved_listings";
+      session.state = 'initial';
       await saveSession(sender, session);
     }
     
@@ -2427,6 +2559,7 @@ async function handleDeleteListing(sender, session) {
       // Clear session data
       delete session.manageListings;
       session.step = "menu";
+      session.state = 'initial';
       await saveSession(sender, session);
       
       await sendMainMenuViaService(sender);
@@ -2556,6 +2689,7 @@ async function handleRemoveSavedListing(sender, session) {
       // Clear session data
       delete session.savedListingsFlow;
       session.step = "menu";
+      session.state = 'initial';
       await saveSession(sender, session);
       
       await sendMainMenuViaService(sender);
@@ -2615,6 +2749,7 @@ async function handlePostListingFlow(sender) {
   const session = await getSession(sender);
   if (session) {
     session.step = "menu";
+    session.state = 'initial';
     await saveSession(sender, session);
     await sendMainMenuViaService(sender);
   }
@@ -2749,6 +2884,7 @@ async function handleTextListingInput(sender, text, session) {
   await sendMessage(sender, "The text listing input feature is currently unavailable. Please use the menu options.");
   
   session.step = "menu";
+  session.state = 'initial';
   await saveSession(sender, session);
   await sendMainMenuViaService(sender);
 }
