@@ -198,7 +198,7 @@ router.post("/", async (req, res) => {
         });
     } else {
       // Process text/interactive messages normally
-      await handleIncomingMessage(sender, extractedText, messageMetadata, null);
+      await handleIncomingMessage(sender, messageText, metadata, whatsappClient);
     }
 
     // Always respond 200 immediately to WhatsApp

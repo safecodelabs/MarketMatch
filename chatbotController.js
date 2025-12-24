@@ -47,6 +47,40 @@ const WHATSAPP_FLOW_ID = process.env.WHATSAPP_FLOW_ID;
 const FLOW_MODE = process.env.FLOW_MODE || "draft"; // "draft" for testing, "published" for production
 
 // ========================================
+// GLOBAL CLIENT HANDLING (NEW)
+// ========================================
+let globalWhatsAppClient = null;
+
+/**
+ * Set the global WhatsApp client
+ * @param {Object} client - WhatsApp client instance
+ */
+function setWhatsAppClient(client) {
+  globalWhatsAppClient = client;
+  console.log("✅ [CONTROLLER] WhatsApp client set globally");
+}
+
+/**
+ * Get the effective client (use passed client or global)
+ * @param {Object} client - Passed client
+ * @returns {Object} Effective client
+ */
+function getEffectiveClient(client) {
+  const effectiveClient = client || globalWhatsAppClient;
+  
+  if (!effectiveClient) {
+    console.error("❌ [CONTROLLER] No WhatsApp client available!");
+    console.error("❌ [CONTROLLER] Client passed:", !!client);
+    console.error("❌ [CONTROLLER] Global client:", !!globalWhatsAppClient);
+  } else {
+    console.log("✅ [CONTROLLER] Client available, has sendMessage:", 
+                typeof effectiveClient.sendMessage === 'function');
+  }
+  
+  return effectiveClient;
+}
+
+// ========================================
 // VALIDATE FLOW CONFIGURATION
 // ========================================
 function validateFlowConfig() {
@@ -102,6 +136,15 @@ async function handleVoiceMessage(sender, metadata, client) {
     session.step = "processing_voice";
     await saveSession(sender, session);
     
+    // Get effective client
+    const effectiveClient = getEffectiveClient(client);
+    if (!effectiveClient) {
+      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
+    
     // Send processing message
     await sendMessage(sender, "🎤 Processing your voice message... Please wait a moment.");
     
@@ -118,7 +161,7 @@ async function handleVoiceMessage(sender, metadata, client) {
     const processingResult = await voiceService.processVoiceMessage(
       { from: sender, id: metadata.id || Date.now().toString() },
       mediaUrl,
-      client
+      effectiveClient
     );
     
     if (!processingResult.success) {
@@ -129,7 +172,14 @@ async function handleVoiceMessage(sender, metadata, client) {
     }
     
     // Handle the intent with confirmation buttons
-    await voiceService.handleIntentConfirmation(processingResult, client);
+    await voiceService.handleIntentConfirmation(
+      sender, // phoneNumber
+      session, // session
+      processingResult.transcription, // transcription
+      processingResult.intent, // intent
+      processingResult.confidence, // confidence
+      effectiveClient // client
+    );
     
     // Store voice processing context in session
     session.voiceContext = {
@@ -156,9 +206,10 @@ async function handleVoiceMessage(sender, metadata, client) {
  * @param {String} sender - User phone number
  * @param {String} response - User's response (button click)
  * @param {Object} session - Current session
+ * @param {Object} client - WhatsApp client
  * @returns {Promise<Object>} Updated session
  */
-async function handleVoiceConfirmation(sender, response, session) {
+async function handleVoiceConfirmation(sender, response, session, client) {
   try {
     console.log("🎤 [VOICE] Handling confirmation response:", response);
     
@@ -172,13 +223,22 @@ async function handleVoiceConfirmation(sender, response, session) {
     
     const { intent, entities, originalTranscription } = voiceContext;
     
+    // Get effective client
+    const effectiveClient = getEffectiveClient(client);
+    if (!effectiveClient) {
+      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
+    
     if (response.startsWith("confirm_")) {
       // User confirmed - proceed with the intent
       const confirmedIntent = response.replace("confirm_", "");
       
       if (confirmedIntent === intent) {
         await sendMessage(sender, `✅ Got it! Processing: "${originalTranscription}"`);
-        await executeVoiceIntent(sender, intent, entities, session);
+        await executeVoiceIntent(sender, intent, entities, session, effectiveClient);
       } else {
         await sendMessage(sender, "❌ Intent mismatch. Please try again.");
         session.step = "menu";
@@ -202,7 +262,7 @@ async function handleVoiceConfirmation(sender, response, session) {
       // Show confirmation buttons again
       await voiceService.sendConfirmationButtons(
         { from: sender },
-        null, // client not needed for re-sending
+        effectiveClient, // client
         intent,
         entities,
         originalTranscription
@@ -227,15 +287,16 @@ async function handleVoiceConfirmation(sender, response, session) {
  * @param {String} intent - Extracted intent
  * @param {Object} entities - Extracted entities
  * @param {Object} session - Current session
+ * @param {Object} client - WhatsApp client
  */
-async function executeVoiceIntent(sender, intent, entities, session) {
+async function executeVoiceIntent(sender, intent, entities, session, client) {
   console.log("🎤 [VOICE] Executing intent:", intent, "with entities:", entities);
   
   switch (intent) {
     case "buy_property":
     case "rent_property":
     case "search_listing":
-      await handleVoiceSearch(sender, intent, entities, session);
+      await handleVoiceSearch(sender, intent, entities, session, client);
       break;
       
     case "post_listing":
@@ -273,8 +334,9 @@ async function executeVoiceIntent(sender, intent, entities, session) {
  * @param {String} intent - Search intent (buy/rent)
  * @param {Object} entities - Search criteria
  * @param {Object} session - Current session
+ * @param {Object} client - WhatsApp client
  */
-async function handleVoiceSearch(sender, intent, entities, session) {
+async function handleVoiceSearch(sender, intent, entities, session, client) {
   try {
     console.log("🎤 [VOICE SEARCH] Searching with criteria:", entities);
     
@@ -351,6 +413,13 @@ async function handleVoiceSearch(sender, intent, entities, session) {
     
     await saveSession(sender, session);
     
+    // Get effective client
+    const effectiveClient = getEffectiveClient(client);
+    if (!effectiveClient) {
+      await sendMessage(sender, "❌ WhatsApp client not available.");
+      return;
+    }
+    
     // Ask if user wants to see more or search differently
     await sendReplyButtons(
       sender,
@@ -403,7 +472,9 @@ function parseBudgetToNumber(budget) {
 /**
  * Handle voice search option responses
  */
-async function handleVoiceSearchOptions(sender, msg, session) {
+async function handleVoiceSearchOptions(sender, msg, session, client) {
+  const effectiveClient = getEffectiveClient(client);
+  
   switch (msg) {
     case "voice_see_more":
       // Show next set of listings
@@ -1356,11 +1427,17 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Input - text:", text);
   console.log("🔍 [CONTROLLER DEBUG] Input - metadata type:", metadata?.type);
   
+  // Get effective client (use passed client or global)
+  const effectiveClient = getEffectiveClient(client);
+  if (!effectiveClient) {
+    console.error("❌ [CONTROLLER] No WhatsApp client available to process message!");
+    return;
+  }
+  
+  console.log("🔍 [CONTROLLER DEBUG] Effective client available:", !!effectiveClient);
+  
   if (!sender) return;
 
-  // ===========================
-  // 0) PRIORITY: CHECK FOR VOICE MESSAGES
-  // ===========================
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES
   // ===========================
@@ -1399,7 +1476,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           body: audioUrl
         },
         audioUrl,
-        client
+        effectiveClient
       );
       
       if (!processingResult.success) {
@@ -1413,8 +1490,15 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       console.log("🎤 [VOICE] Transcription:", processingResult.transcription);
       console.log("🎤 [VOICE] Intent:", processingResult.intent);
       
-      // Handle intent confirmation
-      await voiceService.handleIntentConfirmation(processingResult, client);
+      // FIXED: Call handleIntentConfirmation with correct parameters
+      await voiceService.handleIntentConfirmation(
+        sender, // phoneNumber
+        session, // session
+        processingResult.transcription, // transcription
+        processingResult.intent, // intent
+        processingResult.confidence, // confidence
+        effectiveClient // client
+      );
       
       // Store voice context
       session.voiceContext = {
@@ -1483,14 +1567,14 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ===========================
   if (session.step === "awaiting_voice_confirmation" && replyId) {
     console.log("🎤 [VOICE] Processing confirmation response");
-    return await handleVoiceConfirmation(sender, msg, session);
+    return await handleVoiceConfirmation(sender, msg, session, effectiveClient);
   }
 
   // ===========================
   // 3) CHECK FOR VOICE SEARCH OPTIONS
   // ===========================
   if (msg.startsWith("voice_")) {
-    return await handleVoiceSearchOptions(sender, msg, session);
+    return await handleVoiceSearchOptions(sender, msg, session, effectiveClient);
   }
 
   const user = await getUserProfile(sender);
@@ -2082,11 +2166,19 @@ What would you like to do with this saved listing?`;
               body: audioUrl
             },
             audioUrl,
-            client
+            effectiveClient
           );
           
           if (processingResult.success) {
-            await voiceService.handleIntentConfirmation(processingResult, client);
+            // FIXED: Call with correct parameters
+            await voiceService.handleIntentConfirmation(
+              sender, // phoneNumber
+              session, // session
+              processingResult.transcription, // transcription
+              processingResult.intent, // intent
+              processingResult.confidence, // confidence
+              effectiveClient // client
+            );
             
             session.voiceContext = {
               originalTranscription: processingResult.transcription,
@@ -2144,5 +2236,7 @@ module.exports = {
   handlePostListingFlow, // Export for testing
   handleFlowSubmission, // Export for testing
   handleVoiceMessage, // NEW: Export for testing
-  handleVoiceConfirmation // NEW: Export for testing
+  handleVoiceConfirmation, // NEW: Export for testing
+  setWhatsAppClient, // NEW: Export global client setter
+  getEffectiveClient // NEW: Export for testing
 };
