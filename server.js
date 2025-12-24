@@ -1,7 +1,18 @@
+// server.js
 require("dotenv").config();
 const express = require("express");
 const app = express();
 const webhookRoute = require("./routes/webhook");
+
+// Import YOUR EXISTING messageService as WhatsApp client
+const messageService = require("./src/services/messageService");
+
+// Import controller to set client globally
+const { setWhatsAppClient } = require("./chatbotController");
+
+// Set the WhatsApp client globally in controller
+setWhatsAppClient(messageService);
+console.log("✅ WhatsApp client (messageService) set globally in controller");
 
 // ---------------------------------------------------------
 // 1) DEFAULT JSON PARSER — used for normal routes
@@ -37,12 +48,38 @@ app.use(
 );
 
 // ---------------------------------------------------------
+// 4) TEST ROUTE TO CHECK CLIENT
+// ---------------------------------------------------------
+app.get("/test-client", (_, res) => {
+  const clientAvailable = !!messageService;
+  const hasSendMessage = clientAvailable && typeof messageService.sendMessage === 'function';
+  
+  res.json({ 
+    status: "ok", 
+    clientAvailable,
+    hasSendMessage,
+    clientType: "messageService",
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_ID,
+    hasAccessToken: !!(process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN)
+  });
+});
+
+// ---------------------------------------------------------
 app.get("/", (_, res) => {
-  res.send("🚀 MarketMatchAI WhatsApp Bot is running…");
+  res.send(`
+    🚀 MarketMatchAI WhatsApp Bot is running…
+    <br>
+    <a href="/test-client">Test Client Status</a>
+  `);
 });
 
 // ---------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`📱 WhatsApp Client: ${messageService ? '✅ messageService loaded' : '❌ Not loaded'}`);
+  console.log(`📱 Has sendMessage: ${typeof messageService.sendMessage === 'function' ? '✅ Yes' : '❌ No'}`);
+  console.log(`📱 Phone Number ID: ${process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_ID || 'Not set'}`);
 });
+
+module.exports = { messageService };

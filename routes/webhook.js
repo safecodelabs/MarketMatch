@@ -1,13 +1,10 @@
-// =======================================================
-// ✅ FULLY PATCHED FILE: routes/webhook.js WITH VOICE SUPPORT
-// =======================================================
+// routes/webhook.js
 const express = require("express");
 const router = express.Router();
 
 // Import bot handler
 const { handleIncomingMessage } = require("../chatbotController");
-// Import services for voice processing
-const voiceService = require("../src/services/voiceService");
+// Import YOUR EXISTING WhatsApp client (messageService.js)
 const messageService = require("../src/services/messageService");
 
 // Log level control
@@ -121,12 +118,12 @@ router.post("/", async (req, res) => {
       // Log URL minimally
       log('DEBUG', `Audio URL: ${audioUrl.split('?')[0]}?mid=...`);
       
-      // Send immediate response WITHOUT waiting
+      // Send immediate response
       messageService.sendMessage(
         sender,
         "🎤 I received your voice message! Processing it now..."
       ).catch(err => {
-        log('WARN', 'Failed to send processing message');
+        log('WARN', 'Failed to send processing message:', err.message);
       });
       
       // Mark as voice message for chatbot
@@ -150,7 +147,7 @@ router.post("/", async (req, res) => {
     else if (message.type === "image" || message.type === "document") {
       log('INFO', `${message.type} from ${sender.substring(0, 10)}...`);
       
-      // Send response without logging errors
+      // Send response
       messageService.sendMessage(
         sender,
         message.type === "image" 
@@ -167,7 +164,7 @@ router.post("/", async (req, res) => {
     else {
       log('WARN', `Unsupported type: ${message.type} from ${sender.substring(0, 10)}...`);
       
-      // Send response without logging errors
+      // Send response
       messageService.sendMessage(
         sender,
         `⚠️ I received a ${message.type} message. Currently, I support text, voice messages, and interactive buttons.`
@@ -187,7 +184,7 @@ router.post("/", async (req, res) => {
     // =======================================================
     if (message.type === "audio" || message.type === "voice") {
       // Process voice asynchronously to avoid webhook timeout
-      handleIncomingMessage(sender, extractedText, messageMetadata, null)
+      handleIncomingMessage(sender, extractedText, messageMetadata, messageService)
         .catch(err => {
           log('ERROR', `Voice processing failed: ${err.message}`);
           // Send error message to user
@@ -198,7 +195,7 @@ router.post("/", async (req, res) => {
         });
     } else {
       // Process text/interactive messages normally
-      await handleIncomingMessage(sender, messageText, metadata, whatsappClient);
+      await handleIncomingMessage(sender, extractedText, messageMetadata, messageService);
     }
 
     // Always respond 200 immediately to WhatsApp
@@ -206,6 +203,7 @@ router.post("/", async (req, res) => {
     
   } catch (err) {
     log('ERROR', `Handler error: ${err.message}`);
+    console.error(err.stack);
     return res.sendStatus(500);
   }
 });
