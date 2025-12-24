@@ -4,15 +4,43 @@ const express = require("express");
 const app = express();
 const webhookRoute = require("./routes/webhook");
 
+// Import voice service - CORRECTED: This is a module, not a function
+const voiceService = require("./src/services/voiceService");
+
 // Import YOUR EXISTING messageService as WhatsApp client
 const messageService = require("./src/services/messageService");
-initializeVoiceService({
+
+// Import controller to set client globally
+const { setWhatsAppClient } = require("./controller"); // Make sure this is correct path
+
+// Initialize voice service with WhatsApp credentials
+function initializeVoiceService(config) {
+  console.log("🎤 [SERVER] Initializing voice service with config:", {
+    hasAccessToken: !!config.accessToken,
+    hasPhoneNumberId: !!config.phoneNumberId,
+    apiVersion: config.apiVersion
+  });
+  
+  // The voiceService module should handle initialization internally
+  // We just pass the config if it has an init method
+  if (voiceService.initializeWithConfig) {
+    voiceService.initializeWithConfig(config);
+  } else if (voiceService.init) {
+    voiceService.init(config);
+  } else {
+    console.log("⚠️ [SERVER] Voice service doesn't have an initialization method");
+    console.log("🎤 [SERVER] Voice service exports:", Object.keys(voiceService));
+  }
+  
+  return voiceService;
+}
+
+// Initialize voice service with WhatsApp config
+const voiceServiceInstance = initializeVoiceService({
   accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
   phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0'
 });
-// Import controller to set client globally
-const { setWhatsAppClient } = require("./chatbotController");
 
 // Set the WhatsApp client globally in controller
 setWhatsAppClient(messageService);
@@ -64,7 +92,29 @@ app.get("/test-client", (_, res) => {
     hasSendMessage,
     clientType: "messageService",
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_ID,
-    hasAccessToken: !!(process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN)
+    hasAccessToken: !!(process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN),
+    voiceServiceInitialized: !!voiceServiceInstance,
+    voiceServiceMethods: voiceServiceInstance ? Object.keys(voiceServiceInstance).filter(key => typeof voiceServiceInstance[key] === 'function') : []
+  });
+});
+
+// ---------------------------------------------------------
+// 5) VOICE SERVICE STATUS ROUTE
+// ---------------------------------------------------------
+app.get("/voice-status", (_, res) => {
+  res.json({
+    voiceService: {
+      initialized: !!voiceServiceInstance,
+      availableMethods: voiceServiceInstance ? Object.keys(voiceServiceInstance) : [],
+      hasProcessVoiceMessage: voiceServiceInstance ? typeof voiceServiceInstance.processVoiceMessage === 'function' : false,
+      hasInitializeWithConfig: voiceServiceInstance ? typeof voiceServiceInstance.initializeWithConfig === 'function' : false,
+      hasInit: voiceServiceInstance ? typeof voiceServiceInstance.init === 'function' : false
+    },
+    config: {
+      hasAccessToken: !!(process.env.WHATSAPP_ACCESS_TOKEN),
+      hasPhoneNumberId: !!(process.env.WHATSAPP_PHONE_NUMBER_ID),
+      apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0'
+    }
   });
 });
 
@@ -74,6 +124,8 @@ app.get("/", (_, res) => {
     🚀 MarketMatchAI WhatsApp Bot is running…
     <br>
     <a href="/test-client">Test Client Status</a>
+    <br>
+    <a href="/voice-status">Voice Service Status</a>
   `);
 });
 
@@ -84,6 +136,16 @@ app.listen(PORT, () => {
   console.log(`📱 WhatsApp Client: ${messageService ? '✅ messageService loaded' : '❌ Not loaded'}`);
   console.log(`📱 Has sendMessage: ${typeof messageService.sendMessage === 'function' ? '✅ Yes' : '❌ No'}`);
   console.log(`📱 Phone Number ID: ${process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_ID || 'Not set'}`);
+  console.log(`🎤 Voice Service: ${voiceServiceInstance ? '✅ Initialized' : '❌ Not initialized'}`);
+  
+  // Log available voice service methods
+  if (voiceServiceInstance) {
+    const methods = Object.keys(voiceServiceInstance).filter(key => typeof voiceServiceInstance[key] === 'function');
+    console.log(`🎤 Voice Service Methods: ${methods.length > 0 ? methods.join(', ') : 'None found'}`);
+  }
 });
 
-module.exports = { messageService };
+module.exports = { 
+  messageService, 
+  voiceService: voiceServiceInstance 
+};
