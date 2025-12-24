@@ -225,7 +225,7 @@ async function handleVoiceMessage(sender, metadata, client) {
     // Check if this is an urban help request
     if (processingResult.intent === 'urban_help_request' || 
         processingResult.entities?.category ||
-        this.isUrbanHelpRequest(processingResult.transcription)) {
+        isUrbanHelpRequest(processingResult.transcription)) {
       
       await handleUrbanHelpVoiceIntent(sender, session, processingResult, effectiveClient);
       
@@ -287,7 +287,7 @@ async function handleUrbanHelpVoiceIntent(sender, session, processingResult, cli
   const userLang = multiLanguage.getUserLanguage(sender) || 'en';
   
   // Check for missing information
-  const missingInfo = this.checkMissingUrbanHelpInfo(entities);
+  const missingInfo = checkMissingUrbanHelpInfo(entities);
   
   if (missingInfo.length > 0) {
     // Ask for missing information
@@ -2201,6 +2201,559 @@ async function handleShowListings(sender, session) {
 }
 
 // ========================================
+// HANDLE MANAGE LISTINGS FUNCTION - ADDED TO FIX ERROR
+// ========================================
+async function handleManageListings(sender) {
+  console.log("⚙️ [MANAGE LISTINGS] Handling manage listings");
+  
+  try {
+    const effectiveClient = getEffectiveClient();
+    
+    if (!effectiveClient) {
+      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      return;
+    }
+    
+    // Fetch user's listings
+    await sendMessage(sender, "📋 Fetching your listings...");
+    
+    const userListings = await getUserListings(sender);
+    
+    if (!userListings || userListings.length === 0) {
+      await sendMessage(
+        sender,
+        "📭 You don't have any active listings.\n\n" +
+        "To post a listing, select '📝 Post Listing' from the main menu."
+      );
+      
+      await sendMainMenuViaService(sender);
+      return;
+    }
+    
+    // Format listings for display
+    const listingRows = userListings.slice(0, 10).map((listing, index) => ({
+      id: `listing_${listing.id}`,
+      title: `📋 ${listing.title || 'Untitled Listing'}`,
+      description: `📍 ${listing.location || 'No location'} | 💰 ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}`
+    }));
+    
+    // Create sections for the list
+    const sections = [{
+      title: `Your Listings (${userListings.length})`,
+      rows: listingRows
+    }];
+    
+    // Send listings as interactive list
+    await sendList(
+      sender,
+      "📋 Your Listings",
+      "Select a listing to manage:",
+      "Manage Listings",
+      sections
+    );
+    
+    // Update session
+    const session = await getSession(sender);
+    if (session) {
+      session.manageListings = {
+        step: "awaiting_selection",
+        listings: userListings
+      };
+      session.step = "managing_listings";
+      await saveSession(sender, session);
+    }
+    
+  } catch (error) {
+    console.error("❌ [MANAGE LISTINGS] Error:", error);
+    await sendMessage(sender, "❌ Sorry, I couldn't load your listings. Please try again.");
+    
+    await sendMainMenuViaService(sender);
+  }
+}
+
+// ========================================
+// HANDLE SAVED LISTINGS FUNCTION - ADDED TO FIX ERROR
+// ========================================
+async function handleSavedListings(sender) {
+  console.log("❤️ [SAVED LISTINGS] Handling saved listings");
+  
+  try {
+    const effectiveClient = getEffectiveClient();
+    
+    if (!effectiveClient) {
+      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      return;
+    }
+    
+    // Fetch user's saved listings
+    await sendMessage(sender, "💾 Loading your saved listings...");
+    
+    const savedListings = await getUserSavedListings(sender);
+    
+    if (!savedListings || savedListings.length === 0) {
+      await sendMessage(
+        sender,
+        "📭 You haven't saved any listings yet.\n\n" +
+        "Browse listings and tap the ❤️ button to save them for later!"
+      );
+      
+      await sendMainMenuViaService(sender);
+      return;
+    }
+    
+    // Format saved listings for display
+    const savedRows = savedListings.slice(0, 10).map((listing, index) => ({
+      id: `saved_${listing.id}`,
+      title: `❤️ ${listing.title || 'Saved Listing'}`,
+      description: `📍 ${listing.location || 'No location'} | 💰 ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}`
+    }));
+    
+    // Create sections for the list
+    const sections = [{
+      title: `Saved Listings (${savedListings.length})`,
+      rows: savedRows
+    }];
+    
+    // Send saved listings as interactive list
+    await sendList(
+      sender,
+      "❤️ Your Saved Listings",
+      "Select a listing to view details:",
+      "Saved Listings",
+      sections
+    );
+    
+    // Update session
+    const session = await getSession(sender);
+    if (session) {
+      session.savedListingsFlow = {
+        step: "awaiting_selection",
+        listings: savedListings
+      };
+      session.step = "viewing_saved_listings";
+      await saveSession(sender, session);
+    }
+    
+  } catch (error) {
+    console.error("❌ [SAVED LISTINGS] Error:", error);
+    await sendMessage(sender, "❌ Sorry, I couldn't load your saved listings. Please try again.");
+    
+    await sendMainMenuViaService(sender);
+  }
+}
+
+// ========================================
+// HANDLE LISTING SELECTION FUNCTION - ADDED TO SUPPORT MANAGE LISTINGS
+// ========================================
+async function handleListingSelection(sender, msg, session) {
+  console.log("🔍 [MANAGE LISTINGS] Handling listing selection");
+  
+  try {
+    const listingId = msg.replace('listing_', '');
+    console.log("🔍 [MANAGE LISTINGS] Selected listing ID:", listingId);
+    
+    // Get the selected listing
+    const userListings = session.manageListings?.listings || [];
+    const selectedListing = userListings.find(listing => listing.id === listingId);
+    
+    if (!selectedListing) {
+      await sendMessage(sender, "❌ Listing not found. Please try again.");
+      await handleManageListings(sender);
+      return;
+    }
+    
+    // Store selected listing in session
+    session.manageListings.selectedId = listingId;
+    session.manageListings.selectedListing = selectedListing;
+    session.manageListings.step = "awaiting_action";
+    await saveSession(sender, session);
+    
+    // Display listing details with action buttons
+    const listingText = 
+`📋 Listing Details:
+*Title:* ${selectedListing.title || 'Untitled'}
+*Location:* ${selectedListing.location || 'Not specified'}
+*Type:* ${selectedListing.type || selectedListing.listingType || 'Property'}
+*BHK:* ${selectedListing.bhk || 'N/A'}
+*Price:* ₹${selectedListing.price ? selectedListing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${selectedListing.contact || 'Not provided'}
+*Description:* ${selectedListing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+    await sendReplyButtons(
+      sender,
+      listingText,
+      [
+        { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+        { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+        { id: "cancel_manage", title: "⬅️ Back to List" }
+      ],
+      "Listing Details"
+    );
+    
+  } catch (error) {
+    console.error("❌ [MANAGE LISTINGS] Error in selection:", error);
+    await sendMessage(sender, "❌ Error loading listing details. Please try again.");
+    await handleManageListings(sender);
+  }
+}
+
+// ========================================
+// HANDLE DELETE LISTING FUNCTION - ADDED TO SUPPORT MANAGE LISTINGS
+// ========================================
+async function handleDeleteListing(sender, session) {
+  console.log("🗑️ [MANAGE LISTINGS] Handling delete listing");
+  
+  try {
+    const listingId = session.manageListings?.selectedId;
+    const listing = session.manageListings?.selectedListing;
+    
+    if (!listingId || !listing) {
+      await sendMessage(sender, "❌ Could not find listing to delete.");
+      await handleManageListings(sender);
+      return;
+    }
+    
+    // Delete the listing
+    const result = await deleteListing(sender, listingId);
+    
+    if (result.success) {
+      await sendMessage(
+        sender,
+        `✅ Listing *${listing.title || 'Untitled'}* has been deleted successfully.`
+      );
+      
+      // Clear session data
+      delete session.manageListings;
+      session.step = "menu";
+      await saveSession(sender, session);
+      
+      await sendMainMenuViaService(sender);
+    } else {
+      await sendMessage(
+        sender,
+        `❌ Failed to delete listing: ${result.error || 'Unknown error'}`
+      );
+      
+      // Show listing details again
+      session.manageListings.step = "awaiting_action";
+      await saveSession(sender, session);
+      
+      const listingText = 
+`📋 Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+      await sendReplyButtons(
+        sender,
+        listingText,
+        [
+          { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+          { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+          { id: "cancel_manage", title: "⬅️ Back to List" }
+        ],
+        "Listing Details"
+      );
+    }
+    
+  } catch (error) {
+    console.error("❌ [MANAGE LISTINGS] Error deleting:", error);
+    await sendMessage(sender, "❌ Error deleting listing. Please try again.");
+    await handleManageListings(sender);
+  }
+}
+
+// ========================================
+// HANDLE SAVED LISTING SELECTION FUNCTION - ADDED TO SUPPORT SAVED LISTINGS
+// ========================================
+async function handleSavedListingSelection(sender, msg, session) {
+  console.log("🔍 [SAVED LISTINGS] Handling saved listing selection");
+  
+  try {
+    const listingId = msg.replace('saved_', '');
+    console.log("🔍 [SAVED LISTINGS] Selected listing ID:", listingId);
+    
+    // Get the selected saved listing
+    const savedListings = session.savedListingsFlow?.listings || [];
+    const selectedListing = savedListings.find(listing => listing.id === listingId);
+    
+    if (!selectedListing) {
+      await sendMessage(sender, "❌ Saved listing not found. Please try again.");
+      await handleSavedListings(sender);
+      return;
+    }
+    
+    // Store selected saved listing in session
+    session.savedListingsFlow.selectedId = listingId;
+    session.savedListingsFlow.selectedListing = selectedListing;
+    session.savedListingsFlow.step = "awaiting_action";
+    await saveSession(sender, session);
+    
+    // Display saved listing details with action buttons
+    const listingText = 
+`📋 Saved Listing Details:
+*Title:* ${selectedListing.title || 'Untitled'}
+*Location:* ${selectedListing.location || 'Not specified'}
+*Type:* ${selectedListing.type || selectedListing.listingType || 'Property'}
+*BHK:* ${selectedListing.bhk || 'N/A'}
+*Price:* ₹${selectedListing.price ? selectedListing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${selectedListing.contact || 'Not provided'}
+*Description:* ${selectedListing.description || 'No description'}
+
+What would you like to do with this saved listing?`;
+
+    await sendReplyButtons(
+      sender,
+      listingText,
+      [
+        { id: `remove_saved_${listingId}`, title: "🗑️ Remove from Saved" },
+        { id: `contact_saved_${listingId}`, title: "📞 Contact Owner" },
+        { id: "back_saved", title: "⬅️ Back to Saved List" }
+      ],
+      "Saved Listing Details"
+    );
+    
+  } catch (error) {
+    console.error("❌ [SAVED LISTINGS] Error in selection:", error);
+    await sendMessage(sender, "❌ Error loading saved listing details. Please try again.");
+    await handleSavedListings(sender);
+  }
+}
+
+// ========================================
+// HANDLE REMOVE SAVED LISTING FUNCTION - ADDED TO SUPPORT SAVED LISTINGS
+// ========================================
+async function handleRemoveSavedListing(sender, session) {
+  console.log("🗑️ [SAVED LISTINGS] Handling remove saved listing");
+  
+  try {
+    const listingId = session.savedListingsFlow?.selectedId;
+    const listing = session.savedListingsFlow?.selectedListing;
+    
+    if (!listingId || !listing) {
+      await sendMessage(sender, "❌ Could not find saved listing to remove.");
+      await handleSavedListings(sender);
+      return;
+    }
+    
+    // Remove the listing from saved
+    const result = await removeSavedListing(sender, listingId);
+    
+    if (result.success) {
+      await sendMessage(
+        sender,
+        `✅ Listing *${listing.title || 'Untitled'}* has been removed from your saved list.`
+      );
+      
+      // Clear session data
+      delete session.savedListingsFlow;
+      session.step = "menu";
+      await saveSession(sender, session);
+      
+      await sendMainMenuViaService(sender);
+    } else {
+      await sendMessage(
+        sender,
+        `❌ Failed to remove listing: ${result.error || 'Unknown error'}`
+      );
+      
+      // Show saved listing details again
+      session.savedListingsFlow.step = "awaiting_action";
+      await saveSession(sender, session);
+      
+      const listingText = 
+`📋 Saved Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this saved listing?`;
+
+      await sendReplyButtons(
+        sender,
+        listingText,
+        [
+          { id: `remove_saved_${listingId}`, title: "🗑️ Remove from Saved" },
+          { id: `contact_saved_${listingId}`, title: "📞 Contact Owner" },
+          { id: "back_saved", title: "⬅️ Back to Saved List" }
+        ],
+        "Saved Listing Details"
+      );
+    }
+    
+  } catch (error) {
+    console.error("❌ [SAVED LISTINGS] Error removing:", error);
+    await sendMessage(sender, "❌ Error removing saved listing. Please try again.");
+    await handleSavedListings(sender);
+  }
+}
+
+// ========================================
+// PLACEHOLDER FUNCTIONS FOR MISSING IMPLEMENTATIONS
+// ========================================
+
+/**
+ * Handle post listing flow - PLACEHOLDER
+ */
+async function handlePostListingFlow(sender) {
+  console.log("📝 [POST LISTING] Placeholder - function not fully implemented");
+  await sendMessage(sender, "The post listing feature is currently unavailable. Please try again later.");
+  
+  // Update session
+  const session = await getSession(sender);
+  if (session) {
+    session.step = "menu";
+    await saveSession(sender, session);
+    await sendMainMenuViaService(sender);
+  }
+}
+
+/**
+ * Handle flow submission - PLACEHOLDER
+ */
+async function handleFlowSubmission(metadata, sender) {
+  console.log("🌊 [FLOW] Placeholder - flow submission not implemented");
+  return false;
+}
+
+/**
+ * Handle field edit - PLACEHOLDER
+ */
+async function handleFieldEdit(sender, msg, session) {
+  console.log("✏️ [EDIT] Placeholder - field edit not implemented");
+  await sendMessage(sender, "The edit feature is currently unavailable. Please try again later.");
+  
+  session.manageListings.step = "awaiting_action";
+  await saveSession(sender, session);
+  
+  const listing = session.manageListings.selectedListing;
+  const listingId = session.manageListings.selectedId;
+  
+  const listingText = 
+`📋 Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+  await sendReplyButtons(
+    sender,
+    listingText,
+    [
+      { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+      { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+      { id: "cancel_manage", title: "⬅️ Back to List" }
+    ],
+    "Listing Details"
+  );
+}
+
+/**
+ * Update field value - PLACEHOLDER
+ */
+async function updateFieldValue(sender, text, session) {
+  console.log("✏️ [UPDATE] Placeholder - update field not implemented");
+  await sendMessage(sender, "The update feature is currently unavailable. Please try again later.");
+  
+  delete session.editFlow;
+  session.manageListings.step = "awaiting_action";
+  await saveSession(sender, session);
+  
+  const listing = session.manageListings.selectedListing;
+  const listingId = session.manageListings.selectedId;
+  
+  const listingText = 
+`📋 Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+  await sendReplyButtons(
+    sender,
+    listingText,
+    [
+      { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+      { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+      { id: "cancel_manage", title: "⬅️ Back to List" }
+    ],
+    "Listing Details"
+  );
+}
+
+/**
+ * Save all edits - PLACEHOLDER
+ */
+async function saveAllEdits(sender, session) {
+  console.log("💾 [SAVE] Placeholder - save edits not implemented");
+  await sendMessage(sender, "The save edits feature is currently unavailable. Please try again later.");
+  
+  delete session.editFlow;
+  session.manageListings.step = "awaiting_action";
+  await saveSession(sender, session);
+  
+  const listing = session.manageListings.selectedListing;
+  const listingId = session.manageListings.selectedId;
+  
+  const listingText = 
+`📋 Listing Details:
+*Title:* ${listing.title || 'Untitled'}
+*Location:* ${listing.location || 'Not specified'}
+*Type:* ${listing.type || listing.listingType || 'Property'}
+*BHK:* ${listing.bhk || 'N/A'}
+*Price:* ₹${listing.price ? listing.price.toLocaleString('en-IN') : 'N/A'}
+*Contact:* ${listing.contact || 'Not provided'}
+*Description:* ${listing.description || 'No description'}
+
+What would you like to do with this listing?`;
+
+  await sendReplyButtons(
+    sender,
+    listingText,
+    [
+      { id: `delete_${listingId}`, title: "🗑️ Delete Listing" },
+      { id: `edit_${listingId}`, title: "✏️ Edit Listing" },
+      { id: "cancel_manage", title: "⬅️ Back to List" }
+    ],
+    "Listing Details"
+  );
+}
+
+/**
+ * Handle text listing input - PLACEHOLDER
+ */
+async function handleTextListingInput(sender, text, session) {
+  console.log("📝 [TEXT LISTING] Placeholder - text listing input not implemented");
+  await sendMessage(sender, "The text listing input feature is currently unavailable. Please use the menu options.");
+  
+  session.step = "menu";
+  await saveSession(sender, session);
+  await sendMainMenuViaService(sender);
+}
+
+// ========================================
 // MODULE EXPORTS
 // ========================================
 module.exports = {
@@ -2216,5 +2769,15 @@ module.exports = {
   getEffectiveClient,
   // ✅ ADDED: Urban Help functions
   handleUrbanHelpConfirmation,
-  executeUrbanHelpSearch
+  executeUrbanHelpSearch,
+  // ✅ ADDED: Helper functions for manage and saved listings
+  handleListingSelection,
+  handleDeleteListing,
+  handleSavedListingSelection,
+  handleRemoveSavedListing,
+  // ✅ ADDED: Placeholder functions for missing implementations
+  handleFieldEdit,
+  updateFieldValue,
+  saveAllEdits,
+  handleTextListingInput
 };
