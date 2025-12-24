@@ -6,7 +6,11 @@ const webhookRoute = require("./routes/webhook");
 
 // Import YOUR EXISTING messageService as WhatsApp client
 const messageService = require("./src/services/messageService");
-
+initializeVoiceService({
+  accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
+  phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+  apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0'
+});
 // Import controller to set client globally
 const { setWhatsAppClient } = require("./chatbotController");
 

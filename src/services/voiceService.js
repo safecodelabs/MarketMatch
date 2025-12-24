@@ -36,9 +36,17 @@ class VoiceService {
             fs.mkdirSync(this.tempDir, { recursive: true });
         }
         
+        // WhatsApp API Configuration
+        this.whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+        this.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+        this.whatsappApiVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
+        
         // Log level control
         this.LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
         this.levels = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
+        
+        // ✅ NEW: Initialize WhatsApp credentials
+        this.initializeWhatsAppCredentials();
         
         // Urban Help Categories
         this.urbanHelpCategories = {
@@ -100,6 +108,41 @@ class VoiceService {
         };
         
         console.log('🎤 [VOICE AI] Voice Service with Urban Help initialized');
+        console.log(`🎤 [VOICE AI] WhatsApp Access Token: ${this.whatsappAccessToken ? '✅ Available' : '❌ Missing'}`);
+    }
+
+    /**
+     * ✅ NEW: Initialize WhatsApp credentials
+     */
+    initializeWhatsAppCredentials() {
+        // Try to get from environment if not set in constructor
+        if (!this.whatsappAccessToken) {
+            this.whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+        }
+        if (!this.whatsappPhoneNumberId) {
+            this.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+        }
+        if (!this.whatsappApiVersion) {
+            this.whatsappApiVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
+        }
+        
+        if (this.whatsappAccessToken) {
+            console.log(`🎤 [VOICE AI] WhatsApp Phone Number ID: ${this.whatsappPhoneNumberId || 'Not configured'}`);
+            console.log(`🎤 [VOICE AI] WhatsApp API Version: ${this.whatsappApiVersion}`);
+        } else {
+            console.warn('🎤 [VOICE AI] WhatsApp access token not configured. Voice message download may fail.');
+        }
+    }
+
+    /**
+     * ✅ NEW: Set WhatsApp credentials programmatically
+     */
+    setWhatsAppCredentials(config) {
+        this.whatsappAccessToken = config.accessToken || this.whatsappAccessToken;
+        this.whatsappPhoneNumberId = config.phoneNumberId || this.whatsappPhoneNumberId;
+        this.whatsappApiVersion = config.apiVersion || this.whatsappApiVersion;
+        
+        console.log(`🎤 [VOICE AI] WhatsApp credentials updated: ${this.whatsappAccessToken ? '✅' : '❌'}`);
     }
 
     /**
@@ -125,11 +168,16 @@ class VoiceService {
             try {
                 audioBuffer = await this.downloadAudioWithAuth(mediaUrl, message.id);
                 if (!audioBuffer) {
-                    return {
-                        success: false,
-                        error: 'Could not download audio. Please send the voice message again.',
-                        userMessage: message
-                    };
+                    // Try alternative download method
+                    audioBuffer = await this.tryAlternativeDownload(mediaUrl, message.id);
+                    
+                    if (!audioBuffer) {
+                        return {
+                            success: false,
+                            error: 'Could not download audio. Please send the voice message again.',
+                            userMessage: message
+                        };
+                    }
                 }
             } catch (downloadError) {
                 this.log('ERROR', `Download failed: ${downloadError.message}`);
@@ -145,6 +193,9 @@ class VoiceService {
                 try {
                     const convertedAudioPath = await this.convertToWav(audioBuffer, message.id);
                     transcription = await voiceProcessor.transcribeAudio(convertedAudioPath);
+                    
+                    // Clean up temp files
+                    this.cleanupTempFiles(message.id);
                     
                     // IMPORTANT: Check if transcription is null or empty
                     if (!transcription || transcription.trim() === '' || transcription === 'null') {
@@ -197,28 +248,29 @@ class VoiceService {
     }
 
     /**
-     * NEW: Download audio with proper authentication
+     * ✅ UPDATED: Download audio with proper authentication - Improved error handling
      */
     async downloadAudioWithAuth(mediaUrl, messageId) {
         try {
             this.log('DEBUG', `Downloading with auth: ${messageId.substring(0, 10)}...`);
             
-            // WhatsApp media requires access token
-            const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-            if (!accessToken) {
+            // Check if access token is available
+            if (!this.whatsappAccessToken) {
                 this.log('ERROR', 'WhatsApp access token not configured');
-                return null;
+                throw new Error('WhatsApp access token not configured');
             }
+            
+            this.log('DEBUG', `Using access token: ${this.whatsappAccessToken.substring(0, 10)}...`);
             
             const response = await axios({
                 method: 'GET',
                 url: mediaUrl,
                 responseType: 'arraybuffer',
-                timeout: 15000,
+                timeout: 30000, // Increased timeout to 30 seconds
                 maxContentLength: 15 * 1024 * 1024,
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'User-Agent': 'GlossDrive-Bot/1.0',
+                    'Authorization': `Bearer ${this.whatsappAccessToken}`,
+                    'User-Agent': 'MarketMatch-AI/1.0',
                     'Accept': 'audio/*'
                 }
             });
@@ -232,43 +284,111 @@ class VoiceService {
             
             return response.data;
         } catch (error) {
-            const errorCode = error.response?.status || error.code || 'Unknown';
-            this.log('ERROR', `Download failed [${errorCode}]: ${error.message}`);
+            this.log('ERROR', `Download failed: ${error.message}`);
             
-            // Try alternative approach without auth (some WhatsApp URLs might work without)
-            return await this.tryDirectDownload(mediaUrl, messageId);
+            // If it's a 401/403 error, the token might be invalid
+            if (error.response?.status === 401 || error.response?.status === 403) {
+                this.log('ERROR', 'Access token invalid or expired');
+            }
+            
+            throw error; // Re-throw to be handled by caller
         }
     }
 
     /**
-     * NEW: Alternative download method (direct)
+     * ✅ NEW: Alternative download methods
      */
-    async tryDirectDownload(mediaUrl, messageId) {
+    async tryAlternativeDownload(mediaUrl, messageId) {
+        this.log('INFO', 'Trying alternative download methods...');
+        
+        // Try 1: Direct download without auth (some URLs might work)
         try {
-            this.log('INFO', 'Trying direct download without auth...');
-            
+            const buffer = await this.downloadAudioDirect(mediaUrl, messageId);
+            if (buffer) {
+                this.log('INFO', '✅ Direct download successful');
+                return buffer;
+            }
+        } catch (error) {
+            this.log('WARN', `Direct download failed: ${error.message}`);
+        }
+        
+        // Try 2: Download with different headers
+        try {
+            const buffer = await this.downloadAudioWithRetry(mediaUrl, messageId);
+            if (buffer) {
+                this.log('INFO', '✅ Retry download successful');
+                return buffer;
+            }
+        } catch (error) {
+            this.log('WARN', `Retry download failed: ${error.message}`);
+        }
+        
+        this.log('ERROR', 'All download methods failed');
+        return null;
+    }
+
+    /**
+     * ✅ NEW: Direct download without authentication
+     */
+    async downloadAudioDirect(mediaUrl, messageId) {
+        try {
             const response = await axios({
                 method: 'GET',
                 url: mediaUrl,
                 responseType: 'arraybuffer',
-                timeout: 10000,
+                timeout: 15000,
+                maxContentLength: 15 * 1024 * 1024,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'audio/*'
+                    'Accept': 'audio/*, */*',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Accept-Language': 'en-US,en;q=0.9'
                 }
             });
             
-            if (response.status !== 200) {
-                throw new Error(`HTTP ${response.status}`);
+            if (response.status === 200) {
+                return response.data;
             }
-            
-            const buffer = await response.data;
-            this.log('INFO', `✅ Direct download successful: ${buffer.length} bytes`);
-            return buffer;
-        } catch (error) {
-            this.log('ERROR', `Direct download also failed: ${error.message}`);
             return null;
+        } catch (error) {
+            throw error;
         }
+    }
+
+    /**
+     * ✅ NEW: Download with retry mechanism
+     */
+    async downloadAudioWithRetry(mediaUrl, messageId) {
+        const maxRetries = 3;
+        let lastError;
+        
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                const response = await axios({
+                    method: 'GET',
+                    url: mediaUrl,
+                    responseType: 'arraybuffer',
+                    timeout: 10000,
+                    maxContentLength: 15 * 1024 * 1024,
+                    headers: {
+                        'User-Agent': i === 0 ? 
+                            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' :
+                            'MarketMatch-AI/1.0',
+                        'Accept': 'audio/*'
+                    }
+                });
+                
+                if (response.status === 200) {
+                    return response.data;
+                }
+            } catch (error) {
+                lastError = error;
+                this.log('DEBUG', `Retry ${i + 1} failed: ${error.message}`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+            }
+        }
+        
+        throw lastError;
     }
 
     /**

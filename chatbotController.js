@@ -1098,91 +1098,108 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   if (!sender) return;
 
   // ===========================
-  // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW
+  // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
   // ===========================
   if (metadata?.type === "audio" || metadata?.type === "voice" || text === 'voice_note') {
-      console.log("🎤 [VOICE] Audio message detected");
-      
-      // Get session
-      let session = (await getSession(sender)) || { 
-        step: "start",
-        isInitialized: false,
-        awaitingLang: false,
-        state: 'initial'
-      };
-      
-      // Check if we have audio URL from metadata
-      const audioUrl = metadata.audio?.url || metadata.url || metadata.audioMetadata?.url || metadata.voice?.url;
-      
-      if (!audioUrl) {
-        console.error("🎤 [VOICE] No audio URL found");
-        await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
-        session.step = "menu";
-        session.state = 'initial';
-        await saveSession(sender, session);
-        return session;
-      }
-      
-      console.log("🎤 [VOICE] Processing audio URL:", audioUrl.substring(0, 100) + "...");
-      
-      // Send processing message
-      await sendMessage(sender, "🎤 Processing your voice message...");
-      
-      try {
-        // 1. Process voice for transcription ONLY
-        const voiceResult = await voiceService.processVoiceMessage(
-          { 
-            from: sender, 
-            id: metadata.id || Date.now().toString(),
-            body: audioUrl
-          },
-          audioUrl,
-          effectiveClient
-        );
-        
-        if (!voiceResult.success) {
-          // Send error message
-          await sendMessage(sender, 
-            voiceResult.error || "Could not process voice message. Please try again or type your request.");
-          session.step = "menu";
-          session.state = 'initial';
-          await saveSession(sender, session);
-          return session;
-        }
-        
-        // 2. Store transcription in session
-        session.rawTranscription = voiceResult.transcription;
-        session.state = 'awaiting_confirmation';
-        session.step = 'awaiting_confirmation';
-        session.timestamp = Date.now();
-        await saveSession(sender, session);
-        
-        // 3. Send confirmation message with EXACT transcription
-        const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-        
-        let confirmationMessage = '';
-        if (userLang === 'hi') {
-          confirmationMessage = `🎤 मैंने सुना: "*${voiceResult.transcription}"*\n\nक्या यह सही है?\n\nजवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें`;
-        } else if (userLang === 'ta') {
-          confirmationMessage = `🎤 நான் கேட்டேன்: "*${voiceResult.transcription}"*\n\nஇது சரியானதா?\n\nபதில்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்`;
-        } else {
-          confirmationMessage = `🎤 I heard: "*${voiceResult.transcription}"*\n\nIs this correct?\n\nReply with:\n✅ *Yes* - if correct\n🔄 *No* - to try again\n📝 *Type* - to type instead`;
-        }
-        
-        await sendMessage(sender, confirmationMessage);
-        
-        await saveSession(sender, session);
-        return session;
-        
-      } catch (error) {
-        console.error("🎤 [VOICE] Error processing voice:", error);
-        await sendMessage(sender, "❌ Sorry, I couldn't process your voice. Please type your request.");
-        session.step = "menu";
-        session.state = 'initial';
-        await saveSession(sender, session);
-        return session;
-      }
+    console.log("🎤 [VOICE] Audio message detected");
+    
+    // Get session
+    let session = (await getSession(sender)) || { 
+      step: "start",
+      isInitialized: false,
+      awaitingLang: false,
+      state: 'initial'
+    };
+    
+    // Check if we have audio URL from metadata
+    const audioUrl = metadata.audio?.url || metadata.url || metadata.audioMetadata?.url || metadata.voice?.url;
+    
+    if (!audioUrl) {
+      console.error("🎤 [VOICE] No audio URL found");
+      await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
+      session.step = "menu";
+      session.state = 'initial';
+      await saveSession(sender, session);
+      return session;
     }
+    
+    console.log("🎤 [VOICE] Processing audio URL:", audioUrl.substring(0, 100) + "...");
+    
+    // Send processing message
+    await sendMessage(sender, "🎤 Processing your voice message...");
+    
+    try {
+      // 1. Process voice for transcription ONLY
+      const voiceResult = await voiceService.processVoiceMessage(
+        { 
+          from: sender, 
+          id: metadata.id || Date.now().toString(),
+          body: audioUrl
+        },
+        audioUrl,
+        effectiveClient
+      );
+      
+      if (!voiceResult.success) {
+        // Check if it's an access token error
+        if (voiceResult.error && voiceResult.error.includes('access token')) {
+          await sendMessage(sender, 
+            "❌ Voice processing is temporarily unavailable. Please type your request instead."
+          );
+        } else {
+          await sendMessage(sender, 
+            voiceResult.error || "Could not process voice message. Please try again or type your request."
+          );
+        }
+        session.step = "menu";
+        session.state = 'initial';
+        await saveSession(sender, session);
+        return session;
+      }
+      
+      // 2. Store transcription in session
+      session.rawTranscription = voiceResult.transcription;
+      session.state = 'awaiting_confirmation';
+      session.step = 'awaiting_confirmation';
+      session.timestamp = Date.now();
+      await saveSession(sender, session);
+      
+      // 3. Send confirmation message with EXACT transcription
+      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+      
+      let confirmationMessage = '';
+      if (userLang === 'hi') {
+        confirmationMessage = `🎤 मैंने सुना: "*${voiceResult.transcription}"*\n\nक्या यह सही है?\n\nजवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें`;
+      } else if (userLang === 'ta') {
+        confirmationMessage = `🎤 நான் கேட்டேன்: "*${voiceResult.transcription}"*\n\nஇது சரியானதா?\n\nபதில்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்`;
+      } else {
+        confirmationMessage = `🎤 I heard: "*${voiceResult.transcription}"*\n\nIs this correct?\n\nReply with:\n✅ *Yes* - if correct\n🔄 *No* - to try again\n📝 *Type* - to type instead`;
+      }
+      
+      await sendMessage(sender, confirmationMessage);
+      
+      await saveSession(sender, session);
+      return session;
+      
+    } catch (error) {
+      console.error("🎤 [VOICE] Error processing voice:", error);
+      
+      // Provide helpful error message
+      let errorMessage = "❌ Sorry, I couldn't process your voice. ";
+      
+      if (error.message.includes('access token') || error.message.includes('WHATSAPP_ACCESS_TOKEN')) {
+        errorMessage += "Voice processing is temporarily unavailable. ";
+      }
+      
+      errorMessage += "Please type your request.";
+      
+      await sendMessage(sender, errorMessage);
+      session.step = "menu";
+      session.state = 'initial';
+      await saveSession(sender, session);
+      return session;
+    }
+  }
 
   // ===========================
   // 1) PRIORITY: CHECK FLOW SUBMISSION
@@ -2048,14 +2065,31 @@ What would you like to do with this saved listing?`;
             await sendMessage(sender, confirmationMessage);
             
           } else {
-            await sendMessage(sender, `❌ ${processingResult.error}`);
+            // Check if it's an access token error
+            if (processingResult.error && processingResult.error.includes('access token')) {
+              await sendMessage(sender, 
+                "❌ Voice processing is temporarily unavailable. Please type your request instead."
+              );
+            } else {
+              await sendMessage(sender, `❌ ${processingResult.error}`);
+            }
             session.step = "menu";
             session.state = 'initial';
             await saveSession(sender, session);
           }
         } catch (error) {
           console.error("🎤 Voice processing error:", error);
-          await sendMessage(sender, "❌ Couldn't process voice. Please type your request.");
+          
+          // Provide helpful error message
+          let errorMessage = "❌ Couldn't process voice. ";
+          
+          if (error.message.includes('access token') || error.message.includes('WHATSAPP_ACCESS_TOKEN')) {
+            errorMessage += "Voice processing is temporarily unavailable. ";
+          }
+          
+          errorMessage += "Please type your request.";
+          
+          await sendMessage(sender, errorMessage);
           session.step = "menu";
           session.state = 'initial';
           await saveSession(sender, session);
