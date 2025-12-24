@@ -198,19 +198,52 @@ class VoiceService {
     }
 
     /**
-     * Handle intent confirmation with buttons
+     * Handle intent confirmation with buttons - FIXED SIGNATURE
+     * Updated to match the call from chatbotController.js
      */
-    async handleIntentConfirmation(processingResult, client) {
-        const { userMessage, intent, entities, confidence, transcription } = processingResult;
+    async handleIntentConfirmation(phoneNumber, session, transcription, intent, confidence, client) {
+        this.log('INFO', `handleIntentConfirmation called for ${phoneNumber}`);
+        this.log('DEBUG', `Params - intent: ${intent}, confidence: ${confidence}, client: ${!!client}`);
         
-        if (confidence < (constants.VOICE_CONFIDENCE_THRESHOLD || 0.7)) {
-            // Low confidence - ask for clarification
-            await this.sendClarificationMessage(userMessage, client, transcription);
-            return;
-        }
+        try {
+            // Create processingResult object from individual parameters
+            const processingResult = {
+                userMessage: { 
+                    from: phoneNumber, 
+                    id: session?.lastMessageId || Date.now().toString() 
+                },
+                intent: intent,
+                entities: session?.entities || {},
+                confidence: confidence,
+                transcription: transcription
+            };
+            
+            // Validate client
+            if (!client) {
+                this.log('ERROR', `WhatsApp client is null for ${phoneNumber}`);
+                throw new Error('WhatsApp client not available');
+            }
+            
+            if (confidence < (constants.VOICE_CONFIDENCE_THRESHOLD || 0.7)) {
+                // Low confidence - ask for clarification
+                this.log('INFO', `Low confidence (${confidence}), asking for clarification`);
+                await this.sendClarificationMessage(processingResult.userMessage, client, transcription);
+                return;
+            }
 
-        // High confidence - show confirmation buttons
-        await this.sendConfirmationButtons(userMessage, client, intent, entities, transcription);
+            // High confidence - show confirmation buttons
+            this.log('INFO', `High confidence (${confidence}), sending confirmation buttons`);
+            await this.sendConfirmationButtons(
+                processingResult.userMessage, 
+                client, 
+                intent, 
+                processingResult.entities, 
+                transcription
+            );
+        } catch (error) {
+            this.log('ERROR', `handleIntentConfirmation failed: ${error.message}`);
+            throw error;
+        }
     }
 
     /**
@@ -225,6 +258,7 @@ class VoiceService {
             
         const clarificationText = `I heard: "*${shortTranscription}*"\n\nI'm not completely sure what you need. Please:\n1. Send the voice message again more clearly\n2. Or use the buttons below to select what you want:`;
         
+        // FIXED: Button format - now includes both id and text properties
         const buttons = [
             { id: 'buy_property', text: '🏠 Buy Property' },
             { id: 'rent_property', text: '🏡 Rent Property' },
@@ -233,6 +267,7 @@ class VoiceService {
             { id: 'search_listing', text: '🔍 Search Listings' }
         ];
 
+        this.log('INFO', `Sending clarification to ${chatId}`);
         await messageUtils.sendInteractiveButtons(client, chatId, clarificationText, buttons);
     }
 
@@ -241,6 +276,8 @@ class VoiceService {
      */
     async sendConfirmationButtons(message, client, intent, entities, transcription) {
         const chatId = message.from;
+        
+        this.log('DEBUG', `sendConfirmationButtons for ${chatId}, intent: ${intent}`);
         
         // Map intent to user-friendly text
         const intentMap = {
@@ -258,25 +295,26 @@ class VoiceService {
         // Build confirmation message
         let confirmationText = `I understood: "*${transcription}*"\n\nYou want to *${intentText}*`;
         
-        if (entities.location) {
+        if (entities && entities.location) {
             confirmationText += ` in *${entities.location}*`;
         }
-        if (entities.bedrooms) {
+        if (entities && entities.bedrooms) {
             confirmationText += ` with *${entities.bedrooms} BHK*`;
         }
-        if (entities.budget) {
+        if (entities && entities.budget) {
             confirmationText += `, budget: *${entities.budget}*`;
         }
 
         confirmationText += `\n\nIs this correct?`;
 
+        // FIXED: Button format - includes both id and text properties
         const buttons = [
             { id: `confirm_${intent}`, text: '✅ Yes, proceed' },
             { id: 'try_again', text: '🔄 Try again' },
             { id: 'use_buttons', text: '📋 Show all options' }
         ];
 
-        // Store context for later use - FIXED SESSIONSTORE ERROR
+        // Store context for later use
         try {
             const sessionStore = require('../../utils/sessionStore');
             
@@ -312,6 +350,7 @@ class VoiceService {
             // Continue anyway - session is optional
         }
 
+        this.log('INFO', `Sending confirmation buttons to ${chatId}`);
         await messageUtils.sendInteractiveButtons(client, chatId, confirmationText, buttons);
     }
 
