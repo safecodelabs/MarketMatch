@@ -475,8 +475,135 @@ function getTimeAgo(date) {
     }
 }
 
+
+// src/services/messageService.js
+// ... (keep all your existing code at the top) ...
+
 // -------------------------------------------------------------
-// 10) EXPORTS
+// 11) SEND INTERACTIVE BUTTONS (for voice service compatibility)
+// -------------------------------------------------------------
+async function sendInteractiveButtons(to, message, buttons) {
+  console.log("🔘 [MESSAGE SERVICE] sendInteractiveButtons called");
+  console.log("🔘 Buttons:", buttons);
+  
+  try {
+    // Format buttons for WhatsApp API
+    const formattedButtons = buttons.map((btn, index) => {
+      const id = String(btn.id || `btn_${index}`).slice(0, 256);
+      const text = String(btn.text || btn.title || `Option ${index + 1}`).slice(0, 20);
+      
+      return {
+        type: "reply",
+        reply: {
+          id: id,
+          title: text
+        }
+      };
+    });
+
+    // Create interactive payload with REQUIRED messaging_product parameter
+    const payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: String(message).slice(0, 1024)
+        },
+        action: {
+          buttons: formattedButtons
+        }
+      }
+    };
+
+    console.log("📦 Sending interactive buttons via sendMessage...");
+    return await sendMessage(to, payload);
+    
+  } catch (error) {
+    console.error("❌ sendInteractiveButtons error:", error.message);
+    
+    // Fallback to simple text
+    const fallbackText = `${message}\n\nPlease reply with:\n${buttons.map((btn, i) => `${i + 1}. ${btn.text || btn.title || btn.id}`).join('\n')}`;
+    
+    return await sendText(to, fallbackText);
+  }
+}
+
+// -------------------------------------------------------------
+// 12) SEND MESSAGE WITH CLIENT PARAMETER (for compatibility)
+// -------------------------------------------------------------
+async function sendMessageWithClient(to, message, client = null) {
+  // Ignore client parameter, use our own sendMessage
+  return await sendMessage(to, message);
+}
+
+// -------------------------------------------------------------
+// 13) SEND INTERACTIVE BUTTONS WITH CLIENT (for compatibility)
+// -------------------------------------------------------------
+async function sendInteractiveButtonsWithClient(client, to, message, buttons) {
+  // Ignore client parameter, use our own function
+  return await sendInteractiveButtons(to, message, buttons);
+}
+
+// -------------------------------------------------------------
+// 14) UPDATE YOUR sendMessage FUNCTION TO INCLUDE messaging_product
+// -------------------------------------------------------------
+// Find your existing sendMessage function and update it:
+async function sendMessage(to, messageOrPayload) {
+  const logType = messageOrPayload.type || 'Text';
+  
+  // Prepare payload - ensure messaging_product is included
+  let payload;
+  if (typeof messageOrPayload === 'string') {
+    payload = { 
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to, 
+      type: "text", 
+      text: { body: messageOrPayload } 
+    };
+  } else {
+    // Ensure the payload has required WhatsApp fields
+    payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      ...messageOrPayload
+    };
+  }
+
+  console.log(`📤 Attempting to send ${logType} message to ${to}`);
+  
+  try {
+    const res = await axios.post(API_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    const messageId = res.data.messages?.[0]?.id || 'N/A';
+    console.log(`✅ ${logType} sent successfully (ID: ${messageId})`);
+    return res.data;
+  } catch (err) {
+    console.error("❌ FINAL SEND MESSAGE ERROR:");
+    console.error("❌ Status:", err.response?.status);
+    console.error("❌ Message:", err.message);
+    
+    // Log the payload that caused the error
+    console.error("❌ Payload sent:", JSON.stringify(payload, null, 2));
+    
+    if (err.response?.data) {
+      console.error("❌ API Error Response:", JSON.stringify(err.response.data));
+    }
+
+    throw new Error(`API Send Failed: ${err.message}`, { cause: err.response?.data });
+  }
+}
+
+// -------------------------------------------------------------
+// 15) UPDATE EXPORTS - Add the new functions
 // -------------------------------------------------------------
 module.exports = {
   sendMessage, 
@@ -486,5 +613,10 @@ module.exports = {
   sendReplyButtons, 
   sendSimpleText,
   sendListingCard,
-  sendSavedListingCard, // NEW: Export the new function
+  sendSavedListingCard,
+  
+  // NEW: Add these for compatibility
+  sendInteractiveButtons,      // For voice service
+  sendMessageWithClient,       // For controller compatibility
+  sendInteractiveButtonsWithClient  // For controller compatibility
 };
