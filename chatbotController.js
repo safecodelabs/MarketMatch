@@ -2083,6 +2083,126 @@ function parseLangFromText(text) {
 }
 
 // ========================================
+// HANDLE SHOW LISTINGS FUNCTION - ADDED TO FIX ERROR
+// ========================================
+/**
+ * Handle showing listings to the user
+ */
+async function handleShowListings(sender, session) {
+  console.log("🏠 [LISTINGS] Handling show listings");
+  
+  try {
+    const effectiveClient = getEffectiveClient();
+    
+    if (!effectiveClient) {
+      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      return session;
+    }
+    
+    // Get user's saved preferences if any
+    const userProfile = await getUserProfile(sender);
+    const userLang = userProfile?.language || 'en';
+    
+    // Check if we have listing data in session
+    const listingData = session.housingFlow?.listingData;
+    let currentIndex = session.housingFlow?.currentIndex || 0;
+    
+    if (!listingData || !listingData.listings || listingData.listings.length === 0) {
+      // No listing data in session, fetch top listings
+      await sendMessage(sender, "🔍 Fetching available listings...");
+      
+      const topListings = await getTopListings(10); // Get top 10 listings
+      
+      if (!topListings || topListings.length === 0) {
+        await sendMessage(
+          sender,
+          "📭 No listings available at the moment.\n\n" +
+          "Try posting a listing or check back later!"
+        );
+        
+        session.step = "menu";
+        await saveSession(sender, session);
+        await sendMainMenuViaService(sender);
+        return session;
+      }
+      
+      // Store in session
+      session.housingFlow = {
+        currentIndex: 0,
+        listingData: {
+          listings: topListings,
+          totalCount: topListings.length
+        }
+      };
+      
+      currentIndex = 0;
+      await saveSession(sender, session);
+    }
+    
+    // Get current listing
+    const listings = session.housingFlow.listingData.listings;
+    const totalListings = session.housingFlow.listingData.totalCount;
+    
+    if (currentIndex >= totalListings) {
+      currentIndex = 0;
+      session.housingFlow.currentIndex = 0;
+      await saveSession(sender, session);
+    }
+    
+    const currentListing = listings[currentIndex];
+    
+    if (!currentListing) {
+      await sendMessage(sender, "❌ Could not load listing details. Please try again.");
+      session.step = "menu";
+      await saveSession(sender, session);
+      await sendMainMenuViaService(sender);
+      return session;
+    }
+    
+    // Check if listing is already saved
+    const isSaved = await isListingSaved(sender, currentListing.id);
+    
+    // Send listing card
+    await sendListingCard(
+      sender,
+      {
+        id: currentListing.id,
+        title: currentListing.title || currentListing.type || "Property",
+        location: currentListing.location || "Location not specified",
+        price: currentListing.price || "Price on request",
+        bedrooms: currentListing.bhk || currentListing.bedrooms || "N/A",
+        property_type: currentListing.type || currentListing.propertyType || "Property",
+        description: currentListing.description || "No description available",
+        contact: currentListing.contact || currentListing.phone || "Contact not provided",
+        isSaved: isSaved
+      },
+      currentIndex,
+      totalListings
+    );
+    
+    // Update session
+    session.step = "awaiting_listing_action";
+    await saveSession(sender, session);
+    
+    return session;
+    
+  } catch (error) {
+    console.error("❌ [LISTINGS] Error in handleShowListings:", error);
+    await sendMessage(sender, "❌ Sorry, I couldn't load the listings. Please try again.");
+    
+    session.step = "menu";
+    await saveSession(sender, session);
+    await sendMainMenuViaService(sender);
+    
+    return session;
+  }
+}
+
+// ========================================
+// MODULE EXPORTS
+// ========================================
 module.exports = {
   handleIncomingMessage,
   handleShowListings,
