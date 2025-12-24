@@ -11,7 +11,7 @@ const voiceService = require("./src/services/voiceService");
 const messageService = require("./src/services/messageService");
 
 // Import controller to set client globally
-const { setWhatsAppClient } = require("./controller"); // Make sure this is correct path
+const { setWhatsAppClient } = require("./chatbotController"); // Make sure this is correct path
 
 // Initialize voice service with WhatsApp credentials
 function initializeVoiceService(config) {
