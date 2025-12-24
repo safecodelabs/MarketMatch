@@ -1,5 +1,5 @@
 // ========================================
-// voiceProcessor.js - FINAL PATCHED VERSION
+// voiceProcessor.js - ENHANCED WITH URBAN HELP SUPPORT
 // ========================================
 const Groq = require('groq-sdk');
 const fs = require('fs');
@@ -22,18 +22,54 @@ try {
             SEARCH_LISTING: 'search_listing',
             VIEW_LISTING: 'view_listing',
             CONTACT_AGENT: 'contact_agent',
+            URBAN_HELP_REQUEST: 'urban_help_request',
+            SERVICE_REQUEST: 'service_request',
             UNKNOWN: 'unknown'
         }
     };
 }
-
-const languageStrings = require('../../../utils/languageStrings');
 
 class VoiceProcessor {
     constructor() {
         this.groq = new Groq({
             apiKey: process.env.GROQ_API_KEY || constants.GROQ_API_KEY
         });
+        
+        // Urban Help Categories
+        this.urbanHelpCategories = {
+            'electrician': { 
+                name: 'Electrician',
+                keywords: ['electrician', 'wiring', 'electrical', 'fuse', 'light', 'switch']
+            },
+            'plumber': { 
+                name: 'Plumber',
+                keywords: ['plumber', 'pipe', 'water', 'leak', 'tap', 'bathroom', 'toilet']
+            },
+            'maid': { 
+                name: 'Maid/Househelp',
+                keywords: ['maid', 'househelp', 'cleaning', 'cook', 'naukrani', 'housekeeping']
+            },
+            'carpenter': { 
+                name: 'Carpenter',
+                keywords: ['carpenter', 'woodwork', 'furniture', 'repair', 'door', 'window']
+            },
+            'cleaner': { 
+                name: 'Cleaner',
+                keywords: ['cleaner', 'cleaning', 'deep clean', 'house cleaning']
+            },
+            'technician': { 
+                name: 'Technician',
+                keywords: ['technician', 'ac repair', 'appliance repair', 'tv repair']
+            },
+            'driver': { 
+                name: 'Driver',
+                keywords: ['driver', 'chauffeur', 'car driver', 'permanent driver']
+            },
+            'painter': { 
+                name: 'Painter',
+                keywords: ['painter', 'painting', 'wall', 'color', 'house painting']
+            }
+        };
         
         this.intentPatterns = {
             'buy_property': [
@@ -78,17 +114,28 @@ class VoiceProcessor {
                 /show me.*available/i,
                 /what.*available/i,
                 /see.*listings/i
+            ],
+            'urban_help_request': [
+                /electrician.*chahiye/i,
+                /plumber.*needed/i,
+                /carpenter.*required/i,
+                /maid.*chahiye/i,
+                /service.*karwana.*hai/i,
+                /technician.*chahiye/i,
+                /repair.*needed/i,
+                /need.*electrician|plumber|carpenter|maid/i,
+                /looking for.*service/i
             ]
         };
 
         this.entityPatterns = {
             'location': {
-                pattern: /(noida|delhi|gurgaon|greater noida|ghaziabad|faridabad|bangalore|mumbai|chennai|hyderabad|pune|kolkata)/i,
-                keywords: ['in', 'at', 'near', 'around', 'location', 'area']
+                pattern: /(noida|delhi|gurgaon|greater noida|ghaziabad|faridabad|bangalore|mumbai|chennai|hyderabad|pune|kolkata|sector \d+|dlf phase|phase \d+)/i,
+                keywords: ['in', 'at', 'near', 'around', 'location', 'area', 'mein', 'me']
             },
             'bedrooms': {
                 pattern: /(\d+)\s*(?:bhk|bedroom|bed|bed rooms|b\.h\.k)/i,
-                keywords: ['bhk', 'bedroom', 'bed']
+                keywords: ['bhk', 'bedroom', 'bed', 'room']
             },
             'budget': {
                 pattern: /(?:budget|price|cost)\s*(?:of|is|around|approximately)?\s*(?:rs\.?|₹)?\s*(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:lakh|lac|crore|cr)?/i,
@@ -97,12 +144,22 @@ class VoiceProcessor {
             'property_type': {
                 pattern: /(apartment|flat|house|villa|penthouse|studio|duplex)/i,
                 keywords: ['apartment', 'flat', 'house']
+            },
+            'service_type': {
+                pattern: /(electrician|plumber|carpenter|maid|cleaner|technician|driver|painter)/i,
+                keywords: ['electrician', 'plumber', 'carpenter', 'maid', 'service']
+            },
+            'timing': {
+                pattern: /(now|immediate|urgent|asap|today|tomorrow|next week)/i,
+                keywords: ['now', 'immediate', 'urgent', 'asap']
             }
         };
         
         // Log level control
         this.LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
         this.levels = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
+        
+        console.log('🤖 [VOICE AI] Voice Processor with Urban Help initialized');
     }
 
     /**
@@ -138,7 +195,8 @@ class VoiceProcessor {
                 file: audioFile,
                 model: "whisper-large-v3",
                 response_format: "json",
-                temperature: 0.0
+                temperature: 0.0,
+                language: 'hi' // Support Hindi
             });
 
             const text = transcription.text.trim();
@@ -159,7 +217,15 @@ class VoiceProcessor {
         try {
             this.log('INFO', `Extracting intent from: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
             
-            // First try rule-based extraction
+            // First check if it's an urban help request
+            if (this.isUrbanHelpRequest(text)) {
+                const urbanHelpResult = await this.extractUrbanHelpIntent(text, userId);
+                if (urbanHelpResult.confidence > 0.6) {
+                    return urbanHelpResult;
+                }
+            }
+            
+            // Try rule-based extraction
             const ruleBasedResult = this.extractIntentRuleBased(text);
             
             // If confidence is high, return rule-based result
@@ -173,8 +239,190 @@ class VoiceProcessor {
 
         } catch (error) {
             this.log('ERROR', `Intent extraction failed: ${error.message}`);
-            return this.getDefaultIntent();
+            return this.getDefaultIntent(text);
         }
+    }
+
+    /**
+     * Extract urban help specific intent
+     */
+    async extractUrbanHelpIntent(text, userId) {
+        try {
+            this.log('INFO', `Extracting urban help intent from: "${text.substring(0, 50)}..."`);
+            
+            // First try rule-based
+            const ruleBasedResult = this.extractUrbanHelpRuleBased(text);
+            
+            if (ruleBasedResult.confidence > 0.7) {
+                return ruleBasedResult;
+            }
+            
+            // Use LLM for better accuracy
+            return await this.extractUrbanHelpLLM(text, userId);
+            
+        } catch (error) {
+            this.log('ERROR', `Urban help intent extraction failed: ${error.message}`);
+            return this.getUrbanHelpDefaultIntent(text);
+        }
+    }
+
+    /**
+     * Rule-based urban help intent extraction
+     */
+    extractUrbanHelpRuleBased(text) {
+        const lowerText = text.toLowerCase();
+        let bestIntent = 'unknown';
+        let bestConfidence = 0;
+        const entities = this.extractEntities(text);
+        
+        // Check for urban help patterns
+        for (const pattern of this.intentPatterns.urban_help_request) {
+            if (pattern.test(lowerText)) {
+                const match = lowerText.match(pattern);
+                const confidence = this.calculateConfidence(lowerText, pattern, match);
+                
+                if (confidence > bestConfidence) {
+                    bestIntent = 'urban_help_request';
+                    bestConfidence = confidence;
+                }
+            }
+        }
+        
+        // Also check for service type in entities
+        if (entities.service_type && !bestIntent === 'urban_help_request') {
+            bestIntent = 'urban_help_request';
+            bestConfidence = 0.7;
+        }
+        
+        // Boost confidence if we found relevant entities
+        if (entities.service_type || entities.location) {
+            bestConfidence = Math.min(1.0, bestConfidence + 0.2);
+        }
+        
+        // Determine missing info
+        const missingInfo = [];
+        if (!entities.service_type && !entities.category) missingInfo.push('category');
+        if (!entities.location) missingInfo.push('location');
+        
+        return {
+            intent: bestIntent,
+            entities: entities,
+            confidence: bestConfidence,
+            missingInfo: missingInfo,
+            method: 'urban_help_rule_based',
+            language: this.detectLanguage(text)
+        };
+    }
+
+    /**
+     * LLM-based urban help intent extraction
+     */
+    async extractUrbanHelpLLM(text, userId) {
+        try {
+            const prompt = `
+            Analyze this message for urban help service requests in Indian context. 
+            Extract service category, location, and other details.
+            
+            User Message: "${text}"
+            
+            Available Service Categories:
+            - electrician: Electrical work, wiring, fuse, switches
+            - plumber: Plumbing, pipes, leaks, water issues, bathroom fittings
+            - maid: Househelp, cleaning, cooking, domestic help, naukrani
+            - carpenter: Woodwork, furniture, doors, windows repair
+            - cleaner: Deep cleaning, house cleaning
+            - technician: Appliance repair, AC repair, TV repair
+            - driver: Car driver, chauffeur
+            - painter: House painting, wall painting
+            
+            Common Locations: Noida, Delhi, Gurgaon, Gurugram, Greater Noida, Ghaziabad, Faridabad
+            
+            Return JSON format:
+            {
+                "intent": "urban_help_request",
+                "confidence": 0.0 to 1.0,
+                "entities": {
+                    "category": "category_name or null",
+                    "location": "location or null",
+                    "service_type": "service_type or null",
+                    "timing": "immediate/normal or null",
+                    "emergency": "true/false or null"
+                },
+                "missingInfo": ["field1", "field2"],
+                "language": "en/hi/mixed"
+            }`;
+
+            const response = await this.groq.chat.completions.create({
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are an urban help service intent extractor for Indian users. Understand Hindi-English mix. Return valid JSON."
+                    },
+                    {
+                        role: "user",
+                        content: prompt
+                    }
+                ],
+                model: "llama-3.3-70b-versatile",
+                temperature: 0.1,
+                max_tokens: 400,
+                response_format: { type: "json_object" }
+            });
+
+            const result = JSON.parse(response.choices[0].message.content);
+            
+            // Validate result
+            if (!result.intent || !result.confidence) {
+                throw new Error('Invalid response from LLM');
+            }
+            
+            this.log('INFO', `Urban Help LLM intent: ${result.intent} (${result.confidence})`);
+            
+            // Enhance with rule-based entities
+            const ruleBasedEntities = this.extractEntities(text);
+            result.entities = { ...ruleBasedEntities, ...result.entities };
+            
+            // Ensure category is set from service_type if needed
+            if (!result.entities.category && result.entities.service_type) {
+                result.entities.category = result.entities.service_type;
+            }
+            
+            // Update missing info based on actual data
+            const missing = [];
+            if (!result.entities.category && !result.entities.service_type) missing.push('category');
+            if (!result.entities.location) missing.push('location');
+            result.missingInfo = missing;
+            
+            return {
+                intent: result.intent,
+                entities: result.entities,
+                confidence: result.confidence,
+                missingInfo: result.missingInfo,
+                method: 'urban_help_llm',
+                language: result.language || this.detectLanguage(text)
+            };
+
+        } catch (error) {
+            this.log('WARN', `Urban Help LLM extraction failed: ${error.message}`);
+            return this.extractUrbanHelpRuleBased(text);
+        }
+    }
+
+    /**
+     * Check if text is an urban help request
+     */
+    isUrbanHelpRequest(text) {
+        const lowerText = text.toLowerCase();
+        
+        // Check for urban help keywords
+        const urbanHelpKeywords = [
+            'electrician', 'plumber', 'maid', 'carpenter', 'cleaner', 
+            'technician', 'driver', 'painter', 'naukrani', 'househelp',
+            'service', 'repair', 'chahiye', 'required', 'needed', 'karwana',
+            'बिजली', 'नल', 'मेड', 'बढ़ई', 'सफाई', 'ड्राइवर', 'पेंटर'
+        ];
+        
+        return urbanHelpKeywords.some(keyword => lowerText.includes(keyword));
     }
 
     /**
@@ -187,6 +435,8 @@ class VoiceProcessor {
 
         // Check each intent pattern
         for (const [intent, patterns] of Object.entries(this.intentPatterns)) {
+            if (intent === 'urban_help_request') continue; // Skip urban help for now
+            
             for (const pattern of patterns) {
                 if (pattern.test(text)) {
                     const match = text.match(pattern);
@@ -209,7 +459,8 @@ class VoiceProcessor {
             intent: bestIntent,
             entities: entities,
             confidence: bestConfidence,
-            method: 'rule_based'
+            method: 'rule_based',
+            language: this.detectLanguage(text)
         };
     }
 
@@ -225,10 +476,11 @@ class VoiceProcessor {
             }
 
             const prompt = `
-            Analyze this real estate message and extract intent and entities.
+            Analyze this message and extract intent and entities. Could be about real estate or urban help services.
             User Message: "${text}"
             
             Available Intents:
+            Real Estate:
             - buy_property: User wants to purchase a property
             - rent_property: User wants to rent a property
             - sell_property: User wants to sell a property
@@ -236,6 +488,11 @@ class VoiceProcessor {
             - search_listing: User wants to search/filter listings
             - view_listing: User wants to view specific listing details
             - contact_agent: User wants to contact an agent
+            
+            Urban Help Services:
+            - urban_help_request: User needs a service provider (electrician, plumber, maid, carpenter, etc.)
+            - service_request: General service request
+            
             - unknown: Cannot determine intent
             
             Respond in JSON format:
@@ -246,24 +503,28 @@ class VoiceProcessor {
                     "location": "string or null",
                     "bedrooms": "number or null",
                     "budget": "string or null",
-                    "property_type": "string or null"
-                }
+                    "property_type": "string or null",
+                    "service_type": "string or null",
+                    "category": "string or null",
+                    "timing": "string or null"
+                },
+                "language": "en/hi/mixed"
             }`;
 
             const response = await this.groq.chat.completions.create({
                 messages: [
                     {
                         role: "system",
-                        content: "You are a real estate intent extraction assistant. Return valid JSON only."
+                        content: "You are a multilingual intent extraction assistant for Indian users. Understand Hindi-English mix. Return valid JSON."
                     },
                     {
                         role: "user",
                         content: prompt
                     }
                 ],
-                model: "llama-3.3-70b-versatile", // Updated model
+                model: "llama-3.3-70b-versatile",
                 temperature: 0.1,
-                max_tokens: 300,
+                max_tokens: 400,
                 response_format: { type: "json_object" }
             });
 
@@ -286,7 +547,8 @@ class VoiceProcessor {
                 intent: result.intent,
                 entities: result.entities,
                 confidence: result.confidence,
-                method: 'llm'
+                method: 'llm',
+                language: result.language || this.detectLanguage(text)
             };
 
         } catch (error) {
@@ -303,10 +565,13 @@ class VoiceProcessor {
             location: null,
             bedrooms: null,
             budget: null,
-            property_type: null
+            property_type: null,
+            service_type: null,
+            category: null,
+            timing: null
         };
 
-        // Extract location
+        // Extract all entity types
         for (const [entityName, config] of Object.entries(this.entityPatterns)) {
             const match = text.match(config.pattern);
             if (match) {
@@ -315,7 +580,24 @@ class VoiceProcessor {
                 } else if (entityName === 'budget') {
                     entities[entityName] = this.parseBudget(match[1], text);
                 } else {
-                    entities[entityName] = match[1].toLowerCase();
+                    entities[entityName] = match[1] ? match[1].toLowerCase() : match[0].toLowerCase();
+                }
+            }
+        }
+
+        // Map service_type to category for urban help
+        if (entities.service_type && !entities.category) {
+            entities.category = entities.service_type;
+        }
+        
+        // Check for category from urban help categories
+        if (!entities.category) {
+            const lowerText = text.toLowerCase();
+            for (const [category, data] of Object.entries(this.urbanHelpCategories)) {
+                if (data.keywords.some(keyword => lowerText.includes(keyword))) {
+                    entities.category = category;
+                    entities.service_type = category;
+                    break;
                 }
             }
         }
@@ -327,12 +609,15 @@ class VoiceProcessor {
      * Parse budget string to consistent format
      */
     parseBudget(amount, fullText) {
+        if (!amount) return null;
+        
         amount = amount.replace(/,/g, '');
         
         // Check for lakh/crore indicators
-        if (fullText.toLowerCase().includes('lakh') || fullText.toLowerCase().includes('lac')) {
+        const lowerText = fullText.toLowerCase();
+        if (lowerText.includes('lakh') || lowerText.includes('lac')) {
             return `₹${amount} Lakh`;
-        } else if (fullText.toLowerCase().includes('crore') || fullText.toLowerCase().includes('cr')) {
+        } else if (lowerText.includes('crore') || lowerText.includes('cr')) {
             return `₹${amount} Crore`;
         }
         
@@ -366,7 +651,34 @@ class VoiceProcessor {
             confidence += 0.1;
         }
         
+        // Contains Hindi words for urban help
+        if (this.isUrbanHelpRequest(text)) {
+            confidence += 0.1;
+        }
+        
         return Math.min(1.0, confidence);
+    }
+
+    /**
+     * Detect language of text
+     */
+    detectLanguage(text) {
+        const hindiWords = ['hai', 'he', 'mein', 'chahiye', 'chaahiye', 'ka', 'ki', 'ke', 'ko', 'karna', 'kar'];
+        const englishWords = ['looking', 'for', 'need', 'want', 'property', 'house', 'flat', 'service', 'electrician'];
+        
+        const words = text.toLowerCase().split(/\s+/);
+        
+        let hindiCount = 0;
+        let englishCount = 0;
+        
+        words.forEach(word => {
+            if (hindiWords.includes(word)) hindiCount++;
+            if (englishWords.includes(word)) englishCount++;
+        });
+        
+        if (hindiCount > englishCount && hindiCount > 1) return 'hi';
+        if (englishCount > hindiCount && englishCount > 1) return 'en';
+        return 'mixed';
     }
 
     /**
@@ -376,11 +688,15 @@ class VoiceProcessor {
         const fallbacks = [
             "I'm looking for a property",
             "I want to rent an apartment",
+            "Need electrician in Greater Noida",
+            "Looking for 2 ton steel",
             "Show me available listings",
             "I need to buy a house",
             "Looking for property in Noida",
-            "Show me properties for sale",
-            "I'm searching for a flat"
+            "मुझे इलेक्ट्रीशियन चाहिए",
+            "प्लंबर की जरूरत है",
+            "नौकरानी चाहिए दिल्ली में",
+            "Carpenter required in Gurgaon"
         ];
         return fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
@@ -388,12 +704,38 @@ class VoiceProcessor {
     /**
      * Default intent when extraction fails
      */
-    getDefaultIntent() {
+    getDefaultIntent(text) {
+        // Check if it might be an urban help request
+        if (this.isUrbanHelpRequest(text)) {
+            return this.getUrbanHelpDefaultIntent(text);
+        }
+        
         return {
             intent: 'search_listing',
             entities: {},
             confidence: 0.5,
-            method: 'fallback'
+            method: 'fallback',
+            language: this.detectLanguage(text)
+        };
+    }
+
+    /**
+     * Default urban help intent
+     */
+    getUrbanHelpDefaultIntent(text) {
+        const entities = this.extractEntities(text);
+        const missingInfo = [];
+        
+        if (!entities.category && !entities.service_type) missingInfo.push('category');
+        if (!entities.location) missingInfo.push('location');
+        
+        return {
+            intent: 'urban_help_request',
+            entities: entities,
+            confidence: 0.6,
+            missingInfo: missingInfo,
+            method: 'urban_help_fallback',
+            language: this.detectLanguage(text)
         };
     }
 
@@ -411,6 +753,32 @@ class VoiceProcessor {
         return keywords.some(keyword => 
             text.toLowerCase().includes(keyword.toLowerCase())
         );
+    }
+
+    /**
+     * Get user-friendly intent description
+     */
+    getIntentDescription(intentResult, userId) {
+        const lang = intentResult.language || 'en';
+        
+        const descriptions = {
+            en: {
+                'buy_property': 'looking to buy a property',
+                'rent_property': 'looking to rent a property',
+                'sell_property': 'want to sell a property',
+                'urban_help_request': `need ${intentResult.entities.category || 'a service'}`,
+                'search_listing': 'searching for properties'
+            },
+            hi: {
+                'buy_property': 'प्रॉपर्टी खरीदना चाहते हैं',
+                'rent_property': 'प्रॉपर्टी किराए पर चाहिए',
+                'urban_help_request': `${intentResult.entities.category || 'सर्विस'} चाहिए`,
+                'search_listing': 'प्रॉपर्टी ढूंढ रहे हैं'
+            }
+        };
+        
+        const langDescriptions = descriptions[lang] || descriptions.en;
+        return langDescriptions[intentResult.intent] || 'looking for something';
     }
 }
 

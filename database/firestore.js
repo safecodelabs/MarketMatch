@@ -1,4 +1,4 @@
-// database/firestore.js
+// database/firestore.js - ENHANCED WITH URBAN HELP SUPPORT
 const admin = require("firebase-admin");
 const path = require("path");
 
@@ -22,7 +22,258 @@ const db = admin.firestore();
 
 const listingsRef = db.collection("listings");
 const usersRef = db.collection("users");
-const savedRef = db.collection("saved"); // Dedicated collection for saved items
+const savedRef = db.collection("saved");
+const urbanHelpProvidersRef = db.collection("urban_help_providers");
+const userRequestsRef = db.collection("user_requests");
+
+// -----------------------------------------------
+// URBAN HELP FUNCTIONS
+// -----------------------------------------------
+
+/**
+ * Search urban help service providers
+ */
+async function searchUrbanHelp(category, location, filters = {}) {
+  try {
+    console.log(`🔍 [URBAN HELP] Searching for ${category} in ${location}`);
+    
+    let query = urbanHelpProvidersRef
+      .where("category", "==", category)
+      .where("isActive", "==", true);
+    
+    // Filter by location
+    if (location) {
+      query = query.where("locations", "array-contains", location.toLowerCase());
+    }
+    
+    // Filter by availability
+    if (filters.immediate) {
+      query = query.where("availableNow", "==", true);
+    }
+    
+    // Filter by rating
+    if (filters.minRating) {
+      query = query.where("rating", ">=", filters.minRating);
+    }
+    
+    const snapshot = await query.limit(10).get();
+    
+    if (snapshot.empty) {
+      console.log(`📭 [URBAN HELP] No providers found for ${category} in ${location}`);
+      return [];
+    }
+    
+    const results = [];
+    snapshot.forEach(doc => {
+      results.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    // Sort by rating (highest first)
+    results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    
+    console.log(`✅ [URBAN HELP] Found ${results.length} providers for ${category} in ${location}`);
+    return results;
+    
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error searching urban help:', error);
+    return [];
+  }
+}
+
+/**
+ * Add new urban help provider
+ */
+async function addUrbanHelpProvider(providerData) {
+  try {
+    const docRef = await urbanHelpProvidersRef.add({
+      ...providerData,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      isActive: true,
+      rating: providerData.rating || 4.0,
+      totalJobs: 0
+    });
+    
+    return {
+      success: true,
+      id: docRef.id
+    };
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error adding provider:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Get urban help provider by ID
+ */
+async function getProviderById(providerId) {
+  try {
+    const doc = await urbanHelpProvidersRef.doc(providerId).get();
+    
+    if (!doc.exists) {
+      return null;
+    }
+    
+    return {
+      id: doc.id,
+      ...doc.data()
+    };
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error getting provider:', error);
+    return null;
+  }
+}
+
+/**
+ * Update provider availability
+ */
+async function updateProviderAvailability(providerId, available) {
+  try {
+    await urbanHelpProvidersRef.doc(providerId).update({
+      availableNow: available,
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    return { success: true };
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error updating availability:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Add user request to queue
+ */
+async function addUserRequest(userId, requestData) {
+  try {
+    const requestRef = await userRequestsRef.add({
+      userId,
+      ...requestData,
+      status: 'pending',
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    console.log(`✅ [URBAN HELP] User request added: ${requestRef.id}`);
+    
+    return {
+      success: true,
+      requestId: requestRef.id
+    };
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error adding user request:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Get user's pending requests
+ */
+async function getUserPendingRequests(userId) {
+  try {
+    const snapshot = await userRequestsRef
+      .where("userId", "==", userId)
+      .where("status", "==", "pending")
+      .orderBy("createdAt", "desc")
+      .get();
+    
+    if (snapshot.empty) {
+      return [];
+    }
+    
+    const requests = [];
+    snapshot.forEach(doc => {
+      requests.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return requests;
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error getting user requests:', error);
+    return [];
+  }
+}
+
+/**
+ * Update request status
+ */
+async function updateRequestStatus(requestId, status, matchedProviders = []) {
+  try {
+    const updateData = {
+      status: status,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    if (matchedProviders.length > 0) {
+      updateData.matchedProviders = matchedProviders;
+      updateData.matchedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    
+    await userRequestsRef.doc(requestId).update(updateData);
+    
+    return { success: true };
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error updating request status:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// -----------------------------------------------
+// SEARCH LISTINGS BY CRITERIA
+// -----------------------------------------------
+async function searchListingsByCriteria(criteria) {
+  try {
+    console.log("🔍 [DB] Searching listings with criteria:", criteria);
+    
+    let query = listingsRef;
+    
+    // Apply filters
+    if (criteria.type) {
+      query = query.where("type", "==", criteria.type);
+    }
+    
+    if (criteria.location) {
+      query = query.where("location", "==", criteria.location);
+    }
+    
+    if (criteria.bedrooms) {
+      query = query.where("bhk", "==", criteria.bedrooms);
+    }
+    
+    if (criteria.maxPrice) {
+      query = query.where("price", "<=", criteria.maxPrice);
+    }
+    
+    const snapshot = await query
+      .orderBy(criteria.maxPrice ? "price" : "timestamp", criteria.maxPrice ? "asc" : "desc")
+      .limit(20)
+      .get();
+    
+    if (snapshot.empty) {
+      console.log("📭 [DB] No listings found with given criteria");
+      return [];
+    }
+    
+    const listings = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    console.log(`✅ [DB] Found ${listings.length} listings matching criteria`);
+    return listings;
+    
+  } catch (error) {
+    console.error("❌ [DB] Error searching listings:", error);
+    return [];
+  }
+}
 
 // -----------------------------------------------
 // GET TOP LISTINGS (for chatbotController.js)
@@ -127,8 +378,6 @@ async function getListingById(listingId) {
 // -----------------------------------------------------
 async function deleteListing(listingId) {
   console.log(`🔍 [FIRESTORE] deleteListing called for ID: ${listingId}`);
-  console.log(`🔍 [FIRESTORE] listingId type: ${typeof listingId}`);
-  console.log(`🔍 [FIRESTORE] listingId value: "${listingId}"`);
   
   try {
     // Validate and clean listingId
@@ -143,12 +392,8 @@ async function deleteListing(listingId) {
     
     const cleanListingId = String(listingId).trim();
     
-    console.log(`🔍 [FIRESTORE] Clean listing ID: "${cleanListingId}"`);
-    
     // Get document reference
     const docRef = listingsRef.doc(cleanListingId);
-    
-    console.log(`🔍 [FIRESTORE] Checking if document exists...`);
     
     // Check if document exists
     const doc = await docRef.get();
@@ -163,10 +408,7 @@ async function deleteListing(listingId) {
       };
     }
     
-    console.log(`🔍 [FIRESTORE] Document found, data:`, doc.data());
-    
     // Delete the document
-    console.log(`🔍 [FIRESTORE] Attempting to delete document...`);
     await docRef.delete();
     
     console.log(`✅ [FIRESTORE] Document ${cleanListingId} deleted successfully`);
@@ -181,10 +423,6 @@ async function deleteListing(listingId) {
     
   } catch (err) {
     console.error("🔥 [FIRESTORE] Error in deleteListing:", err);
-    console.error("🔥 [FIRESTORE] Error name:", err.name);
-    console.error("🔥 [FIRESTORE] Error message:", err.message);
-    console.error("🔥 [FIRESTORE] Error code:", err.code);
-    console.error("🔥 [FIRESTORE] Error stack:", err.stack);
     
     return { 
       success: false, 
@@ -427,7 +665,7 @@ async function getSavedCount(listingId) {
 }
 
 // -----------------------------------------------------
-// USER PROFILE & LANGUAGE (Kept as provided)
+// USER PROFILE & LANGUAGE
 // -----------------------------------------------------
 async function getUserProfile(userId) {
   try {
@@ -465,9 +703,60 @@ async function saveListingToUser(userId, listingId) {
   }
 }
 
-// Export the necessary functions
+// -----------------------------------------------------
+// SEARCH SERVICE PROVIDERS (LEGACY COMPATIBILITY)
+// -----------------------------------------------------
+async function searchServiceProviders(serviceType, location) {
+  try {
+    console.log(`🔍 [LEGACY] Searching for ${serviceType} in ${location}`);
+    
+    // Use the new urban help search function
+    return await searchUrbanHelp(serviceType, location);
+    
+  } catch (error) {
+    console.error('❌ [LEGACY] Error searching service providers:', error);
+    return [];
+  }
+}
+
+// -----------------------------------------------------
+// SEARCH COMMODITIES (LEGACY COMPATIBILITY)
+// -----------------------------------------------------
+async function searchCommodities(item, quantity) {
+  try {
+    console.log(`🔍 [LEGACY] Searching for ${quantity} of ${item}`);
+    
+    // Return mock data for backward compatibility
+    return [
+      {
+        item: item || 'Steel',
+        quantity: quantity || '10 tons available',
+        price: 65000,
+        seller: 'Reliable Suppliers',
+        location: 'Delhi',
+        contact: '+91 98765 43213',
+        quality: 'A-Grade'
+      }
+    ];
+    
+  } catch (error) {
+    console.error('❌ [LEGACY] Error searching commodities:', error);
+    return [];
+  }
+}
+
+// Export all functions
 module.exports = {
   db,
+  // Urban Help Functions
+  searchUrbanHelp,
+  addUrbanHelpProvider,
+  getProviderById,
+  updateProviderAvailability,
+  addUserRequest,
+  getUserPendingRequests,
+  updateRequestStatus,
+  // Property Listing Functions
   addListing,
   getAllListings,
   getTopListings,
@@ -481,6 +770,11 @@ module.exports = {
   getSavedCount,
   deleteListing,
   updateListing,
+  searchListingsByCriteria,
+  // User Functions
   getUserProfile,
   saveUserLanguage,
+  // Legacy Functions for Backward Compatibility
+  searchServiceProviders,
+  searchCommodities
 };
