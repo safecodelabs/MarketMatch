@@ -41,116 +41,71 @@ const urbanServicesRef = db.collection("urban_services");
  */
 async function searchUrbanServices(category, location) {
   try {
-    console.log(`🔍 [URBAN SERVICES] Searching urban_services for "${category}" in "${location}"`);
+    console.log(`🔍 [URBAN SERVICES] Searching for "${category}" in "${location}"`);
     
-    // Normalize inputs
-    const normalizedCategory = category ? category.toLowerCase().trim() : '';
-    const normalizedLocation = location ? location.toLowerCase().trim() : '';
-    
-    // Query urban_services collection
     let query = urbanServicesRef;
     
-    // Filter by category if category is provided
-    if (normalizedCategory) {
+    // Apply category filter if provided
+    if (category && category.trim()) {
+      const normalizedCategory = category.toLowerCase().trim();
       query = query.where('category', '==', normalizedCategory);
     }
     
-    // Filter by location if location is provided
-    if (normalizedLocation) {
-      // Try exact match first
+    // Apply location filter if provided
+    if (location && location.trim()) {
+      const normalizedLocation = location.toLowerCase().trim();
       query = query.where('location', '==', normalizedLocation);
     }
     
-    // Add status filter if you have active/inactive status
-    // Check if status field exists in your schema
-    try {
-      // Try to filter by status if the field exists
-      query = query.where('status', '==', 'active');
-    } catch (error) {
-      // If status field doesn't exist, continue without it
-      console.log('ℹ️ Status field not found in urban_services schema, skipping status filter');
-    }
-    
-    // Get results with limit
-    const snapshot = await query.limit(20).get();
+    // Get results with a limit
+    const snapshot = await query.limit(10).get();
     
     if (snapshot.empty) {
-      console.log(`📭 [URBAN SERVICES] No urban services found for ${category} in ${location}`);
+      console.log(`📭 [URBAN SERVICES] No services found for ${category} in ${location}`);
       
-      // Try broader search if no exact matches
-      if (normalizedCategory || normalizedLocation) {
-        console.log(`🔍 [URBAN SERVICES] Trying broader search...`);
-        
-        // Create a new query for broader search
-        let broadQuery = urbanServicesRef;
-        
-        if (normalizedCategory) {
-          // Try searching in name or description fields
-          const broadSnapshot = await urbanServicesRef
-            .where('name', '>=', normalizedCategory)
-            .where('name', '<=', normalizedCategory + '\uf8ff')
-            .limit(10)
-            .get();
-          
-          if (!broadSnapshot.empty) {
-            const results = [];
-            broadSnapshot.forEach(doc => {
-              results.push({
-                id: doc.id,
-                ...doc.data()
-              });
-            });
-            console.log(`✅ [URBAN SERVICES] Found ${results.length} services with broader category search`);
-            return results;
-          }
-        }
-        
-        if (normalizedLocation) {
-          // Try partial location match
-          const locationSnapshot = await urbanServicesRef
-            .where('location', '>=', normalizedLocation)
-            .where('location', '<=', normalizedLocation + '\uf8ff')
-            .limit(10)
-            .get();
-          
-          if (!locationSnapshot.empty) {
-            const results = [];
-            locationSnapshot.forEach(doc => {
-              results.push({
-                id: doc.id,
-                ...doc.data()
-              });
-            });
-            console.log(`✅ [URBAN SERVICES] Found ${results.length} services with broader location search`);
-            return results;
-          }
-        }
+      // Try broader search without filters
+      console.log(`🔍 [URBAN SERVICES] Trying broader search...`);
+      const broadSnapshot = await urbanServicesRef.limit(5).get();
+      
+      if (broadSnapshot.empty) {
+        console.log(`📭 [URBAN SERVICES] No services found in database`);
+        return [];
       }
       
-      return [];
+      const results = [];
+      broadSnapshot.forEach(doc => {
+        results.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+      
+      console.log(`✅ [URBAN SERVICES] Found ${results.length} services in database`);
+      return results;
     }
     
     const results = [];
     snapshot.forEach(doc => {
+      const data = doc.data();
       results.push({
         id: doc.id,
-        ...doc.data()
+        name: data.name || 'Service Provider',
+        category: data.category || 'service',
+        location: data.location || 'Not specified',
+        phone: data.phone || 'Contact not available',
+        createdAt: data.createdAt || null
       });
     });
     
-    console.log(`✅ [URBAN SERVICES] Found ${results.length} urban services`);
+    console.log(`✅ [URBAN SERVICES] Found ${results.length} services`);
     return results;
     
   } catch (error) {
     console.error("❌ [URBAN SERVICES] Error searching urban services:", error);
+    console.error("Error details:", error.code, error.message);
     
-    // Provide fallback data for testing
-    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-      console.log('🔄 [URBAN SERVICES] Returning fallback data for testing');
-      return getFallbackServices(category, location);
-    }
-    
-    throw error;
+    // Return empty array instead of throwing error
+    return [];
   }
 }
 
@@ -167,33 +122,14 @@ function getFallbackServices(category, location) {
       name: `Sample ${categoryName.charAt(0).toUpperCase() + categoryName.slice(1)} 1`,
       category: categoryName,
       location: locationName,
-      phone: '+91 98765 43210',
-      rating: 4.5,
-      experience: '5 years',
-      availability: '10 AM - 8 PM',
-      rate: 'Starting from ₹300'
+      phone: '+91 98765 43210'
     },
     {
       id: 'fallback_2',
       name: `Reliable ${categoryName.charAt(0).toUpperCase() + categoryName.slice(1)}`,
       category: categoryName,
       location: locationName,
-      phone: '+91 98765 43211',
-      rating: 4.3,
-      experience: '3 years',
-      availability: '9 AM - 9 PM',
-      rate: 'Starting from ₹250'
-    },
-    {
-      id: 'fallback_3',
-      name: `Quick ${categoryName.charAt(0).toUpperCase() + categoryName.slice(1)} Service`,
-      category: categoryName,
-      location: locationName,
-      phone: '+91 98765 43212',
-      rating: 4.2,
-      experience: '2 years',
-      availability: '11 AM - 7 PM',
-      rate: 'Starting from ₹200'
+      phone: '+91 98765 43211'
     }
   ];
 }
@@ -209,23 +145,14 @@ async function searchUrbanHelp(category, location, filters = {}) {
   try {
     console.log(`🔍 [URBAN HELP] Searching for ${category} in ${location}`);
     
-    let query = urbanHelpProvidersRef
-      .where("category", "==", category)
-      .where("isActive", "==", true);
+    let query = urbanHelpProvidersRef;
     
-    // Filter by location
-    if (location) {
-      query = query.where("locations", "array-contains", location.toLowerCase());
+    if (category) {
+      query = query.where("category", "==", category);
     }
     
-    // Filter by availability
-    if (filters.immediate) {
-      query = query.where("availableNow", "==", true);
-    }
-    
-    // Filter by rating
-    if (filters.minRating) {
-      query = query.where("rating", ">=", filters.minRating);
+    if (filters.isActive !== undefined) {
+      query = query.where("isActive", "==", filters.isActive);
     }
     
     const snapshot = await query.limit(10).get();
@@ -237,16 +164,20 @@ async function searchUrbanHelp(category, location, filters = {}) {
     
     const results = [];
     snapshot.forEach(doc => {
+      const data = doc.data();
       results.push({
         id: doc.id,
-        ...doc.data()
+        name: data.name || 'Service Provider',
+        category: data.category || 'service',
+        location: data.location || 'Not specified',
+        phone: data.phone || data.contact || 'Contact not available',
+        rating: data.rating || 0,
+        isActive: data.isActive !== false, // Default to true
+        createdAt: data.createdAt || null
       });
     });
     
-    // Sort by rating (highest first)
-    results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-    
-    console.log(`✅ [URBAN HELP] Found ${results.length} providers for ${category} in ${location}`);
+    console.log(`✅ [URBAN HELP] Found ${results.length} providers`);
     return results;
     
   } catch (error) {
@@ -256,21 +187,40 @@ async function searchUrbanHelp(category, location, filters = {}) {
 }
 
 /**
- * Add new urban help provider
+ * Add new urban help provider to urban_services collection
  */
 async function addUrbanHelpProvider(providerData) {
   try {
+    // Check if we should add to urban_services collection
+    if (providerData.category && providerData.location) {
+      const docRef = await urbanServicesRef.add({
+        category: providerData.category,
+        name: providerData.name || 'Service Provider',
+        phone: providerData.phone || '',
+        location: providerData.location,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      console.log(`✅ [URBAN SERVICES] Added provider: ${docRef.id}`);
+      
+      return {
+        success: true,
+        id: docRef.id,
+        collection: 'urban_services'
+      };
+    }
+    
+    // Fallback to urban_help_providers collection
     const docRef = await urbanHelpProvidersRef.add({
       ...providerData,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      isActive: true,
-      rating: providerData.rating || 4.0,
-      totalJobs: 0
+      isActive: true
     });
     
     return {
       success: true,
-      id: docRef.id
+      id: docRef.id,
+      collection: 'urban_help_providers'
     };
   } catch (error) {
     console.error('❌ [URBAN HELP] Error adding provider:', error);

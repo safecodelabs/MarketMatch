@@ -526,37 +526,37 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
       client
     );
     
-    // ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
-    const results = await searchUrbanServices(category, location);
-    
-    if (results && results.length > 0) {
-      // Format and send results
-      const resultsMessage = formatUrbanHelpResults(results, userLang, categoryName);
-      await sendMessageWithClient(sender, resultsMessage, client);
-      
-      // Add to user requests
-      await addUserRequest(sender, {
-        category: category,
-        location: location,
-        status: 'matched',
-        matchedProviders: results.map(r => r.id).slice(0, 3),
-        timestamp: Date.now()
-      });
-      
-    } else {
-      // No results found
-      const noResultsMessage = `❌ No ${categoryName} found in ${location}.\n\nTry:\n• Different location\n• Broader search terms\n• Check back later`;
-      
-      await sendMessageWithClient(sender, noResultsMessage, client);
-      
-      // Add to user requests as pending
-      await addUserRequest(sender, {
-        category: category,
-        location: location,
-        status: 'pending',
-        timestamp: Date.now()
-      });
-    }
+// ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
+const results = await searchUrbanServices(category, location);
+
+if (results && results.length > 0) {
+  // Format and send results
+  const resultsMessage = formatUrbanHelpResults(results, userLang, categoryName);
+  await sendMessageWithClient(sender, resultsMessage, client);
+  
+  // Add to user requests
+  await addUserRequest(sender, {
+    category: category,
+    location: location,
+    status: 'matched',
+    matchedProviders: results.map(r => r.id).slice(0, 3),
+    timestamp: Date.now()
+  });
+  
+} else {
+  // No results found
+  const noResultsMessage = `❌ No ${categoryName} found in ${location}.\n\nTry:\n• Different location\n• Broader search terms\n• Check back later`;
+  
+  await sendMessageWithClient(sender, noResultsMessage, client);
+  
+  // Add to user requests as pending
+  await addUserRequest(sender, {
+    category: category,
+    location: location,
+    status: 'pending',
+    timestamp: Date.now()
+  });
+}
     
     // Send follow-up
     const followUpText = "\n\nNeed another service? Send another voice message or type 'help'.";
@@ -598,7 +598,7 @@ function getCategoryDisplayName(category) {
 }
 
 /**
- * Format urban help results - UPDATED FOR FLEXIBLE CATEGORIES
+ * Format urban help results
  */
 function formatUrbanHelpResults(results, userLang, categoryName = null) {
   if (!results || results.length === 0) {
@@ -610,10 +610,8 @@ function formatUrbanHelpResults(results, userLang, categoryName = null) {
   if (!displayCategory) {
     const firstResult = results[0];
     displayCategory = firstResult.category || 
-                     firstResult.service_type || 
-                     firstResult.name || 
+                     getCategoryDisplayName(firstResult.category) || 
                      'service';
-    displayCategory = getCategoryDisplayName(displayCategory);
   }
   
   let message = `✅ Found ${results.length} ${displayCategory}(s):\n\n`;
@@ -621,29 +619,23 @@ function formatUrbanHelpResults(results, userLang, categoryName = null) {
   results.slice(0, 5).forEach((provider, index) => {
     message += `*${index + 1}. ${provider.name || 'Service Provider'}*\n`;
     
-    if (provider.rating || provider.rating_score) {
-      const rating = provider.rating || provider.rating_score;
-      message += `   ⭐ ${rating}/5\n`;
-    }
-    
-    if (provider.experience) {
-      message += `   📅 ${provider.experience}\n`;
-    }
-    
-    if (provider.phone || provider.contact || provider.mobile) {
-      message += `   📞 ${provider.phone || provider.contact || provider.mobile}\n`;
-    }
-    
-    if (provider.availability) {
-      message += `   🕒 ${provider.availability}\n`;
-    }
-    
-    if (provider.rate || provider.price) {
-      message += `   💰 ${provider.rate || provider.price}\n`;
+    // Only include fields that exist in your database
+    if (provider.phone) {
+      message += `   📞 ${provider.phone}\n`;
     }
     
     if (provider.location) {
       message += `   📍 ${provider.location}\n`;
+    }
+    
+    if (provider.category) {
+      message += `   🔧 ${getCategoryDisplayName(provider.category)}\n`;
+    }
+    
+    // Format timestamp if needed
+    if (provider.createdAt) {
+      const date = provider.createdAt.toDate ? provider.createdAt.toDate() : new Date(provider.createdAt);
+      message += `   📅 Added: ${date.toLocaleDateString()}\n`;
     }
     
     message += '\n';
