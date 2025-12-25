@@ -1097,6 +1097,22 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   
   if (!sender) return;
 
+  let replyId = null;
+  
+  if (metadata?.interactive?.type === "list_reply") {
+    replyId = metadata.interactive.list_reply.id;
+  } else if (metadata?.interactive?.type === "button_reply") {
+    replyId = metadata.interactive.button_reply.id;
+  }
+  
+  console.log("🔍 [CONTROLLER DEBUG] replyId:", replyId);
+  
+  const msg = String(replyId || text || "").trim();
+  const lower = msg.toLowerCase();
+  
+  console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
+  console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
+
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
   // ===========================
@@ -1169,14 +1185,24 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       
       let confirmationMessage = '';
       if (userLang === 'hi') {
-        confirmationMessage = `🎤 मैंने सुना: "*${voiceResult.transcription}"*\n\nक्या यह सही है?\n\nजवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें`;
+        confirmationMessage = `🎤 मैंने सुना: "*${voiceResult.transcription}"*\n\nक्या यह सही है?`;
       } else if (userLang === 'ta') {
-        confirmationMessage = `🎤 நான் கேட்டேன்: "*${voiceResult.transcription}"*\n\nஇது சரியானதா?\n\nபதில்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்`;
+        confirmationMessage = `🎤 நான் கேட்டேன்: "*${voiceResult.transcription}"*\n\nஇது சரியானதா?`;
       } else {
-        confirmationMessage = `🎤 I heard: "*${voiceResult.transcription}"*\n\nIs this correct?\n\nReply with:\n✅ *Yes* - if correct\n🔄 *No* - to try again\n📝 *Type* - to type instead`;
+        confirmationMessage = `🎤 I heard: "*${voiceResult.transcription}"*\n\nIs this correct?`;
       }
       
-      await sendMessage(sender, confirmationMessage);
+      // Send with interactive buttons
+      await sendInteractiveButtons(
+        effectiveClient,
+        sender,
+        confirmationMessage,
+        [
+          { id: 'confirm_yes', text: '✅ Yes' },
+          { id: 'try_again', text: '🔄 No' },
+          { id: 'type_instead', text: '📝 Type' }
+        ]
+      );
       
       await saveSession(sender, session);
       return session;
@@ -1201,31 +1227,6 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     }
   }
 
-  // ===========================
-  // 1) PRIORITY: CHECK FLOW SUBMISSION
-  // ===========================
-  const flowHandled = await handleFlowSubmission(metadata, sender);
-  if (flowHandled) {
-    const session = await getSession(sender);
-    return session;
-  }
-
-  let replyId = null;
-  
-  if (metadata?.interactive?.type === "list_reply") {
-    replyId = metadata.interactive.list_reply.id;
-  } else if (metadata?.interactive?.type === "button_reply") {
-    replyId = metadata.interactive.button_reply.id;
-  }
-  
-  console.log("🔍 [CONTROLLER DEBUG] replyId:", replyId);
-  
-  const msg = String(replyId || text || "").trim();
-  const lower = msg.toLowerCase();
-  
-  console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
-  console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
-
   // Get session
   let session = (await getSession(sender)) || { 
     step: "start",
@@ -1244,25 +1245,122 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
   // ===========================
-  // 2) CHECK FOR VOICE CONFIRMATION RESPONSES (SIMPLIFIED FLOW)
+  // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS
   // ===========================
-  if (session.state === 'awaiting_confirmation') {
-    console.log("🎤 [VOICE] Processing confirmation response:", msg);
+  if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again') || replyId.startsWith('type_instead'))) {
+    console.log(`🎤 [VOICE BUTTON] Detected voice confirmation button: ${replyId}`);
     
-    const userResponse = lower.trim();
+    // Get the user language
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
     
-    if (userResponse.includes('yes') || userResponse.includes('correct') || userResponse.includes('✅') || userResponse.includes('हां') || userResponse.includes('ஆம்')) {
+    // Handle the button click based on session state
+    if (session.state === 'awaiting_confirmation' || session.step === 'awaiting_confirmation') {
+      console.log(`🎤 [VOICE BUTTON] Processing confirmation for session state: ${session.state}`);
+      
+      // Map button IDs to actions
+      let action = '';
+      if (replyId.includes('confirm_') || replyId === 'confirm_yes') {
+        action = 'confirm_yes';
+      } else if (replyId.includes('try_again') || replyId === 'try_again') {
+        action = 'try_again';
+      } else if (replyId.includes('type_instead') || replyId === 'type_instead') {
+        action = 'type_instead';
+      }
+      
+      // Process the action
+      switch(action) {
+        case 'confirm_yes':
+          // User confirmed transcription is correct
+          const confirmedText = session.rawTranscription;
+          
+          if (!confirmedText) {
+            await sendMessage(sender, "❌ No transcription found. Please try again.");
+            session.state = 'initial';
+            session.step = 'menu';
+            await saveSession(sender, session);
+            await sendMainMenuViaService(sender);
+            return session;
+          }
+          
+          await sendMessage(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
+          
+          // Check if it's an urban help request
+          if (isUrbanHelpRequest(confirmedText)) {
+            // Extract urban help info
+            const extractedInfo = extractUrbanHelpFromText(confirmedText);
+            
+            if (extractedInfo.category && extractedInfo.location) {
+              // We have both category and location, search immediately
+              await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);
+            } else {
+              // Need more info
+              await handleUrbanHelpTextRequest(sender, confirmedText, session, effectiveClient);
+            }
+          } else {
+            // Process property-related intent
+            await voiceService.extractIntentAfterConfirmation(sender, confirmedText, session, effectiveClient);
+          }
+          
+          // Reset session
+          session.state = 'initial';
+          delete session.rawTranscription;
+          session.step = 'menu';
+          await saveSession(sender, session);
+          break;
+          
+        case 'try_again':
+          // User wants to try again
+          await sendMessage(sender, "🔄 No problem! Please send your voice message again.");
+          session.state = 'initial';
+          session.step = 'menu';
+          delete session.rawTranscription;
+          await saveSession(sender, session);
+          break;
+          
+        case 'type_instead':
+          // User wants to type
+          await sendMessage(sender, "📝 Please type what you're looking for:");
+          session.state = 'awaiting_text_input';
+          session.step = 'awaiting_text_input';
+          delete session.rawTranscription;
+          await saveSession(sender, session);
+          break;
+      }
+      
+      await saveSession(sender, session);
+      return session;
+    }
+  }
+
+  // ===========================
+  // ✅ ADDED: ALSO CHECK FOR TEXT RESPONSES TO VOICE CONFIRMATION
+  // ===========================
+  if (text && (session.state === 'awaiting_confirmation' || session.step === 'awaiting_confirmation')) {
+    console.log(`🎤 [VOICE TEXT] Processing text response to voice confirmation: "${text}"`);
+    
+    const lowerText = text.toLowerCase().trim();
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+    
+    if (lowerText.includes('yes') || lowerText.includes('y') || lowerText.includes('correct') || 
+        lowerText.includes('✅') || lowerText.includes('हां') || lowerText.includes('ஆம்')) {
       // User confirmed transcription is correct
       const confirmedText = session.rawTranscription;
       
+      if (!confirmedText) {
+        await sendMessage(sender, "❌ No transcription found. Please try again.");
+        session.state = 'initial';
+        session.step = 'menu';
+        await saveSession(sender, session);
+        await sendMainMenuViaService(sender);
+        return session;
+      }
+      
       await sendMessage(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
       
-      // Now process the confirmed text for intent
       // Check if it's an urban help request
       if (isUrbanHelpRequest(confirmedText)) {
         // Extract urban help info
         const extractedInfo = extractUrbanHelpFromText(confirmedText);
-        const userLang = multiLanguage.getUserLanguage(sender) || 'en';
         
         if (extractedInfo.category && extractedInfo.location) {
           // We have both category and location, search immediately
@@ -1282,7 +1380,8 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       session.step = 'menu';
       await saveSession(sender, session);
       
-    } else if (userResponse.includes('no') || userResponse.includes('try again') || userResponse.includes('🔄') || userResponse.includes('नहीं') || userResponse.includes('இல்லை')) {
+    } else if (lowerText.includes('no') || lowerText.includes('n') || lowerText.includes('try again') || 
+               lowerText.includes('🔄') || lowerText.includes('नहीं') || lowerText.includes('இல்லை')) {
       // User wants to try again
       await sendMessage(sender, "🔄 No problem! Please send your voice message again.");
       session.state = 'initial';
@@ -1290,7 +1389,8 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       delete session.rawTranscription;
       await saveSession(sender, session);
       
-    } else if (userResponse.includes('type') || userResponse.includes('📝') || userResponse.includes('टाइप') || userResponse.includes('தட்டச்சு')) {
+    } else if (lowerText.includes('type') || lowerText.includes('📝') || 
+               lowerText.includes('टाइप') || lowerText.includes('தட்டச்சு')) {
       // User wants to type
       await sendMessage(sender, "📝 Please type what you're looking for:");
       session.state = 'awaiting_text_input';
@@ -1299,9 +1399,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       await saveSession(sender, session);
       
     } else {
-      // Unexpected response
-      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-      
+      // Unexpected response - remind user of options
       let errorMessage = '';
       if (userLang === 'hi') {
         errorMessage = "कृपया जवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें";
@@ -1314,11 +1412,21 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       await sendMessage(sender, errorMessage);
     }
     
+    await saveSession(sender, session);
     return session;
   }
 
   // ===========================
-  // 3) CHECK FOR URBAN HELP CONFIRMATION RESPONSES
+  // 1) PRIORITY: CHECK FLOW SUBMISSION
+  // ===========================
+  const flowHandled = await handleFlowSubmission(metadata, sender);
+  if (flowHandled) {
+    const session = await getSession(sender);
+    return session;
+  }
+
+  // ===========================
+  // 2) CHECK FOR URBAN HELP CONFIRMATION RESPONSES
   // ===========================
   if (session.step.startsWith("awaiting_urban_help_") && replyId) {
     console.log("🔧 [URBAN HELP] Processing response:", msg);
@@ -1326,7 +1434,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // 4) CHECK FOR VOICE CONFIRMATION RESPONSES (OLD FLOW)
+  // 3) CHECK FOR VOICE CONFIRMATION RESPONSES (OLD FLOW)
   // ===========================
   if (session.step === "awaiting_voice_confirmation" && replyId) {
     console.log("🎤 [VOICE] Processing confirmation response");
@@ -1334,7 +1442,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // 5) CHECK FOR VOICE SEARCH OPTIONS
+  // 4) CHECK FOR VOICE SEARCH OPTIONS
   // ===========================
   if (msg.startsWith("voice_")) {
     return await handleVoiceSearchOptions(sender, msg, session, effectiveClient);
@@ -1346,7 +1454,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   const isNewUser = !user && !session.isInitialized;
 
   // ===========================
-  // 6) NEW USER INTRO
+  // 5) NEW USER INTRO
   // ===========================
   if (isGreeting && isNewUser) {
     await sendMessage(
@@ -1364,7 +1472,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // 7) EXISTING USER GREETING
+  // 6) EXISTING USER GREETING
   // ===========================
   if (isGreeting && !isNewUser) {
     session.housingFlow.listingData = null;
@@ -1377,7 +1485,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // 8) LANGUAGE SELECTION
+  // 7) LANGUAGE SELECTION
   // ===========================
   if (session.housingFlow?.awaitingLangSelection) {
     const parsed = parseLangFromText(msg);
@@ -1404,7 +1512,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ===========================
-  // 9) URBAN HELP TEXT INPUT
+  // 8) URBAN HELP TEXT INPUT
   // ===========================
   if (session.step === "awaiting_urban_help_text" && text) {
     console.log("🔧 [URBAN HELP] Processing text input:", text);
@@ -1413,7 +1521,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ===========================
-  // 10) TEXT INPUT AFTER VOICE CONFIRMATION
+  // 9) TEXT INPUT AFTER VOICE CONFIRMATION
   // ===========================
   if (session.state === 'awaiting_text_input' && text) {
     console.log("📝 [TEXT INPUT] Processing text after voice fallback:", text);
@@ -1461,7 +1569,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ===========================
-  // 11) URBAN HELP CATEGORY SELECTION
+  // 10) URBAN HELP CATEGORY SELECTION
   // ===========================
   if (msg.startsWith("text_category_") && session.step === "awaiting_urban_help_category") {
     const category = msg.replace("text_category_", "");
@@ -1482,7 +1590,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ===========================
-  // 12) URBAN HELP LOCATION INPUT
+  // 11) URBAN HELP LOCATION INPUT
   // ===========================
   if (session.step === "awaiting_urban_help_location" && text) {
     const urbanContext = session.urbanHelpContext || {};
@@ -1500,7 +1608,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ==========================================
-  // 13) MANAGE LISTINGS INTERACTIVE HANDLING
+  // 12) MANAGE LISTINGS INTERACTIVE HANDLING
   // ==========================================
   
   // Handle listing selection from manage listings
@@ -1511,7 +1619,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   // ==========================================
-  // 14) DELETE FLOW HANDLING
+  // 13) DELETE FLOW HANDLING
   // ==========================================
   
   // Handle delete button click (shows confirmation)
@@ -1579,7 +1687,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 15) EDIT FLOW HANDLING
+  // 14) EDIT FLOW HANDLING
   // ==========================================
   
   // Handle edit button click (starts edit flow)
@@ -1626,7 +1734,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 16) EDIT FIELD SELECTION HANDLING
+  // 15) EDIT FIELD SELECTION HANDLING
   // ==========================================
   
   // Handle edit flow field selection
@@ -1736,7 +1844,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 17) EDIT FIELD VALUE INPUT (TEXT-BASED)
+  // 16) EDIT FIELD VALUE INPUT (TEXT-BASED)
   // ==========================================
   if (session.editFlow?.step === "awaiting_field_value" && text) {
     console.log("🔍 [CONTROLLER] Field value received:", text);
@@ -1745,7 +1853,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 18) CANCEL MANAGE (Back button)
+  // 17) CANCEL MANAGE (Back button)
   // ==========================================
   if (msg === "cancel_manage" && session.manageListings?.step === "awaiting_action") {
     console.log("🔍 [CONTROLLER] Back to listing list");
@@ -1754,7 +1862,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 19) SAVED LISTINGS INTERACTIVE HANDLING
+  // 18) SAVED LISTINGS INTERACTIVE HANDLING
   // ==========================================
 
   // Handle saved listing selection
@@ -1876,7 +1984,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 20) TEXT-BASED LISTING INPUT (FALLBACK)
+  // 19) TEXT-BASED LISTING INPUT (FALLBACK)
   // ==========================================
   if (session.step === "awaiting_post_details" && text) {
     console.log("📝 [CONTROLLER] Processing text-based listing input");
@@ -1885,7 +1993,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 21) INTERACTIVE LISTING ACTIONS
+  // 20) INTERACTIVE LISTING ACTIONS
   // ==========================================
   if (session.step === "awaiting_listing_action" && replyId) {
     console.log(`🔄 Handling listing action: ${msg}`);
@@ -1975,7 +2083,7 @@ What would you like to do with this saved listing?`;
   }
 
   // ===========================
-  // 22) MENU COMMAND HANDLING
+  // 21) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
@@ -2055,14 +2163,24 @@ What would you like to do with this saved listing?`;
             
             let confirmationMessage = '';
             if (userLang === 'hi') {
-              confirmationMessage = `🎤 मैंने सुना: "*${processingResult.transcription}"*\n\nक्या यह सही है?\n\nजवाब दें:\n✅ *हां* - अगर सही है\n🔄 *नहीं* - फिर से कोशिश करें\n📝 *टाइप करें* - टाइप करके भेजें`;
+              confirmationMessage = `🎤 मैंने सुना: "*${processingResult.transcription}"*\n\nक्या यह सही है?`;
             } else if (userLang === 'ta') {
-              confirmationMessage = `🎤 நான் கேட்டேன்: "*${processingResult.transcription}"*\n\nஇது சரியானதா?\n\nபதில்:\n✅ *ஆம்* - சரியானது என்றால்\n🔄 *இல்லை* - மீண்டும் முயற்சிக்கவும்\n📝 *தட்டச்சு செய்யவும்* - தட்டச்சு செய்து அனுப்பவும்`;
+              confirmationMessage = `🎤 நான் கேட்டேன்: "*${processingResult.transcription}"*\n\nஇது சரியானதா?`;
             } else {
-              confirmationMessage = `🎤 I heard: "*${processingResult.transcription}"*\n\nIs this correct?\n\nReply with:\n✅ *Yes* - if correct\n🔄 *No* - to try again\n📝 *Type* - to type instead`;
+              confirmationMessage = `🎤 I heard: "*${processingResult.transcription}"*\n\nIs this correct?`;
             }
             
-            await sendMessage(sender, confirmationMessage);
+            // Send with interactive buttons
+            await sendInteractiveButtons(
+              effectiveClient,
+              sender,
+              confirmationMessage,
+              [
+                { id: 'confirm_yes', text: '✅ Yes' },
+                { id: 'try_again', text: '🔄 No' },
+                { id: 'type_instead', text: '📝 Type' }
+              ]
+            );
             
           } else {
             // Check if it's an access token error
