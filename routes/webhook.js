@@ -4,7 +4,8 @@ const router = express.Router();
 
 // Import bot handler
 const { handleIncomingMessage } = require("../chatbotController");
-// Import YOUR EXISTING WhatsApp client (messageService.js)
+
+// Import message service
 let messageService;
 try {
     messageService = require("../src/services/messageService");
@@ -27,25 +28,10 @@ function log(level, ...args) {
 // 🚀 MAIN WEBHOOK HANDLER (POST)
 // =======================================================
 router.post("/", async (req, res) => {
-  // FIX: Set timeout for webhook processing
-  req.setTimeout(15000, () => {
-    log('WARN', 'Webhook request timeout');
-  });
-  
-  // FIX: Handle request abort
-  req.on('aborted', () => {
-    log('WARN', 'Webhook request aborted by client');
-    return;
-  });
-  
   try {
-    // FIX: Check if body exists
-    if (!req.body || Object.keys(req.body).length === 0) {
-      log('INFO', 'Empty webhook request (likely health check)');
-      return res.status(200).send('OK');
-    }
+    log('INFO', 'Webhook POST received');
     
-    // FIX: Parse raw buffer to JSON safely
+    // Parse raw buffer to JSON
     let body;
     if (Buffer.isBuffer(req.body)) {
       try {
@@ -64,13 +50,8 @@ router.post("/", async (req, res) => {
 
     // Skip typing indicators, delivery receipts, etc.
     if (!value || !value.messages || value.messages.length === 0) {
-      // Don't log status updates to reduce log volume
       if (value?.statuses) {
-        // Optional: log every 10th status update
-        const statusCount = (global.statusLogCount = (global.statusLogCount || 0) + 1);
-        if (statusCount % 10 === 0) {
-          log('DEBUG', `Status update: ${value.statuses[0]?.status}`);
-        }
+        log('DEBUG', `Status update: ${value.statuses[0]?.status}`);
       }
       return res.status(200).send('OK');
     }
@@ -78,25 +59,18 @@ router.post("/", async (req, res) => {
     const message = value.messages[0];
     const sender = message.from;
     
-    // Log minimal webhook info
-    if (message.type !== 'audio') { // Audio logs handled separately
-      log('INFO', `${message.type} from ${sender.substring(0, 10)}...`);
-    }
+    log('INFO', `${message.type} from ${sender.substring(0, 10)}...`);
 
     let extractedText = "";
     let messageMetadata = { ...message };
 
-    // =======================================================
-    // 📝 NORMAL TEXT MESSAGE
-    // =======================================================
+    // TEXT MESSAGE
     if (message.type === "text") {
       extractedText = message.text.body.trim();
       log('DEBUG', `Text: "${extractedText.substring(0, 50)}${extractedText.length > 50 ? '...' : ''}"`);
     }
 
-    // =======================================================
-    // 🎛 INTERACTIVE MESSAGE (buttons, list)
-    // =======================================================
+    // INTERACTIVE MESSAGE
     else if (message.type === "interactive") {
       const interactive = message.interactive;
 
@@ -108,22 +82,13 @@ router.post("/", async (req, res) => {
       log('DEBUG', `Interactive: ${extractedText}`);
     }
 
-    // =======================================================
-    // 🧱 FLOW / FORM SUBMISSION (WhatsApp Flows)
-    // =======================================================
+    // BUTTON
     else if (message.type === "button") {
       extractedText = message.button.payload || "";
       log('DEBUG', `Button: ${extractedText}`);
     }
 
-    else if (message.type === "interactive_response") {
-      extractedText = message.interactive_response.id || "";
-      log('DEBUG', `Interactive Response: ${extractedText}`);
-    }
-
-    // =======================================================
-    // 🎤 AUDIO / VOICE MESSAGE HANDLING (OPTIMIZED)
-    // =======================================================
+    // AUDIO / VOICE MESSAGE
     else if (message.type === "audio" || message.type === "voice") {
       log('INFO', `Audio from ${sender.substring(0, 10)}...`);
       
@@ -141,10 +106,9 @@ router.post("/", async (req, res) => {
         return res.status(200).send('OK');
       }
       
-      // Log URL minimally
-      log('DEBUG', `Audio URL: ${audioUrl.split('?')[0]}?mid=...`);
+      log('DEBUG', `Audio URL received`);
       
-      // Send immediate response if messageService is available
+      // Send immediate response
       if (messageService) {
         messageService.sendMessage(
           sender,
@@ -169,13 +133,10 @@ router.post("/", async (req, res) => {
       log('INFO', 'Audio metadata stored');
     }
 
-    // =======================================================
-    // 📸 IMAGE / DOCUMENT MESSAGES (Minimal logging)
-    // =======================================================
+    // IMAGE / DOCUMENT
     else if (message.type === "image" || message.type === "document") {
       log('INFO', `${message.type} from ${sender.substring(0, 10)}...`);
       
-      // Send response if messageService is available
       if (messageService) {
         messageService.sendMessage(
           sender,
@@ -188,13 +149,10 @@ router.post("/", async (req, res) => {
       return res.status(200).send('OK');
     }
 
-    // =======================================================
-    // ❌ UNSUPPORTED MESSAGE TYPE
-    // =======================================================
+    // UNSUPPORTED TYPE
     else {
       log('WARN', `Unsupported type: ${message.type} from ${sender.substring(0, 10)}...`);
       
-      // Send response if messageService is available
       if (messageService) {
         messageService.sendMessage(
           sender,
@@ -208,46 +166,34 @@ router.post("/", async (req, res) => {
     // Normalize text
     extractedText = (extractedText || "").toLowerCase();
 
-    // Log final processing info
-    log('DEBUG', `Final: ${sender.substring(0, 10)} | ${message.type} | "${extractedText.substring(0, 30)}"`);
+    log('DEBUG', `Processing: ${sender.substring(0, 10)} | ${message.type} | "${extractedText.substring(0, 30)}"`);
 
     // =======================================================
-    // 🔥 PASS TO BOT (Non-blocking for voice to avoid timeouts)
+    // 🔥 PASS TO BOT (Async to avoid webhook timeout)
     // =======================================================
-    // FIX: Always respond 200 immediately first
+    // Always respond 200 immediately
     res.status(200).send('OK');
     
-    // Then process asynchronously
-    if (message.type === "audio" || message.type === "voice") {
-      // Process voice asynchronously to avoid webhook timeout
-      setTimeout(async () => {
-        try {
-          await handleIncomingMessage(sender, extractedText, messageMetadata, messageService);
-        } catch (err) {
-          log('ERROR', `Voice processing failed: ${err.message}`);
-          // Send error message to user if messageService is available
-          if (messageService) {
-            messageService.sendMessage(
-              sender,
-              "❌ Sorry, I encountered an error processing your voice message. Please try again."
-            ).catch(() => { /* silent fail */ });
-          }
+    // Process asynchronously
+    setTimeout(async () => {
+      try {
+        await handleIncomingMessage(sender, extractedText, messageMetadata, messageService);
+      } catch (err) {
+        log('ERROR', `Processing failed: ${err.message}`);
+        
+        // Send error message to user
+        if (messageService) {
+          messageService.sendMessage(
+            sender,
+            "❌ Sorry, I encountered an error. Please try again."
+          ).catch(() => { /* silent fail */ });
         }
-      }, 0);
-    } else {
-      // Process text/interactive messages asynchronously
-      setTimeout(async () => {
-        try {
-          await handleIncomingMessage(sender, extractedText, messageMetadata, messageService);
-        } catch (err) {
-          log('ERROR', `Message processing failed: ${err.message}`);
-        }
-      }, 0);
-    }
+      }
+    }, 0);
     
   } catch (err) {
-    log('ERROR', `Webhook handler error: ${err.message}`);
-    // FIX: Always return 200 to WhatsApp even on errors
+    log('ERROR', `Webhook error: ${err.message}`);
+    // Always return 200 to WhatsApp
     return res.status(200).send('ERROR_RECEIVED');
   }
 });
@@ -260,15 +206,16 @@ router.get("/", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
+  log('INFO', `Webhook GET verification: mode=${mode}, token=${token ? "provided" : "missing"}`);
+
   const verifyToken = process.env.VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || "marketmatch-ai-token";
 
   if (mode && token) {
     if (mode === "subscribe" && token === verifyToken) {
-      log('INFO', 'Webhook verified');
+      log('INFO', 'Webhook verified successfully');
       return res.status(200).send(challenge);
     } else {
       log('ERROR', 'Webhook verification failed');
-      log('ERROR', `Expected: ${verifyToken}, Received: ${token}`);
       return res.sendStatus(403);
     }
   }
