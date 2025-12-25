@@ -8,7 +8,7 @@ const webhookRoute = require("./routes/webhook");
 console.log("🔍 Environment check:");
 console.log("🔍 WHATSAPP_TOKEN exists:", !!(process.env.WHATSAPP_TOKEN));
 console.log("🔍 WHATSAPP_TOKEN length:", process.env.WHATSAPP_TOKEN?.length || 0);
-console.log("🔍 WHATSAPP_PHONE_NUMBER_ID exists:", !!(process.env.WHATSAPP_PHONE_NUMBER_ID));
+console.log("🔍 WHATSAPP_PHONE_ID exists:", !!(process.env.WHATSAPP_PHONE_ID));
 console.log("🔍 VERIFY_TOKEN exists:", !!(process.env.VERIFY_TOKEN));
 
 // Import voice service
@@ -61,7 +61,7 @@ if (voiceService) {
         if (typeof voiceService.setWhatsAppCredentials === 'function') {
             voiceService.setWhatsAppCredentials({
                 accessToken: whatsappToken,
-                phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+                phoneNumberId: process.env.WHATSAPP_PHONE_ID,
                 apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0'
             });
             console.log("✅ setWhatsAppCredentials() called");
@@ -69,14 +69,14 @@ if (voiceService) {
         // Try direct property assignment
         else if (voiceService.whatsappAccessToken !== undefined) {
             voiceService.whatsappAccessToken = whatsappToken;
-            voiceService.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+            voiceService.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_ID;
             console.log("✅ Direct property assignment");
         }
         // Try initializeWithConfig if exists
         else if (typeof voiceService.initializeWithConfig === 'function') {
             voiceService.initializeWithConfig({
                 accessToken: whatsappToken,
-                phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+                phoneNumberId: process.env.WHATSAPP_PHONE_ID,
                 apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0'
             });
             console.log("✅ initializeWithConfig() called");
@@ -146,7 +146,7 @@ app.get("/test", (_, res) => {
         whatsapp: {
             tokenExists: !!whatsappToken,
             tokenLength: whatsappToken?.length || 0,
-            phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "Not set",
+            phoneNumberId: process.env.WHATSAPP_PHONE_ID || "Not set",
             verifyToken: process.env.VERIFY_TOKEN ? "Set" : "Not set"
         },
         voiceService: voiceService ? {
@@ -212,7 +212,7 @@ app.listen(PORT, '0.0.0.0', () => {
     ========================================
     ENVIRONMENT CHECK:
     🔑 WHATSAPP_TOKEN: ${process.env.WHATSAPP_TOKEN ? '✅ Found' : '❌ Missing'}
-    📱 PHONE_NUMBER_ID: ${process.env.WHATSAPP_PHONE_NUMBER_ID || '❌ Missing'}
+    📱 PHONE_NUMBER_ID: ${process.env.WHATSAPP_PHONE_ID || '❌ Missing'}
     🔐 VERIFY_TOKEN: ${process.env.VERIFY_TOKEN ? '✅ Set' : '❌ Missing'}
     ========================================
     SERVICES:
