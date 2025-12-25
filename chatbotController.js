@@ -39,13 +39,13 @@ const {
 
 // ✅ UPDATED: Added sendSavedListingCard
 const { 
-    sendMessage, 
+    sendMessageWithClient: sendMessageWithClientWithClient, // Use the compatibility version
     sendList, 
     sendReplyButtons, 
     sendListingCard,
     sendSavedListingCard,
-    sendInteractiveButtons // NEW: For voice confirmation
-} = require("./src/services/messageService"); 
+    sendInteractiveButtonsWithClientWithClient // Use the compatibility version
+} = require("./src/services/messageService");
 const { db } = require("./database/firestore");
 
 // ✅ ADDED: Environment variables for Flow
@@ -82,8 +82,8 @@ function getEffectiveClient(client) {
     console.error("❌ [CONTROLLER] Client passed:", !!client);
     console.error("❌ [CONTROLLER] Global client:", !!globalWhatsAppClient);
   } else {
-    console.log("✅ [CONTROLLER] Client available, has sendMessage:", 
-                typeof effectiveClient.sendMessage === 'function');
+    console.log("✅ [CONTROLLER] Client available, has sendMessageWithClient:", 
+                typeof effectiveClient.sendMessageWithClient === 'function');
   }
   
   return effectiveClient;
@@ -190,19 +190,19 @@ async function handleVoiceMessage(sender, metadata, client) {
     // Get effective client
     const effectiveClient = getEffectiveClient(client);
     if (!effectiveClient) {
-      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
       session.step = "menu";
       await saveSession(sender, session);
       return session;
     }
     
     // Send processing message
-    await sendMessage(sender, "🎤 Processing your voice message... Please wait a moment.");
+    await sendMessageWithClient(sender, "🎤 Processing your voice message... Please wait a moment.");
     
     // Get media URL from metadata
     const mediaUrl = metadata.body || metadata.mediaUrl;
     if (!mediaUrl) {
-      await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
+      await sendMessageWithClient(sender, "❌ Could not access the voice message. Please try sending it again.");
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -216,7 +216,7 @@ async function handleVoiceMessage(sender, metadata, client) {
     );
     
     if (!processingResult.success) {
-      await sendMessage(sender, `❌ Error processing voice: ${processingResult.error}\n\nPlease try again or type your request.`);
+      await sendMessageWithClient(sender, `❌ Error processing voice: ${processingResult.error}\n\nPlease try again or type your request.`);
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -256,7 +256,7 @@ async function handleVoiceMessage(sender, metadata, client) {
     
   } catch (error) {
     console.error("🎤 [VOICE] Error handling voice message:", error);
-    await sendMessage(sender, "❌ Sorry, I couldn't process your voice message. Please try typing your request.");
+    await sendMessageWithClient(sender, "❌ Sorry, I couldn't process your voice message. Please try typing your request.");
     return null;
   }
 }
@@ -303,13 +303,13 @@ async function handleUrbanHelpVoiceIntent(sender, session, processingResult, cli
     
   } else if (confidence < 0.7) {
     // Low confidence - ask for clarification
-    await sendMessage(sender, 
+    await sendMessageWithClient(sender, 
       multiLanguage.getMessage(userLang, 'not_understood') + 
       `\n\nI heard: "*${transcription.substring(0, 50)}${transcription.length > 50 ? '...' : ''}*"`,
       client
     );
     
-    await sendInteractiveButtons(
+    await sendInteractiveButtonsWithClient(
       client,
       sender,
       "Is this what you need?",
@@ -392,7 +392,7 @@ async function askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLan
     ];
   }
   
-  await sendInteractiveButtons(client, sender, message, buttons);
+  await sendInteractiveButtonsWithClient(client, sender, message, buttons);
 }
 
 /**
@@ -425,7 +425,7 @@ async function sendUrbanHelpConfirmation(sender, transcription, entities, userLa
     { id: 'modify_details', text: '✏️ Modify details' }
   ];
   
-  await sendInteractiveButtons(client, sender, confirmationText, buttons);
+  await sendInteractiveButtonsWithClient(client, sender, confirmationText, buttons);
 }
 
 /**
@@ -435,7 +435,7 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
   const urbanContext = session.urbanHelpContext;
   
   if (!urbanContext) {
-    await sendMessage(sender, "❌ Session expired. Please start over.");
+    await sendMessageWithClient(sender, "❌ Session expired. Please start over.");
     session.step = "menu";
     await saveSession(sender, session);
     return session;
@@ -445,7 +445,7 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
   
   if (response.startsWith('confirm_urban_')) {
     // User confirmed - search for service providers
-    await sendMessage(sender, 
+    await sendMessageWithClient(sender, 
       multiLanguage.getMessage(userLang, 'searching', {
         category: URBAN_HELP_CATEGORIES[urbanContext.entities.category]?.name || 'Service',
         location: urbanContext.entities.location || 'your area'
@@ -456,12 +456,12 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
     await executeUrbanHelpSearch(sender, urbanContext.entities, session, client, userLang);
     
   } else if (response === 'try_again_urban') {
-    await sendMessage(sender, "🔄 Please send your request again.");
+    await sendMessageWithClient(sender, "🔄 Please send your request again.");
     delete session.urbanHelpContext;
     session.step = "awaiting_voice";
     
   } else if (response === 'modify_details') {
-    await sendMessage(sender, "✏️ What would you like to change? Please send your updated request.");
+    await sendMessageWithClient(sender, "✏️ What would you like to change? Please send your updated request.");
     delete session.urbanHelpContext;
     session.step = "awaiting_urban_help_text";
     
@@ -512,7 +512,7 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
     if (results && results.length > 0) {
       // Format and send results
       const resultsMessage = formatUrbanHelpResults(results, userLang);
-      await sendMessage(sender, resultsMessage, client);
+      await sendMessageWithClient(sender, resultsMessage, client);
       
       // Add to user requests
       await addUserRequest(sender, {
@@ -530,7 +530,7 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
         location: location
       }) || `Sorry, no ${category} found in ${location}. I'll notify you when one becomes available.`;
       
-      await sendMessage(sender, noResultsMessage, client);
+      await sendMessageWithClient(sender, noResultsMessage, client);
       
       // Add to user requests as pending
       await addUserRequest(sender, {
@@ -543,7 +543,7 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
     
     // Send follow-up
     const followUpText = "\n\nNeed another service? Send another voice message or type 'help'.";
-    await sendMessage(sender, followUpText, client);
+    await sendMessageWithClient(sender, followUpText, client);
     
     // Clear context and return to menu
     delete session.urbanHelpContext;
@@ -554,7 +554,7 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
     console.error("Error in urban help search:", error);
     const errorMessage = multiLanguage.getMessage(userLang, 'search_error') ||
                          "Sorry, I encountered an error while searching. Please try again.";
-    await sendMessage(sender, errorMessage, client);
+    await sendMessageWithClient(sender, errorMessage, client);
     
     delete session.urbanHelpContext;
     session.step = "menu";
@@ -626,7 +626,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
     
     const voiceContext = session.voiceContext;
     if (!voiceContext) {
-      await sendMessage(sender, "❌ Voice context lost. Please start over.");
+      await sendMessageWithClient(sender, "❌ Voice context lost. Please start over.");
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -637,7 +637,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
     // Get effective client
     const effectiveClient = getEffectiveClient(client);
     if (!effectiveClient) {
-      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -648,28 +648,28 @@ async function handleVoiceConfirmation(sender, response, session, client) {
       const confirmedIntent = response.replace("confirm_", "");
       
       if (confirmedIntent === intent) {
-        await sendMessage(sender, `✅ Got it! Processing: "${originalTranscription}"`);
+        await sendMessageWithClient(sender, `✅ Got it! Processing: "${originalTranscription}"`);
         await executeVoiceIntent(sender, intent, entities, session, effectiveClient);
       } else {
-        await sendMessage(sender, "❌ Intent mismatch. Please try again.");
+        await sendMessageWithClient(sender, "❌ Intent mismatch. Please try again.");
         session.step = "menu";
       }
       
     } else if (response === "try_again") {
       // User wants to try voice again
-      await sendMessage(sender, "🔄 Please send your voice message again.");
+      await sendMessageWithClient(sender, "🔄 Please send your voice message again.");
       session.step = "awaiting_voice";
       delete session.voiceContext;
       
     } else if (response === "use_buttons") {
       // User wants to use buttons instead
-      await sendMessage(sender, "📋 Switching to menu options...");
+      await sendMessageWithClient(sender, "📋 Switching to menu options...");
       session.step = "menu";
       delete session.voiceContext;
       await sendMainMenuViaService(sender);
       
     } else {
-      await sendMessage(sender, "I didn't understand that response. Please use the buttons provided.");
+      await sendMessageWithClient(sender, "I didn't understand that response. Please use the buttons provided.");
       // Show confirmation buttons again
       await voiceService.sendConfirmationButtons(
         { from: sender },
@@ -685,7 +685,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
     
   } catch (error) {
     console.error("🎤 [VOICE] Error handling confirmation:", error);
-    await sendMessage(sender, "❌ Error processing your response. Please try again.");
+    await sendMessageWithClient(sender, "❌ Error processing your response. Please try again.");
     session.step = "menu";
     await saveSession(sender, session);
     return session;
@@ -711,24 +711,24 @@ async function executeVoiceIntent(sender, intent, entities, session, client) {
       break;
       
     case "post_listing":
-      await sendMessage(sender, "🎤 Voice listing post detected. Switching to listing form...");
+      await sendMessageWithClient(sender, "🎤 Voice listing post detected. Switching to listing form...");
       await handlePostListingFlow(sender);
       break;
       
     case "view_listing":
-      await sendMessage(sender, "🎤 To view specific listing details, please use the 'View Listings' option from the menu.");
+      await sendMessageWithClient(sender, "🎤 To view specific listing details, please use the 'View Listings' option from the menu.");
       session.step = "menu";
       await sendMainMenuViaService(sender);
       break;
       
     case "contact_agent":
-      await sendMessage(sender, "🎤 For contacting agents, please use the contact information provided in individual listings.");
+      await sendMessageWithClient(sender, "🎤 For contacting agents, please use the contact information provided in individual listings.");
       session.step = "menu";
       await sendMainMenuViaService(sender);
       break;
       
     default:
-      await sendMessage(sender, "🎤 I understood your request but need more details. Please use the menu options.");
+      await sendMessageWithClient(sender, "🎤 I understood your request but need more details. Please use the menu options.");
       session.step = "menu";
       await sendMainMenuViaService(sender);
       break;
@@ -759,13 +759,13 @@ async function handleVoiceSearch(sender, intent, entities, session, client) {
       maxPrice: entities.budget ? parseBudgetToNumber(entities.budget) : null
     };
     
-    await sendMessage(sender, `🔍 Searching for ${intent === 'buy_property' ? 'properties to buy' : 'properties to rent'}...`);
+    await sendMessageWithClient(sender, `🔍 Searching for ${intent === 'buy_property' ? 'properties to buy' : 'properties to rent'}...`);
     
     // Search listings
     const listings = await searchListingsByCriteria(searchCriteria);
     
     if (!listings || listings.length === 0) {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         `❌ No listings found for your criteria.\n\n` +
         `Try adjusting your search:\n` +
@@ -782,7 +782,7 @@ async function handleVoiceSearch(sender, intent, entities, session, client) {
     // Show top 3 listings as requested
     const topListings = listings.slice(0, 3);
     
-    await sendMessage(
+    await sendMessageWithClient(
       sender,
       `✅ Found ${listings.length} properties. Here are the top ${topListings.length}:`
     );
@@ -827,7 +827,7 @@ async function handleVoiceSearch(sender, intent, entities, session, client) {
     // Get effective client
     const effectiveClient = getEffectiveClient(client);
     if (!effectiveClient) {
-      await sendMessage(sender, "❌ WhatsApp client not available.");
+      await sendMessageWithClient(sender, "❌ WhatsApp client not available.");
       return;
     }
     
@@ -845,7 +845,7 @@ async function handleVoiceSearch(sender, intent, entities, session, client) {
     
   } catch (error) {
     console.error("🎤 [VOICE SEARCH] Error:", error);
-    await sendMessage(
+    await sendMessageWithClient(
       sender,
       "❌ Error searching for properties. Please try the 'View Listings' option from the menu."
     );
@@ -911,12 +911,12 @@ async function handleVoiceSearchOptions(sender, msg, session, client) {
         
         await saveSession(sender, session);
       } else {
-        await sendMessage(sender, "🎤 That's all the listings matching your criteria!");
+        await sendMessageWithClient(sender, "🎤 That's all the listings matching your criteria!");
       }
       break;
       
     case "voice_refine_search":
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         "🎤 Please send another voice message with your refined search criteria.\n\n" +
         "Examples:\n" +
@@ -995,7 +995,7 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
   
   if (!extractedInfo.category) {
     // Ask for category
-    await sendInteractiveButtons(
+    await sendInteractiveButtonsWithClient(
       client,
       sender,
       "What type of service do you need?",
@@ -1013,7 +1013,7 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
     
   } else if (!extractedInfo.location) {
     // Ask for location
-    await sendMessage(sender, 
+    await sendMessageWithClient(sender, 
       `Where do you need the ${URBAN_HELP_CATEGORIES[extractedInfo.category]?.name || 'service'}?`,
       client
     );
@@ -1132,7 +1132,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     
     if (!audioUrl) {
       console.error("🎤 [VOICE] No audio URL found");
-      await sendMessage(sender, "❌ Could not access the voice message. Please try sending it again.");
+      await sendMessageWithClient(sender, "❌ Could not access the voice message. Please try sending it again.");
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
@@ -1142,7 +1142,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     console.log("🎤 [VOICE] Processing audio URL:", audioUrl.substring(0, 100) + "...");
     
     // Send processing message
-    await sendMessage(sender, "🎤 Processing your voice message...");
+    await sendMessageWithClient(sender, "🎤 Processing your voice message...");
     
     try {
       // 1. Process voice for transcription ONLY
@@ -1159,11 +1159,11 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       if (!voiceResult.success) {
         // Check if it's an access token error
         if (voiceResult.error && voiceResult.error.includes('access token')) {
-          await sendMessage(sender, 
+          await sendMessageWithClient(sender, 
             "❌ Voice processing is temporarily unavailable. Please type your request instead."
           );
         } else {
-          await sendMessage(sender, 
+          await sendMessageWithClient(sender, 
             voiceResult.error || "Could not process voice message. Please try again or type your request."
           );
         }
@@ -1193,7 +1193,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       }
       
       // Send with interactive buttons
-      await sendInteractiveButtons(
+      await sendInteractiveButtonsWithClient(
         effectiveClient,
         sender,
         confirmationMessage,
@@ -1219,7 +1219,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       
       errorMessage += "Please type your request.";
       
-      await sendMessage(sender, errorMessage);
+      await sendMessageWithClient(sender, errorMessage);
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
@@ -1274,7 +1274,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           const confirmedText = session.rawTranscription;
           
           if (!confirmedText) {
-            await sendMessage(sender, "❌ No transcription found. Please try again.");
+            await sendMessageWithClient(sender, "❌ No transcription found. Please try again.");
             session.state = 'initial';
             session.step = 'menu';
             await saveSession(sender, session);
@@ -1282,7 +1282,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
             return session;
           }
           
-          await sendMessage(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
+          await sendMessageWithClient(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
           
           // Check if it's an urban help request
           if (isUrbanHelpRequest(confirmedText)) {
@@ -1310,7 +1310,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           
         case 'try_again':
           // User wants to try again
-          await sendMessage(sender, "🔄 No problem! Please send your voice message again.");
+          await sendMessageWithClient(sender, "🔄 No problem! Please send your voice message again.");
           session.state = 'initial';
           session.step = 'menu';
           delete session.rawTranscription;
@@ -1319,7 +1319,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           
         case 'type_instead':
           // User wants to type
-          await sendMessage(sender, "📝 Please type what you're looking for:");
+          await sendMessageWithClient(sender, "📝 Please type what you're looking for:");
           session.state = 'awaiting_text_input';
           session.step = 'awaiting_text_input';
           delete session.rawTranscription;
@@ -1347,7 +1347,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       const confirmedText = session.rawTranscription;
       
       if (!confirmedText) {
-        await sendMessage(sender, "❌ No transcription found. Please try again.");
+        await sendMessageWithClient(sender, "❌ No transcription found. Please try again.");
         session.state = 'initial';
         session.step = 'menu';
         await saveSession(sender, session);
@@ -1355,7 +1355,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         return session;
       }
       
-      await sendMessage(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
+      await sendMessageWithClient(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
       
       // Check if it's an urban help request
       if (isUrbanHelpRequest(confirmedText)) {
@@ -1383,7 +1383,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     } else if (lowerText.includes('no') || lowerText.includes('n') || lowerText.includes('try again') || 
                lowerText.includes('🔄') || lowerText.includes('नहीं') || lowerText.includes('இல்லை')) {
       // User wants to try again
-      await sendMessage(sender, "🔄 No problem! Please send your voice message again.");
+      await sendMessageWithClient(sender, "🔄 No problem! Please send your voice message again.");
       session.state = 'initial';
       session.step = 'menu';
       delete session.rawTranscription;
@@ -1392,7 +1392,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     } else if (lowerText.includes('type') || lowerText.includes('📝') || 
                lowerText.includes('टाइप') || lowerText.includes('தட்டச்சு')) {
       // User wants to type
-      await sendMessage(sender, "📝 Please type what you're looking for:");
+      await sendMessageWithClient(sender, "📝 Please type what you're looking for:");
       session.state = 'awaiting_text_input';
       session.step = 'awaiting_text_input';
       delete session.rawTranscription;
@@ -1409,7 +1409,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         errorMessage = "Please reply with:\n✅ *Yes* - if I heard correctly\n🔄 *No* - to try again\n📝 *Type* - to type instead";
       }
       
-      await sendMessage(sender, errorMessage);
+      await sendMessageWithClient(sender, errorMessage);
     }
     
     await saveSession(sender, session);
@@ -1457,7 +1457,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // 5) NEW USER INTRO
   // ===========================
   if (isGreeting && isNewUser) {
-    await sendMessage(
+    await sendMessageWithClient(
       sender,
       "👋 *Welcome to MarketMatch AI!* \n\nI'm your personal assistant for:\n🏠 Rentals & Real Estate\n🔧 Urban Help Services\n👤 PG / Flatmates\n\nLet's begin by choosing your preferred language."
     );
@@ -1505,7 +1505,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       await sendMainMenuViaService(sender);
       return session;
     } else {
-      await sendMessage(sender, "Please select a language 👇");
+      await sendMessageWithClient(sender, "Please select a language 👇");
       await sendLanguageListViaService(sender);
       return session;
     }
@@ -1531,7 +1531,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
     } else {
       // Process as property-related request
-      await sendMessage(sender, `🔍 Processing your request: *"${text}"*`);
+      await sendMessageWithClient(sender, `🔍 Processing your request: *"${text}"*`);
       
       // Try to extract intent from text
       const processingResult = {
@@ -1553,10 +1553,10 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       }
       
       if (processingResult.intent) {
-        await sendMessage(sender, `✅ I understand you want to ${processingResult.intent.replace('_', ' ')}.`);
+        await sendMessageWithClient(sender, `✅ I understand you want to ${processingResult.intent.replace('_', ' ')}.`);
         await executeVoiceIntent(sender, processingResult.intent, processingResult.entities, session, effectiveClient);
       } else {
-        await sendMessage(sender, "🤔 I'm not sure what you're looking for. Please use the menu options below.");
+        await sendMessageWithClient(sender, "🤔 I'm not sure what you're looking for. Please use the menu options below.");
         await sendMainMenuViaService(sender);
       }
     }
@@ -1578,7 +1578,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     urbanContext.category = category;
     urbanContext.step = "awaiting_location";
     
-    await sendMessage(sender, 
+    await sendMessageWithClient(sender, 
       `Where do you need the ${URBAN_HELP_CATEGORIES[category]?.name || 'service'}?`,
       effectiveClient
     );
@@ -1728,7 +1728,7 @@ What would you like to do with this listing?`;
       );
     } else {
       console.error("❌ [CONTROLLER] Listing ID mismatch");
-      await sendMessage(sender, "❌ Unable to edit listing. Please try again.");
+      await sendMessageWithClient(sender, "❌ Unable to edit listing. Please try again.");
     }
     return session;
   }
@@ -1940,14 +1940,14 @@ What would you like to do with this saved listing?`;
     const listing = session.savedListingsFlow.selectedListing;
     
     if (listing && listing.contact) {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         `📞 Contact the owner of "${listing.title || 'Untitled'}":\n\n` +
         `*Contact:* ${listing.contact}\n\n` +
         `You can call or message them directly.`
       );
     } else {
-      await sendMessage(sender, "❌ Contact information is not available for this listing.");
+      await sendMessageWithClient(sender, "❌ Contact information is not available for this listing.");
     }
     
     // Show the listing details again
@@ -2004,7 +2004,7 @@ What would you like to do with this saved listing?`;
     
     if (!currentListing) {
       console.log("❌ Lost track of current listing, resetting to menu");
-      await sendMessage(sender, "Sorry, I lost track of the current listing. Please try searching again.");
+      await sendMessageWithClient(sender, "Sorry, I lost track of the current listing. Please try searching again.");
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
@@ -2016,7 +2016,7 @@ What would you like to do with this saved listing?`;
       
       const listingData = session.housingFlow.listingData;
       if (!listingData || !listingData.listings) {
-        await sendMessage(sender, "No listings data found. Please search again.");
+        await sendMessageWithClient(sender, "No listings data found. Please search again.");
         session.step = "menu";
         session.state = 'initial';
         await saveSession(sender, session);
@@ -2030,7 +2030,7 @@ What would you like to do with this saved listing?`;
       
       if (currentIndex >= totalListings) {
         currentIndex = 0;
-        await sendMessage(sender, "🔄 You've seen all listings! Starting from the first one again.");
+        await sendMessageWithClient(sender, "🔄 You've seen all listings! Starting from the first one again.");
       }
       
       session.housingFlow.currentIndex = currentIndex;
@@ -2042,7 +2042,7 @@ What would you like to do with this saved listing?`;
     
     if (msg.startsWith("VIEW_DETAILS_")) {
       console.log("📄 View details button clicked");
-      await sendMessage(
+      await sendMessageWithClient(
         sender, 
         `*Full Details for ${currentListing.title || 'Property'}*\n\n` +
         `*Description:*\n${currentListing.description || "No full description provided."}\n\n` +
@@ -2062,22 +2062,22 @@ What would you like to do with this saved listing?`;
       const result = await saveListingToUser(sender, listingId);
       
       if (result.success) {
-        await sendMessage(
+        await sendMessageWithClient(
           sender, 
           `✅ Listing *${currentListing.title || 'Property'}* has been saved to your favorites! ❤️\n\n` +
           `You can view all your saved listings from the main menu.`
         );
       } else if (result.error === 'Listing already saved') {
-        await sendMessage(sender, `⚠️ This listing is already in your saved listings.`);
+        await sendMessageWithClient(sender, `⚠️ This listing is already in your saved listings.`);
       } else {
-        await sendMessage(sender, `❌ Could not save the listing. Please try again.`);
+        await sendMessageWithClient(sender, `❌ Could not save the listing. Please try again.`);
       }
       
       await handleShowListings(sender, session);
       return session;
     }
     
-    await sendMessage(sender, "Action unrecognized. Please select a button from the card.");
+    await sendMessageWithClient(sender, "Action unrecognized. Please select a button from the card.");
     await handleShowListings(sender, session); 
     return session;
   }
@@ -2137,7 +2137,7 @@ What would you like to do with this saved listing?`;
         console.log("🎤 Found audio metadata, processing voice message...");
         
         const audioUrl = metadata.audioMetadata.url;
-        await sendMessage(sender, "🎤 Processing your voice message...");
+        await sendMessageWithClient(sender, "🎤 Processing your voice message...");
         
         try {
           const processingResult = await voiceService.processVoiceMessage(
@@ -2171,7 +2171,7 @@ What would you like to do with this saved listing?`;
             }
             
             // Send with interactive buttons
-            await sendInteractiveButtons(
+            await sendInteractiveButtonsWithClient(
               effectiveClient,
               sender,
               confirmationMessage,
@@ -2185,11 +2185,11 @@ What would you like to do with this saved listing?`;
           } else {
             // Check if it's an access token error
             if (processingResult.error && processingResult.error.includes('access token')) {
-              await sendMessage(sender, 
+              await sendMessageWithClient(sender, 
                 "❌ Voice processing is temporarily unavailable. Please type your request instead."
               );
             } else {
-              await sendMessage(sender, `❌ ${processingResult.error}`);
+              await sendMessageWithClient(sender, `❌ ${processingResult.error}`);
             }
             session.step = "menu";
             session.state = 'initial';
@@ -2207,14 +2207,14 @@ What would you like to do with this saved listing?`;
           
           errorMessage += "Please type your request.";
           
-          await sendMessage(sender, errorMessage);
+          await sendMessageWithClient(sender, errorMessage);
           session.step = "menu";
           session.state = 'initial';
           await saveSession(sender, session);
         }
       } else {
         // No audio metadata - user typed "voice" command
-        await sendMessage(
+        await sendMessageWithClient(
           sender,
           "🎤 *Voice Message Mode*\n\n" +
           "You can now send a voice message in any language!\n\n" +
@@ -2242,7 +2242,7 @@ What would you like to do with this saved listing?`;
       
       // Default: show menu
       console.log(`❓ Unknown command: ${lower}, showing menu`);
-      await sendMessage(sender, "I didn't understand that. Choose an option or type *hi* to restart.");
+      await sendMessageWithClient(sender, "I didn't understand that. Choose an option or type *hi* to restart.");
       await sendMainMenuViaService(sender);
       session.step = "menu";
       session.state = 'initial';
@@ -2299,9 +2299,9 @@ async function handleUrbanHelpMenu(sender, session, client) {
               `Just tell me what you need!`;
   }
   
-  await sendMessage(sender, message, client);
+  await sendMessageWithClient(sender, message, client);
   
-  await sendInteractiveButtons(
+  await sendInteractiveButtonsWithClient(
     client,
     sender,
     "How would you like to proceed?",
@@ -2373,7 +2373,7 @@ async function handleShowListings(sender, session) {
     const effectiveClient = getEffectiveClient();
     
     if (!effectiveClient) {
-      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
@@ -2390,12 +2390,12 @@ async function handleShowListings(sender, session) {
     
     if (!listingData || !listingData.listings || listingData.listings.length === 0) {
       // No listing data in session, fetch top listings
-      await sendMessage(sender, "🔍 Fetching available listings...");
+      await sendMessageWithClient(sender, "🔍 Fetching available listings...");
       
       const topListings = await getTopListings(10); // Get top 10 listings
       
       if (!topListings || topListings.length === 0) {
-        await sendMessage(
+        await sendMessageWithClient(
           sender,
           "📭 No listings available at the moment.\n\n" +
           "Try posting a listing or check back later!"
@@ -2434,7 +2434,7 @@ async function handleShowListings(sender, session) {
     const currentListing = listings[currentIndex];
     
     if (!currentListing) {
-      await sendMessage(sender, "❌ Could not load listing details. Please try again.");
+      await sendMessageWithClient(sender, "❌ Could not load listing details. Please try again.");
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
@@ -2471,7 +2471,7 @@ async function handleShowListings(sender, session) {
     
   } catch (error) {
     console.error("❌ [LISTINGS] Error in handleShowListings:", error);
-    await sendMessage(sender, "❌ Sorry, I couldn't load the listings. Please try again.");
+    await sendMessageWithClient(sender, "❌ Sorry, I couldn't load the listings. Please try again.");
     
     session.step = "menu";
     session.state = 'initial';
@@ -2492,17 +2492,17 @@ async function handleManageListings(sender) {
     const effectiveClient = getEffectiveClient();
     
     if (!effectiveClient) {
-      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
       return;
     }
     
     // Fetch user's listings
-    await sendMessage(sender, "📋 Fetching your listings...");
+    await sendMessageWithClient(sender, "📋 Fetching your listings...");
     
     const userListings = await getUserListings(sender);
     
     if (!userListings || userListings.length === 0) {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         "📭 You don't have any active listings.\n\n" +
         "To post a listing, select '📝 Post Listing' from the main menu."
@@ -2548,7 +2548,7 @@ async function handleManageListings(sender) {
     
   } catch (error) {
     console.error("❌ [MANAGE LISTINGS] Error:", error);
-    await sendMessage(sender, "❌ Sorry, I couldn't load your listings. Please try again.");
+    await sendMessageWithClient(sender, "❌ Sorry, I couldn't load your listings. Please try again.");
     
     await sendMainMenuViaService(sender);
   }
@@ -2564,17 +2564,17 @@ async function handleSavedListings(sender) {
     const effectiveClient = getEffectiveClient();
     
     if (!effectiveClient) {
-      await sendMessage(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
       return;
     }
     
     // Fetch user's saved listings
-    await sendMessage(sender, "💾 Loading your saved listings...");
+    await sendMessageWithClient(sender, "💾 Loading your saved listings...");
     
     const savedListings = await getUserSavedListings(sender);
     
     if (!savedListings || savedListings.length === 0) {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         "📭 You haven't saved any listings yet.\n\n" +
         "Browse listings and tap the ❤️ button to save them for later!"
@@ -2620,7 +2620,7 @@ async function handleSavedListings(sender) {
     
   } catch (error) {
     console.error("❌ [SAVED LISTINGS] Error:", error);
-    await sendMessage(sender, "❌ Sorry, I couldn't load your saved listings. Please try again.");
+    await sendMessageWithClient(sender, "❌ Sorry, I couldn't load your saved listings. Please try again.");
     
     await sendMainMenuViaService(sender);
   }
@@ -2641,7 +2641,7 @@ async function handleListingSelection(sender, msg, session) {
     const selectedListing = userListings.find(listing => listing.id === listingId);
     
     if (!selectedListing) {
-      await sendMessage(sender, "❌ Listing not found. Please try again.");
+      await sendMessageWithClient(sender, "❌ Listing not found. Please try again.");
       await handleManageListings(sender);
       return;
     }
@@ -2678,7 +2678,7 @@ What would you like to do with this listing?`;
     
   } catch (error) {
     console.error("❌ [MANAGE LISTINGS] Error in selection:", error);
-    await sendMessage(sender, "❌ Error loading listing details. Please try again.");
+    await sendMessageWithClient(sender, "❌ Error loading listing details. Please try again.");
     await handleManageListings(sender);
   }
 }
@@ -2694,7 +2694,7 @@ async function handleDeleteListing(sender, session) {
     const listing = session.manageListings?.selectedListing;
     
     if (!listingId || !listing) {
-      await sendMessage(sender, "❌ Could not find listing to delete.");
+      await sendMessageWithClient(sender, "❌ Could not find listing to delete.");
       await handleManageListings(sender);
       return;
     }
@@ -2703,7 +2703,7 @@ async function handleDeleteListing(sender, session) {
     const result = await deleteListing(sender, listingId);
     
     if (result.success) {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         `✅ Listing *${listing.title || 'Untitled'}* has been deleted successfully.`
       );
@@ -2716,7 +2716,7 @@ async function handleDeleteListing(sender, session) {
       
       await sendMainMenuViaService(sender);
     } else {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         `❌ Failed to delete listing: ${result.error || 'Unknown error'}`
       );
@@ -2751,7 +2751,7 @@ What would you like to do with this listing?`;
     
   } catch (error) {
     console.error("❌ [MANAGE LISTINGS] Error deleting:", error);
-    await sendMessage(sender, "❌ Error deleting listing. Please try again.");
+    await sendMessageWithClient(sender, "❌ Error deleting listing. Please try again.");
     await handleManageListings(sender);
   }
 }
@@ -2771,7 +2771,7 @@ async function handleSavedListingSelection(sender, msg, session) {
     const selectedListing = savedListings.find(listing => listing.id === listingId);
     
     if (!selectedListing) {
-      await sendMessage(sender, "❌ Saved listing not found. Please try again.");
+      await sendMessageWithClient(sender, "❌ Saved listing not found. Please try again.");
       await handleSavedListings(sender);
       return;
     }
@@ -2808,7 +2808,7 @@ What would you like to do with this saved listing?`;
     
   } catch (error) {
     console.error("❌ [SAVED LISTINGS] Error in selection:", error);
-    await sendMessage(sender, "❌ Error loading saved listing details. Please try again.");
+    await sendMessageWithClient(sender, "❌ Error loading saved listing details. Please try again.");
     await handleSavedListings(sender);
   }
 }
@@ -2824,7 +2824,7 @@ async function handleRemoveSavedListing(sender, session) {
     const listing = session.savedListingsFlow?.selectedListing;
     
     if (!listingId || !listing) {
-      await sendMessage(sender, "❌ Could not find saved listing to remove.");
+      await sendMessageWithClient(sender, "❌ Could not find saved listing to remove.");
       await handleSavedListings(sender);
       return;
     }
@@ -2833,7 +2833,7 @@ async function handleRemoveSavedListing(sender, session) {
     const result = await removeSavedListing(sender, listingId);
     
     if (result.success) {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         `✅ Listing *${listing.title || 'Untitled'}* has been removed from your saved list.`
       );
@@ -2846,7 +2846,7 @@ async function handleRemoveSavedListing(sender, session) {
       
       await sendMainMenuViaService(sender);
     } else {
-      await sendMessage(
+      await sendMessageWithClient(
         sender,
         `❌ Failed to remove listing: ${result.error || 'Unknown error'}`
       );
@@ -2881,7 +2881,7 @@ What would you like to do with this saved listing?`;
     
   } catch (error) {
     console.error("❌ [SAVED LISTINGS] Error removing:", error);
-    await sendMessage(sender, "❌ Error removing saved listing. Please try again.");
+    await sendMessageWithClient(sender, "❌ Error removing saved listing. Please try again.");
     await handleSavedListings(sender);
   }
 }
@@ -2895,7 +2895,7 @@ What would you like to do with this saved listing?`;
  */
 async function handlePostListingFlow(sender) {
   console.log("📝 [POST LISTING] Placeholder - function not fully implemented");
-  await sendMessage(sender, "The post listing feature is currently unavailable. Please try again later.");
+  await sendMessageWithClient(sender, "The post listing feature is currently unavailable. Please try again later.");
   
   // Update session
   const session = await getSession(sender);
@@ -2920,7 +2920,7 @@ async function handleFlowSubmission(metadata, sender) {
  */
 async function handleFieldEdit(sender, msg, session) {
   console.log("✏️ [EDIT] Placeholder - field edit not implemented");
-  await sendMessage(sender, "The edit feature is currently unavailable. Please try again later.");
+  await sendMessageWithClient(sender, "The edit feature is currently unavailable. Please try again later.");
   
   session.manageListings.step = "awaiting_action";
   await saveSession(sender, session);
@@ -2957,7 +2957,7 @@ What would you like to do with this listing?`;
  */
 async function updateFieldValue(sender, text, session) {
   console.log("✏️ [UPDATE] Placeholder - update field not implemented");
-  await sendMessage(sender, "The update feature is currently unavailable. Please try again later.");
+  await sendMessageWithClient(sender, "The update feature is currently unavailable. Please try again later.");
   
   delete session.editFlow;
   session.manageListings.step = "awaiting_action";
@@ -2995,7 +2995,7 @@ What would you like to do with this listing?`;
  */
 async function saveAllEdits(sender, session) {
   console.log("💾 [SAVE] Placeholder - save edits not implemented");
-  await sendMessage(sender, "The save edits feature is currently unavailable. Please try again later.");
+  await sendMessageWithClient(sender, "The save edits feature is currently unavailable. Please try again later.");
   
   delete session.editFlow;
   session.manageListings.step = "awaiting_action";
@@ -3033,7 +3033,7 @@ What would you like to do with this listing?`;
  */
 async function handleTextListingInput(sender, text, session) {
   console.log("📝 [TEXT LISTING] Placeholder - text listing input not implemented");
-  await sendMessage(sender, "The text listing input feature is currently unavailable. Please use the menu options.");
+  await sendMessageWithClient(sender, "The text listing input feature is currently unavailable. Please use the menu options.");
   
   session.step = "menu";
   session.state = 'initial';

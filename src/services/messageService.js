@@ -14,15 +14,30 @@ function cleanString(str, maxLength = 100) {
 }
 
 // -------------------------------------------------------------
-// 1) SEND MESSAGE (FINAL, UNCONDITIONAL LOGGING)
+// 1) SEND MESSAGE (FINAL, UNCONDITIONAL LOGGING) - UPDATED VERSION
 // -------------------------------------------------------------
 async function sendMessage(to, messageOrPayload) {
   const logType = messageOrPayload.type || 'Text';
-  const payload = typeof messageOrPayload === 'string'
-    ? { messaging_product: "whatsapp", to, type: "text", text: { body: messageOrPayload } }
-    : messageOrPayload;
+  
+  // Prepare payload - ensure messaging_product is included
+  let payload;
+  if (typeof messageOrPayload === 'string') {
+    payload = { 
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to, 
+      type: "text", 
+      text: { body: messageOrPayload } 
+    };
+  } else {
+    // Ensure the payload has required WhatsApp fields
+    payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      ...messageOrPayload
+    };
+  }
 
-  // Add debug logging for payload type
   console.log(`📤 Attempting to send ${logType} message to ${to}`);
   
   try {
@@ -61,6 +76,7 @@ async function sendMessage(to, messageOrPayload) {
 async function sendText(to, text) {
   const payload = {
     messaging_product: "whatsapp",
+    recipient_type: "individual",
     to,
     type: "text",
     text: {
@@ -149,6 +165,7 @@ async function sendButtons(to, bodyText, buttons, headerText) {
     
     const payload = {
       messaging_product: "whatsapp",
+      recipient_type: "individual",
       to,
       type: "interactive",
       interactive: {
@@ -227,6 +244,7 @@ async function sendList(to, headerText, bodyText, buttonText, sections) {
 
     const payload = {
       messaging_product: "whatsapp",
+      recipient_type: "individual",
       to,
       type: "interactive",
       interactive: {
@@ -475,33 +493,62 @@ function getTimeAgo(date) {
     }
 }
 
-
-// src/services/messageService.js
-// ... (keep all your existing code at the top) ...
-
 // -------------------------------------------------------------
-// 11) SEND INTERACTIVE BUTTONS (for voice service compatibility)
+// 10) SEND INTERACTIVE BUTTONS (for voice service compatibility) - UPDATED WITH PROPER VALIDATION
 // -------------------------------------------------------------
 async function sendInteractiveButtons(to, message, buttons) {
   console.log("🔘 [MESSAGE SERVICE] sendInteractiveButtons called");
-  console.log("🔘 Buttons:", buttons);
   
   try {
+    // Validate buttons parameter
+    if (!buttons) {
+      console.error("❌ [INTERACTIVE] No buttons provided");
+      buttons = [
+        { id: 'default_yes', text: '✅ Yes' },
+        { id: 'default_no', text: '🔄 No' },
+        { id: 'default_type', text: '📝 Type' }
+      ];
+    }
+    
+    // Ensure buttons is an array
+    if (!Array.isArray(buttons)) {
+      console.error("❌ [INTERACTIVE] Buttons is not an array:", typeof buttons);
+      buttons = [];
+    }
+    
+    console.log("🔘 Message:", message.substring(0, 50) + (message.length > 50 ? "..." : ""));
+    console.log("🔘 Button count:", buttons.length);
+    
     // Format buttons for WhatsApp API
     const formattedButtons = buttons.map((btn, index) => {
-      const id = String(btn.id || `btn_${index}`).slice(0, 256);
-      const text = String(btn.text || btn.title || `Option ${index + 1}`).slice(0, 20);
+      // Handle different button formats
+      const id = btn.id || btn.buttonId || `btn_${index}`;
+      const text = btn.text || btn.title || btn.buttonText || `Option ${index + 1}`;
+      
+      console.log(`🔘 Button ${index + 1}: id="${String(id).slice(0, 20)}", text="${String(text).slice(0, 20)}"`);
       
       return {
         type: "reply",
         reply: {
-          id: id,
-          title: text
+          id: String(id).slice(0, 256), // WhatsApp limit: 256 chars
+          title: String(text).slice(0, 20) // WhatsApp limit: 20 chars
         }
       };
     });
 
-    // Create interactive payload with REQUIRED messaging_product parameter
+    // Ensure we have at least one button
+    if (formattedButtons.length === 0) {
+      console.error("❌ [INTERACTIVE] No valid buttons after formatting");
+      formattedButtons.push({
+        type: "reply",
+        reply: {
+          id: "default_ok",
+          title: "✅ OK"
+        }
+      });
+    }
+
+    // Create interactive payload
     const payload = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
@@ -510,7 +557,7 @@ async function sendInteractiveButtons(to, message, buttons) {
       interactive: {
         type: "button",
         body: {
-          text: String(message).slice(0, 1024)
+          text: String(message).slice(0, 1024) // WhatsApp limit: 1024 chars
         },
         action: {
           buttons: formattedButtons
@@ -519,91 +566,56 @@ async function sendInteractiveButtons(to, message, buttons) {
     };
 
     console.log("📦 Sending interactive buttons via sendMessage...");
-    return await sendMessage(to, payload);
+    const result = await sendMessage(to, payload);
+    console.log("✅ sendInteractiveButtons completed successfully");
+    return result;
     
   } catch (error) {
     console.error("❌ sendInteractiveButtons error:", error.message);
+    console.error("❌ Error stack:", error.stack);
     
-    // Fallback to simple text
-    const fallbackText = `${message}\n\nPlease reply with:\n${buttons.map((btn, i) => `${i + 1}. ${btn.text || btn.title || btn.id}`).join('\n')}`;
-    
-    return await sendText(to, fallbackText);
+    // Detailed fallback to simple text
+    try {
+      console.log("🔄 Falling back to text message...");
+      
+      const buttonText = Array.isArray(buttons) 
+        ? buttons.map((btn, i) => {
+            const text = btn.text || btn.title || btn.buttonText || btn.id || `Option ${i + 1}`;
+            return `${i + 1}. ${text}`;
+          }).join('\n')
+        : '1. ✅ Yes\n2. 🔄 No\n3. 📝 Type';
+      
+      const fallbackText = `${message}\n\nPlease reply with:\n${buttonText}`;
+      
+      console.log("📤 Sending fallback text message...");
+      return await sendText(to, fallbackText);
+    } catch (fallbackError) {
+      console.error("❌ Ultimate fallback also failed:", fallbackError.message);
+      throw error; // Re-throw original error
+    }
   }
 }
 
 // -------------------------------------------------------------
-// 12) SEND MESSAGE WITH CLIENT PARAMETER (for compatibility)
+// 11) SEND MESSAGE WITH CLIENT PARAMETER (for compatibility)
 // -------------------------------------------------------------
 async function sendMessageWithClient(to, message, client = null) {
   // Ignore client parameter, use our own sendMessage
+  console.log("📤 sendMessageWithClient called (client ignored)");
   return await sendMessage(to, message);
 }
 
 // -------------------------------------------------------------
-// 13) SEND INTERACTIVE BUTTONS WITH CLIENT (for compatibility)
+// 12) SEND INTERACTIVE BUTTONS WITH CLIENT (for compatibility)
 // -------------------------------------------------------------
 async function sendInteractiveButtonsWithClient(client, to, message, buttons) {
   // Ignore client parameter, use our own function
+  console.log("🔘 sendInteractiveButtonsWithClient called (client ignored)");
   return await sendInteractiveButtons(to, message, buttons);
 }
 
 // -------------------------------------------------------------
-// 14) UPDATE YOUR sendMessage FUNCTION TO INCLUDE messaging_product
-// -------------------------------------------------------------
-// Find your existing sendMessage function and update it:
-async function sendMessage(to, messageOrPayload) {
-  const logType = messageOrPayload.type || 'Text';
-  
-  // Prepare payload - ensure messaging_product is included
-  let payload;
-  if (typeof messageOrPayload === 'string') {
-    payload = { 
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to, 
-      type: "text", 
-      text: { body: messageOrPayload } 
-    };
-  } else {
-    // Ensure the payload has required WhatsApp fields
-    payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      ...messageOrPayload
-    };
-  }
-
-  console.log(`📤 Attempting to send ${logType} message to ${to}`);
-  
-  try {
-    const res = await axios.post(API_URL, payload, {
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    const messageId = res.data.messages?.[0]?.id || 'N/A';
-    console.log(`✅ ${logType} sent successfully (ID: ${messageId})`);
-    return res.data;
-  } catch (err) {
-    console.error("❌ FINAL SEND MESSAGE ERROR:");
-    console.error("❌ Status:", err.response?.status);
-    console.error("❌ Message:", err.message);
-    
-    // Log the payload that caused the error
-    console.error("❌ Payload sent:", JSON.stringify(payload, null, 2));
-    
-    if (err.response?.data) {
-      console.error("❌ API Error Response:", JSON.stringify(err.response.data));
-    }
-
-    throw new Error(`API Send Failed: ${err.message}`, { cause: err.response?.data });
-  }
-}
-
-// -------------------------------------------------------------
-// 15) UPDATE EXPORTS - Add the new functions
+// 13) EXPORTS
 // -------------------------------------------------------------
 module.exports = {
   sendMessage, 
@@ -615,7 +627,7 @@ module.exports = {
   sendListingCard,
   sendSavedListingCard,
   
-  // NEW: Add these for compatibility
+  // Compatibility functions
   sendInteractiveButtons,      // For voice service
   sendMessageWithClient,       // For controller compatibility
   sendInteractiveButtonsWithClient  // For controller compatibility
