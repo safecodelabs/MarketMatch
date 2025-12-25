@@ -39,12 +39,12 @@ const {
 
 // ✅ UPDATED: Added sendSavedListingCard
 const { 
-    sendMessageWithClient: sendMessageWithClientWithClient, // Use the compatibility version
+    sendMessageWithClient, // ✅ Use the actual name
     sendList, 
     sendReplyButtons, 
     sendListingCard,
     sendSavedListingCard,
-    sendInteractiveButtonsWithClientWithClient // Use the compatibility version
+    sendInteractiveButtonsWithClient // ✅ Use the actual name
 } = require("./src/services/messageService");
 const { db } = require("./database/firestore");
 
