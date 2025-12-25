@@ -9,24 +9,106 @@ const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
 
-const voiceProcessor = require('../core/ai/voiceProcessor');
-const messageUtils = require('../../utils/messageUtils');
-const constants = require('../../utils/constants');
+// Safely import ALL dependencies with fallbacks
+let voiceProcessor, messageUtils, constants, multiLanguage, firestoreDb;
 
-// Import multi-language support
-const multiLanguage = require('../../utils/multiLanguage');
+try {
+    // ✅ CORRECT: Import from separate file
+    voiceProcessor = require('../core/ai/voiceProcessor');
+    console.log('🎤 [VOICE AI] VoiceProcessor loaded successfully');
+} catch (error) {
+    console.warn('🎤 [VOICE AI] VoiceProcessor not found, creating mock');
+    voiceProcessor = {
+        transcribeAudio: async () => {
+            console.warn('[MOCK] Transcription disabled');
+            return null;
+        },
+        extractIntent: async () => ({
+            intent: 'unknown',
+            confidence: 0,
+            entities: {},
+            method: 'mock'
+        }),
+        isUrbanHelpRequest: () => false
+    };
+}
 
-// Import database functions
-let firestoreDb;
+try {
+    messageUtils = require('../../utils/messageUtils');
+    console.log('🎤 [VOICE AI] messageUtils loaded');
+} catch (error) {
+    console.warn('🎤 [VOICE AI] messageUtils not found, using fallback');
+    messageUtils = {
+        sendInteractiveButtons: async (client, phoneNumber, text, buttons) => {
+            console.log('[MOCK BUTTONS]', text.substring(0, 50));
+            if (client && client.sendMessage) {
+                const buttonText = buttons.map(b => `${b.text}`).join('\n');
+                await client.sendMessage(phoneNumber, { 
+                    text: `${text}\n\n${buttonText}` 
+                });
+            }
+        }
+    };
+}
+
+try {
+    constants = require('../../utils/constants');
+    console.log('🎤 [VOICE AI] constants loaded');
+} catch (error) {
+    console.warn('🎤 [VOICE AI] constants not found, using defaults');
+    constants = {
+        VOICE_CONFIDENCE_THRESHOLD: 0.7
+    };
+}
+
+try {
+    multiLanguage = require('../../utils/multiLanguage');
+    console.log('🎤 [VOICE AI] multiLanguage loaded');
+} catch (error) {
+    console.warn('🎤 [VOICE AI] multiLanguage not found, using fallback');
+    multiLanguage = {
+        getUserLanguage: () => 'en',
+        setUserLanguage: () => {},
+        getMessage: (lang, key, params) => {
+            const messages = {
+                'en': {
+                    'not_understood': "I didn't understand that. Could you please rephrase?",
+                    'try_again': "Please try again or type your request.",
+                    'type_instead': "Please type your request:",
+                    'no_results': "No results found for your request.",
+                    'searching': "Searching...",
+                    'ask_category': "What type of service do you need?",
+                    'ask_location': "Where do you need the {category}?",
+                    'urban_help_clarify': "Is this about finding a service provider?"
+                },
+                'hi': {
+                    'not_understood': "मुझे समझ नहीं आया। कृपया दोबारा कहें।",
+                    'try_again': "कृपया फिर से कोशिश करें या टाइप करें।",
+                    'type_instead': "कृपया टाइप करें:",
+                    'no_results': "आपकी खोज के लिए कोई परिणाम नहीं मिला।",
+                    'searching': "खोज रहा हूं...",
+                    'ask_category': "आपको किस तरह की सेवा चाहिए?",
+                    'ask_location': "आपको {category} कहाँ चाहिए?",
+                    'urban_help_clarify': "क्या यह सर्विस प्रोवाइडर ढूंढने के बारे में है?"
+                }
+            };
+            return messages[lang]?.[key] || key;
+        }
+    };
+}
+
 try {
     firestoreDb = require('../../database/firestore');
+    console.log('🎤 [VOICE AI] firestoreDb loaded');
 } catch (error) {
-    console.warn('[VOICE] Database functions not found, using mock data');
+    console.warn('🎤 [VOICE AI] firestoreDb not found, using mock data');
     firestoreDb = null;
 }
 
 class VoiceService {
     constructor() {
+        console.log('🎤 [VOICE AI] Initializing VoiceService...');
+        
         this.supportedAudioFormats = ['ogg', 'opus', 'mp3', 'wav', 'm4a'];
         this.maxAudioSize = 10 * 1024 * 1024; // 10MB
         this.tempDir = path.join(__dirname, '../../temp');
@@ -37,18 +119,18 @@ class VoiceService {
         }
         
         // WhatsApp API Configuration
-this.whatsappAccessToken = process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN;
-this.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_ID || process.env.WHATSAPP_PHONE_NUMBER_ID; // CHANGED
-this.whatsappApiVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
+        this.whatsappAccessToken = process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN;
+        this.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_ID || process.env.WHATSAPP_PHONE_NUMBER_ID;
+        this.whatsappApiVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
 
-console.log(`🎤 [VOICE AI] WhatsApp Access Token: ${this.whatsappAccessToken ? '✅ Available' : '❌ Missing'}`);
-console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '✅ Available' : '❌ Missing'}`);
+        console.log(`🎤 [VOICE AI] WhatsApp Access Token: ${this.whatsappAccessToken ? '✅ Available' : '❌ Missing'}`);
+        console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '✅ Available' : '❌ Missing'}`);
         
         // Log level control
         this.LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
         this.levels = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
         
-        // ✅ NEW: Initialize WhatsApp credentials
+        // Initialize WhatsApp credentials
         this.initializeWhatsAppCredentials();
         
         // Urban Help Categories
@@ -111,14 +193,12 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
         };
         
         console.log('🎤 [VOICE AI] Voice Service with Urban Help initialized');
-        console.log(`🎤 [VOICE AI] WhatsApp Access Token: ${this.whatsappAccessToken ? '✅ Available' : '❌ Missing'}`);
     }
 
     /**
-     * ✅ NEW: Initialize WhatsApp credentials
+     * Initialize WhatsApp credentials
      */
     initializeWhatsAppCredentials() {
-        // Try to get from environment if not set in constructor
         if (!this.whatsappAccessToken) {
             this.whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN;
         }
@@ -138,7 +218,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * ✅ NEW: Set WhatsApp credentials programmatically
+     * Set WhatsApp credentials programmatically
      */
     setWhatsAppCredentials(config) {
         this.whatsappAccessToken = config.accessToken || this.whatsappAccessToken;
@@ -158,7 +238,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * Process incoming voice message - UPDATED: Transcription only, no intent extraction
+     * Process incoming voice message - Transcription only, no intent extraction
      */
     async processVoiceMessage(message, mediaUrl, client) {
         try {
@@ -251,7 +331,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * ✅ UPDATED: Download audio with proper authentication - Improved error handling
+     * Download audio with proper authentication - Improved error handling
      */
     async downloadAudioWithAuth(mediaUrl, messageId) {
         try {
@@ -299,7 +379,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * ✅ NEW: Alternative download methods
+     * Alternative download methods
      */
     async tryAlternativeDownload(mediaUrl, messageId) {
         this.log('INFO', 'Trying alternative download methods...');
@@ -331,7 +411,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * ✅ NEW: Direct download without authentication
+     * Direct download without authentication
      */
     async downloadAudioDirect(mediaUrl, messageId) {
         try {
@@ -359,7 +439,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * ✅ NEW: Download with retry mechanism
+     * Download with retry mechanism
      */
     async downloadAudioWithRetry(mediaUrl, messageId) {
         const maxRetries = 3;
@@ -395,7 +475,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * NEW: Send transcription confirmation to user
+     * Send transcription confirmation to user
      */
     async sendTranscriptionConfirmation(phoneNumber, transcription, client) {
         try {
@@ -420,7 +500,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * NEW: Process confirmed transcription (after user confirms)
+     * Process confirmed transcription (after user confirms)
      */
     async processConfirmedTranscription(phoneNumber, confirmedTranscription, client) {
         try {
@@ -459,7 +539,7 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
     }
 
     /**
-     * NEW: Extract intent after confirmation (wrapper for existing handleIntentConfirmation)
+     * Extract intent after confirmation
      */
     async extractIntentAfterConfirmation(phoneNumber, transcription, session, client) {
         try {
@@ -868,59 +948,67 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
      * Handle confirmation response from user
      */
     async handleConfirmationResponse(phoneNumber, response, session, client) {
-        const voiceContext = session.voiceContext;
-        
-        if (!voiceContext) {
-            await this.sendMessage(client, phoneNumber, "Session expired. Please start over.");
-            return;
-        }
-        
-        const userLang = multiLanguage.getUserLanguage(phoneNumber) || 'en';
-        
-        // Handle urban help responses
-        if (voiceContext.isUrbanHelp) {
-            await this.handleUrbanHelpResponse(phoneNumber, response, voiceContext, session, client, userLang);
-            return;
-        }
-        
-        // Handle regular property-related responses
-        switch(response) {
-            case 'confirm_yes':
-            case `confirm_${voiceContext.intent}`:
-                // User confirmed - execute intent
-                await this.sendMessage(client, phoneNumber, "✅ Great! Let me find that for you...");
-                await this.executeAIIntent(phoneNumber, voiceContext, client, userLang);
-                break;
-                
-            case 'try_again':
-            case 'try_voice':
-                // User wants to try again
-                await this.sendMessage(client, phoneNumber, 
-                    multiLanguage.getMessage(userLang, 'try_again') || "🔄 Please send your request again, more clearly.");
-                await this.sendVoiceHelp(phoneNumber, client, userLang);
-                break;
-                
-            case 'use_text':
-            case 'use_buttons':
-                // User wants to type
-                await this.sendMessage(client, phoneNumber, 
-                    multiLanguage.getMessage(userLang, 'type_instead') || "📝 Please type your request:");
-                break;
-                
-            case 'main_menu':
-                // Return to main menu
-                await this.sendMessage(client, phoneNumber, "🏠 Returning to main menu...");
-                break;
-                
-            default:
-                await this.sendMessage(client, phoneNumber, 
-                    multiLanguage.getMessage(userLang, 'not_understood') || "I didn't understand that response.");
-                break;
-        }
-        
-        // Clear voice context unless continuing
-        if (response !== 'confirm_yes' && !response.startsWith('confirm_')) {
-            delete session.voiceContext;
+        try {
+            const sessionStore = require('../../utils/sessionStore');
+            const fullSession = await sessionStore.get(phoneNumber) || {};
+            const voiceContext = fullSession.voiceContext;
+            
+            if (!voiceContext) {
+                await this.sendMessage(client, phoneNumber, "Session expired. Please start over.");
+                return;
+            }
+            
+            const userLang = multiLanguage.getUserLanguage(phoneNumber) || 'en';
+            
+            // Handle urban help responses
+            if (voiceContext.isUrbanHelp) {
+                await this.handleUrbanHelpResponse(phoneNumber, response, voiceContext, fullSession, client, userLang);
+                return;
+            }
+            
+            // Handle regular property-related responses
+            switch(response) {
+                case 'confirm_yes':
+                case `confirm_${voiceContext.intent}`:
+                    // User confirmed - execute intent
+                    await this.sendMessage(client, phoneNumber, "✅ Great! Let me find that for you...");
+                    await this.executeAIIntent(phoneNumber, voiceContext, client, userLang);
+                    break;
+                    
+                case 'try_again':
+                case 'try_voice':
+                    // User wants to try again
+                    await this.sendMessage(client, phoneNumber, 
+                        multiLanguage.getMessage(userLang, 'try_again') || "🔄 Please send your request again, more clearly.");
+                    await this.sendVoiceHelp(phoneNumber, client, userLang);
+                    break;
+                    
+                case 'use_text':
+                case 'use_buttons':
+                    // User wants to type
+                    await this.sendMessage(client, phoneNumber, 
+                        multiLanguage.getMessage(userLang, 'type_instead') || "📝 Please type your request:");
+                    break;
+                    
+                case 'main_menu':
+                    // Return to main menu
+                    await this.sendMessage(client, phoneNumber, "🏠 Returning to main menu...");
+                    break;
+                    
+                default:
+                    await this.sendMessage(client, phoneNumber, 
+                        multiLanguage.getMessage(userLang, 'not_understood') || "I didn't understand that response.");
+                    break;
+            }
+            
+            // Clear voice context unless continuing
+            if (response !== 'confirm_yes' && !response.startsWith('confirm_')) {
+                delete fullSession.voiceContext;
+                await sessionStore.set(phoneNumber, fullSession);
+            }
+        } catch (error) {
+            this.log('ERROR', `handleConfirmationResponse failed: ${error.message}`);
+            await this.sendMessage(client, phoneNumber, "An error occurred. Please try again.");
         }
     }
 
@@ -928,57 +1016,65 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
      * Handle urban help response
      */
     async handleUrbanHelpResponse(phoneNumber, response, voiceContext, session, client, userLang) {
-        if (response.startsWith('confirm_urban_')) {
-            // User confirmed - execute urban help search
-            await this.sendMessage(client, phoneNumber, 
-                multiLanguage.getMessage(userLang, 'searching') || "✅ Great! Finding the best service providers for you...");
-            await this.executeUrbanHelpIntent(phoneNumber, voiceContext, client, userLang);
+        try {
+            const sessionStore = require('../../utils/sessionStore');
             
-        } else if (response === 'try_again_urban') {
-            // User wants to try again
-            await this.sendMessage(client, phoneNumber, 
-                "🔄 Please send your request again.");
-            
-        } else if (response === 'type_instead') {
-            // User wants to type
-            await this.sendMessage(client, phoneNumber, 
-                "📝 Please type your request:");
-            
-        } else if (response.startsWith('category_')) {
-            // User selected a category
-            const category = response.replace('category_', '');
-            voiceContext.entities.category = category;
-            
-            // Check if location is still missing
-            if (!voiceContext.entities.location) {
-                await this.askForMissingUrbanHelpInfo(phoneNumber, client, voiceContext.entities, ['location'], userLang);
-                await this.saveVoiceContext(phoneNumber, voiceContext);
-            } else {
+            if (response.startsWith('confirm_urban_')) {
+                // User confirmed - execute urban help search
+                await this.sendMessage(client, phoneNumber, 
+                    multiLanguage.getMessage(userLang, 'searching') || "✅ Great! Finding the best service providers for you...");
+                await this.executeUrbanHelpIntent(phoneNumber, voiceContext, client, userLang);
+                
+            } else if (response === 'try_again_urban') {
+                // User wants to try again
+                await this.sendMessage(client, phoneNumber, 
+                    "🔄 Please send your request again.");
+                
+            } else if (response === 'type_instead') {
+                // User wants to type
+                await this.sendMessage(client, phoneNumber, 
+                    "📝 Please type your request:");
+                
+            } else if (response.startsWith('category_')) {
+                // User selected a category
+                const category = response.replace('category_', '');
+                voiceContext.entities.category = category;
+                
+                // Check if location is still missing
+                if (!voiceContext.entities.location) {
+                    await this.askForMissingUrbanHelpInfo(phoneNumber, client, voiceContext.entities, ['location'], userLang);
+                    await this.saveVoiceContext(phoneNumber, voiceContext);
+                } else {
+                    // Show confirmation with both category and location
+                    await this.sendUrbanHelpConfirmation(phoneNumber, client, voiceContext, userLang);
+                    await this.saveVoiceContext(phoneNumber, voiceContext);
+                }
+                
+                return; // Don't clear context yet
+                
+            } else if (response.startsWith('location_')) {
+                // User selected a location
+                const location = response.replace('location_', '');
+                voiceContext.entities.location = location.charAt(0).toUpperCase() + location.slice(1);
+                
                 // Show confirmation with both category and location
                 await this.sendUrbanHelpConfirmation(phoneNumber, client, voiceContext, userLang);
                 await this.saveVoiceContext(phoneNumber, voiceContext);
+                return; // Don't clear context yet
+                
+            } else if (response === 'modify_details') {
+                // User wants to modify
+                await this.sendMessage(client, phoneNumber, 
+                    "✏️ What would you like to change? Please send your updated request.");
             }
             
-            return; // Don't clear context yet
-            
-        } else if (response.startsWith('location_')) {
-            // User selected a location
-            const location = response.replace('location_', '');
-            voiceContext.entities.location = location.charAt(0).toUpperCase() + location.slice(1);
-            
-            // Show confirmation with both category and location
-            await this.sendUrbanHelpConfirmation(phoneNumber, client, voiceContext, userLang);
-            await this.saveVoiceContext(phoneNumber, voiceContext);
-            return; // Don't clear context yet
-            
-        } else if (response === 'modify_details') {
-            // User wants to modify
-            await this.sendMessage(client, phoneNumber, 
-                "✏️ What would you like to change? Please send your updated request.");
+            // Clear voice context
+            delete session.voiceContext;
+            await sessionStore.set(phoneNumber, session);
+        } catch (error) {
+            this.log('ERROR', `handleUrbanHelpResponse failed: ${error.message}`);
+            await this.sendMessage(client, phoneNumber, "An error occurred. Please try again.");
         }
-        
-        // Clear voice context
-        delete session.voiceContext;
     }
 
     /**
@@ -1462,15 +1558,6 @@ console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '
                 quality: 'A-Grade'
             }
         ];
-    }
-
-    /**
-     * Get fallback transcription - UPDATED: Return null instead of random text
-     */
-    getFallbackTranscription() {
-        // Return null to trigger proper error handling
-        console.warn('[VOICE] Transcription failed - returning null');
-        return null;
     }
 
     /**
