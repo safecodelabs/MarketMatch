@@ -30,7 +30,7 @@ const {
   isListingSaved,
   searchListingsByCriteria, // NEW: For voice search results
   // ✅ ADDED: Urban Help Functions
-  searchUrbanHelp,
+  searchUrbanServices, // ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
   addUrbanHelpProvider,
   getProviderById,
   updateProviderAvailability,
@@ -82,8 +82,8 @@ function getEffectiveClient(client) {
     console.error("❌ [CONTROLLER] Client passed:", !!client);
     console.error("❌ [CONTROLLER] Global client:", !!globalWhatsAppClient);
   } else {
-    console.log("✅ [CONTROLLER] Client available, has sendMessageWithClient:", 
-                typeof effectiveClient.sendMessageWithClient === 'function');
+    console.log("✅ [CONTROLLER] Client available, has sendMessage:", 
+                typeof effectiveClient.sendMessage === 'function');
   }
   
   return effectiveClient;
@@ -267,14 +267,25 @@ async function handleVoiceMessage(sender, metadata, client) {
 function isUrbanHelpRequest(transcription) {
   const lowerText = transcription.toLowerCase();
   
-  // Check for urban help keywords
-  const urbanHelpKeywords = [
-    'electrician', 'plumber', 'maid', 'carpenter', 'cleaner', 
-    'technician', 'driver', 'painter', 'naukrani', 'househelp',
-    'service', 'repair', 'chahiye', 'required', 'needed'
+  // Check for general service keywords (not specific categories)
+  const serviceKeywords = [
+    'service', 'chahiye', 'required', 'needed', 'want', 'looking for',
+    'kaam', 'required', 'mujhe', 'karwana', 'karane', 'help', 'sahayata',
+    'required', 'wanted', 'searching', 'find', 'available', 'contractor'
   ];
   
-  return urbanHelpKeywords.some(keyword => lowerText.includes(keyword));
+  // Also check for location indicators
+  const locationIndicators = ['in', 'at', 'near', 'around', 'mein', 'पर', 'में'];
+  
+  // If it contains service keywords AND location indicators, it's likely a service request
+  const hasServiceKeyword = serviceKeywords.some(keyword => lowerText.includes(keyword));
+  const hasLocationIndicator = locationIndicators.some(indicator => lowerText.includes(indicator));
+  
+  // Also check if it sounds like a service request pattern
+  // Patterns like: "[service] in [location]" or "[location] mein [service]"
+  const servicePattern = /\b(in|at|near|around|mein|पर|में)\b/i.test(lowerText);
+  
+  return hasServiceKeyword || servicePattern || hasLocationIndicator;
 }
 
 /**
@@ -497,21 +508,30 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
 }
 
 /**
- * Execute urban help search
+ * Execute urban help search - UPDATED TO USE searchUrbanServices
  */
 async function executeUrbanHelpSearch(sender, entities, session, client, userLang) {
   try {
     const { category, location } = entities;
     
-    // Search for service providers
-    const results = await searchUrbanHelp(category, location, {
-      immediate: entities.timing === 'immediate',
-      minRating: 4.0
-    });
+    console.log(`🔍 [URBAN HELP] Searching for "${category}" in "${location}"`);
+    
+    // Get category name for display
+    const categoryName = getCategoryDisplayName(category);
+    
+    // Send searching message
+    await sendMessageWithClient(
+      sender,
+      `🔍 Searching for ${categoryName} in ${location}...`,
+      client
+    );
+    
+    // ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
+    const results = await searchUrbanServices(category, location);
     
     if (results && results.length > 0) {
       // Format and send results
-      const resultsMessage = formatUrbanHelpResults(results, userLang);
+      const resultsMessage = formatUrbanHelpResults(results, userLang, categoryName);
       await sendMessageWithClient(sender, resultsMessage, client);
       
       // Add to user requests
@@ -525,10 +545,7 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
       
     } else {
       // No results found
-      const noResultsMessage = multiLanguage.getMessage(userLang, 'no_results_found', {
-        category: URBAN_HELP_CATEGORIES[category]?.name || 'Service',
-        location: location
-      }) || `Sorry, no ${category} found in ${location}. I'll notify you when one becomes available.`;
+      const noResultsMessage = `❌ No ${categoryName} found in ${location}.\n\nTry:\n• Different location\n• Broader search terms\n• Check back later`;
       
       await sendMessageWithClient(sender, noResultsMessage, client);
       
@@ -548,61 +565,92 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
     // Clear context and return to menu
     delete session.urbanHelpContext;
     session.step = "menu";
+    session.state = 'initial';
     await saveSession(sender, session);
     
   } catch (error) {
-    console.error("Error in urban help search:", error);
-    const errorMessage = multiLanguage.getMessage(userLang, 'search_error') ||
-                         "Sorry, I encountered an error while searching. Please try again.";
+    console.error("❌ [URBAN HELP] Error in search:", error);
+    const errorMessage = "Sorry, I encountered an error while searching. Please try again.";
     await sendMessageWithClient(sender, errorMessage, client);
     
     delete session.urbanHelpContext;
     session.step = "menu";
+    session.state = 'initial';
     await saveSession(sender, session);
   }
 }
 
 /**
- * Format urban help results
+ * Get category display name
  */
-function formatUrbanHelpResults(results, userLang) {
-  const category = results[0]?.category || 'service';
-  const categoryName = URBAN_HELP_CATEGORIES[category]?.name || 'Service';
+function getCategoryDisplayName(category) {
+  if (!category) return 'service';
   
-  let message = `✅ ${multiLanguage.getMessage(userLang, 'results_found', {
-    count: results.length,
-    category: categoryName,
-    location: results[0]?.location || 'area'
-  }) || `Found ${results.length} ${categoryName}(s):`}\n\n`;
+  // Check if it matches any known category
+  for (const [knownCategory, data] of Object.entries(URBAN_HELP_CATEGORIES)) {
+    if (category.toLowerCase() === knownCategory.toLowerCase()) {
+      return data.name;
+    }
+  }
+  
+  // Return capitalized version
+  return category.charAt(0).toUpperCase() + category.slice(1);
+}
+
+/**
+ * Format urban help results - UPDATED FOR FLEXIBLE CATEGORIES
+ */
+function formatUrbanHelpResults(results, userLang, categoryName = null) {
+  if (!results || results.length === 0) {
+    return "No services found.";
+  }
+  
+  // Determine category name
+  let displayCategory = categoryName;
+  if (!displayCategory) {
+    const firstResult = results[0];
+    displayCategory = firstResult.category || 
+                     firstResult.service_type || 
+                     firstResult.name || 
+                     'service';
+    displayCategory = getCategoryDisplayName(displayCategory);
+  }
+  
+  let message = `✅ Found ${results.length} ${displayCategory}(s):\n\n`;
   
   results.slice(0, 5).forEach((provider, index) => {
     message += `*${index + 1}. ${provider.name || 'Service Provider'}*\n`;
     
-    if (provider.rating) {
-      message += `   ⭐ ${provider.rating}/5\n`;
+    if (provider.rating || provider.rating_score) {
+      const rating = provider.rating || provider.rating_score;
+      message += `   ⭐ ${rating}/5\n`;
     }
     
     if (provider.experience) {
-      message += `   📅 ${provider.experience} experience\n`;
+      message += `   📅 ${provider.experience}\n`;
     }
     
-    if (provider.contact) {
-      message += `   📞 ${provider.contact}\n`;
+    if (provider.phone || provider.contact || provider.mobile) {
+      message += `   📞 ${provider.phone || provider.contact || provider.mobile}\n`;
     }
     
     if (provider.availability) {
       message += `   🕒 ${provider.availability}\n`;
     }
     
-    if (provider.rate) {
-      message += `   💰 ${provider.rate}\n`;
+    if (provider.rate || provider.price) {
+      message += `   💰 ${provider.rate || provider.price}\n`;
+    }
+    
+    if (provider.location) {
+      message += `   📍 ${provider.location}\n`;
     }
     
     message += '\n';
   });
   
   if (results.length > 5) {
-    message += `... and ${results.length - 5} more ${categoryName}(s) available.\n`;
+    message += `... and ${results.length - 5} more services available.\n`;
   }
   
   return message;
@@ -1014,7 +1062,7 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
   } else if (!extractedInfo.location) {
     // Ask for location
     await sendMessageWithClient(sender, 
-      `Where do you need the ${URBAN_HELP_CATEGORIES[extractedInfo.category]?.name || 'service'}?`,
+      `Where do you need the ${extractedInfo.category}?`,
       client
     );
     
@@ -1040,40 +1088,82 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
 }
 
 /**
- * Extract urban help info from text
+ * Extract urban help info from text - UPDATED FOR FLEXIBLE EXTRACTION
  */
 function extractUrbanHelpFromText(text) {
   const lowerText = text.toLowerCase();
   const result = {
     category: null,
     location: null,
-    timing: null
+    timing: null,
+    rawText: text
   };
   
-  // Extract category
-  for (const [category, data] of Object.entries(URBAN_HELP_CATEGORIES)) {
+  console.log(`🔍 [EXTRACT] Analyzing text: "${text}"`);
+  
+  // Common service keywords to remove when extracting category
+  const commonWords = ['i', 'need', 'want', 'looking', 'for', 'a', 'an', 'the', 
+                       'in', 'at', 'near', 'around', 'mein', 'please', 'mujhe',
+                       'chahiye', 'required', 'service', 'services', 'karwana', 'find'];
+  
+  // 1. Extract location first (easier to identify)
+  const locationMatch = lowerText.match(/\b(in|at|near|around|mein|पर|में)\s+([^,.!?]+)/i);
+  if (locationMatch) {
+    result.location = locationMatch[2].trim()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+    console.log(`📍 Extracted location: ${result.location}`);
+  }
+  
+  // 2. Extract category by removing location and common words
+  let categoryText = lowerText;
+  
+  // Remove location from text
+  if (result.location) {
+    const locationLower = result.location.toLowerCase();
+    categoryText = categoryText.replace(new RegExp(`\\b${locationLower}\\b`, 'g'), '');
+    categoryText = categoryText.replace(/\s+/g, ' ').trim();
+  }
+  
+  // Remove common words
+  commonWords.forEach(word => {
+    const regex = new RegExp(`\\b${word}\\b`, 'gi');
+    categoryText = categoryText.replace(regex, '');
+  });
+  
+  // Clean up the text
+  categoryText = categoryText
+    .replace(/\s+/g, ' ')
+    .replace(/[^\w\s]/gi, '')
+    .trim();
+  
+  // If we have meaningful text left, that's likely the category
+  if (categoryText && categoryText.length > 2 && !/^\d+$/.test(categoryText)) {
+    result.category = categoryText;
+    console.log(`🔧 Extracted category: ${result.category}`);
+  }
+  
+  // 3. Check if it matches any known categories (for better display, not for filtering)
+  for (const [knownCategory, data] of Object.entries(URBAN_HELP_CATEGORIES)) {
     if (data.keywords.some(keyword => lowerText.includes(keyword))) {
-      result.category = category;
+      console.log(`✅ Matches known category: ${knownCategory}`);
+      // If we didn't extract a category, use this known one
+      if (!result.category) {
+        result.category = knownCategory;
+      }
       break;
     }
   }
   
-  // Extract location
-  const locations = ['noida', 'gurgaon', 'delhi', 'gurugram', 'greater noida', 'ghaziabad', 'faridabad'];
-  for (const location of locations) {
-    if (lowerText.includes(location)) {
-      result.location = location.charAt(0).toUpperCase() + location.slice(1);
-      break;
-    }
-  }
-  
-  // Extract timing
+  // 4. Extract timing
   if (lowerText.includes('now') || lowerText.includes('immediate') || lowerText.includes('urgent')) {
     result.timing = 'immediate';
   } else if (lowerText.includes('tomorrow') || lowerText.includes('next week')) {
     result.timing = 'future';
   }
   
+  console.log(`📦 Final extraction:`, result);
   return result;
 }
 
@@ -1247,90 +1337,135 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ===========================
   // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS
   // ===========================
-  if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again') || replyId.startsWith('type_instead'))) {
+if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again') || 
+    replyId.startsWith('type_instead') || replyId.startsWith('use_buttons'))) {
+    
     console.log(`🎤 [VOICE BUTTON] Detected voice confirmation button: ${replyId}`);
     
-    // Get the user language
-    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-    
-    // Handle the button click based on session state
-    if (session.state === 'awaiting_confirmation' || session.step === 'awaiting_confirmation') {
-      console.log(`🎤 [VOICE BUTTON] Processing confirmation for session state: ${session.state}`);
-      
-      // Map button IDs to actions
-      let action = '';
-      if (replyId.includes('confirm_') || replyId === 'confirm_yes') {
-        action = 'confirm_yes';
-      } else if (replyId.includes('try_again') || replyId === 'try_again') {
-        action = 'try_again';
-      } else if (replyId.includes('type_instead') || replyId === 'type_instead') {
-        action = 'type_instead';
-      }
-      
-      // Process the action
-      switch(action) {
-        case 'confirm_yes':
-          // User confirmed transcription is correct
-          const confirmedText = session.rawTranscription;
-          
-          if (!confirmedText) {
+    // Handle both simple confirmation (confirm_yes) and AI confirmation (confirm_service_search, etc.)
+    if (replyId === 'confirm_yes' || replyId.startsWith('confirm_')) {
+        // User confirmed - extract the intent
+        let intent = 'service_search'; // Default
+        
+        if (replyId === 'confirm_yes') {
+            // From simple confirmation flow
+            intent = 'service_search'; // Default intent for voice messages
+        } else {
+            // From AI confirmation flow (e.g., confirm_service_search)
+            intent = replyId.replace('confirm_', '');
+        }
+        
+        console.log(`🎤 [VOICE BUTTON] Processing confirmation for intent: ${intent}`);
+        
+        const confirmedText = session.rawTranscription;
+        
+        if (!confirmedText) {
             await sendMessageWithClient(sender, "❌ No transcription found. Please try again.");
             session.state = 'initial';
             session.step = 'menu';
             await saveSession(sender, session);
             await sendMainMenuViaService(sender);
             return session;
-          }
-          
-          await sendMessageWithClient(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
-          
-          // Check if it's an urban help request
-          if (isUrbanHelpRequest(confirmedText)) {
+        }
+        
+        await sendMessageWithClient(sender, `✅ Perfect! You're looking for: *"${confirmedText}"*\n\nSearching for services...`);
+        
+        // Check if it's an urban help request
+        if (intent === 'service_search' || isUrbanHelpRequest(confirmedText)) {
             // Extract urban help info
             const extractedInfo = extractUrbanHelpFromText(confirmedText);
+            console.log(`🔧 [URBAN HELP] Extracted info:`, extractedInfo);
+            
+            const userLang = multiLanguage.getUserLanguage(sender) || 'en';
             
             if (extractedInfo.category && extractedInfo.location) {
-              // We have both category and location, search immediately
-              await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);
+                // We have both category and location, search immediately
+                await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);
+            } else if (extractedInfo.category && !extractedInfo.location) {
+                // Have category but no location - ask for location
+                await sendMessageWithClient(sender, 
+                    `Where do you need the ${extractedInfo.category}?`,
+                    effectiveClient
+                );
+                
+                session.urbanHelpContext = {
+                    ...extractedInfo,
+                    transcription: confirmedText,
+                    step: "awaiting_location"
+                };
+                session.step = "awaiting_urban_help_location";
+                await saveSession(sender, session);
+                
+            } else if (!extractedInfo.category && extractedInfo.location) {
+                // Have location but no category - ask for category
+                await sendInteractiveButtonsWithClient(
+                    effectiveClient,
+                    sender,
+                    `What type of service do you need in ${extractedInfo.location}?`,
+                    Object.entries(URBAN_HELP_CATEGORIES).slice(0, 4).map(([id, data]) => ({
+                        id: `category_${id}`,
+                        text: `${data.emoji} ${data.name}`
+                    }))
+                );
+                
+                session.urbanHelpContext = {
+                    ...extractedInfo,
+                    transcription: confirmedText,
+                    step: "awaiting_category"
+                };
+                session.step = "awaiting_urban_help_category";
+                await saveSession(sender, session);
+                
             } else {
-              // Need more info
-              await handleUrbanHelpTextRequest(sender, confirmedText, session, effectiveClient);
+                // Neither category nor location - ask user to clarify
+                await sendMessageWithClient(sender, 
+                    "I understand you need a service. Could you please specify what type of service and location?\n\nExample: 'Electrician in Rajouri Garden'",
+                    effectiveClient
+                );
+                session.state = 'initial';
+                session.step = 'menu';
             }
-          } else {
+        } else {
             // Process property-related intent
             await voiceService.extractIntentAfterConfirmation(sender, confirmedText, session, effectiveClient);
-          }
-          
-          // Reset session
-          session.state = 'initial';
-          delete session.rawTranscription;
-          session.step = 'menu';
-          await saveSession(sender, session);
-          break;
-          
-        case 'try_again':
-          // User wants to try again
-          await sendMessageWithClient(sender, "🔄 No problem! Please send your voice message again.");
-          session.state = 'initial';
-          session.step = 'menu';
-          delete session.rawTranscription;
-          await saveSession(sender, session);
-          break;
-          
-        case 'type_instead':
-          // User wants to type
-          await sendMessageWithClient(sender, "📝 Please type what you're looking for:");
-          session.state = 'awaiting_text_input';
-          session.step = 'awaiting_text_input';
-          delete session.rawTranscription;
-          await saveSession(sender, session);
-          break;
-      }
-      
-      await saveSession(sender, session);
-      return session;
+        }
+        
+        // Reset session
+        session.state = 'initial';
+        delete session.rawTranscription;
+        session.step = 'menu';
+        await saveSession(sender, session);
+        
+    } else if (replyId === 'try_again' || replyId === 'try_again_urban') {
+        // User wants to try again
+        await sendMessageWithClient(sender, "🔄 No problem! Please send your voice message again.");
+        session.state = 'initial';
+        session.step = 'menu';
+        delete session.rawTranscription;
+        delete session.urbanHelpContext;
+        await saveSession(sender, session);
+        
+    } else if (replyId === 'type_instead') {
+        // User wants to type
+        await sendMessageWithClient(sender, "📝 Please type what you're looking for:");
+        session.state = 'awaiting_text_input';
+        session.step = 'awaiting_text_input';
+        delete session.rawTranscription;
+        await saveSession(sender, session);
+        
+    } else if (replyId === 'use_buttons') {
+        // User wants to use menu buttons
+        await sendMessageWithClient(sender, "📋 Showing menu options...");
+        session.state = 'initial';
+        session.step = 'menu';
+        delete session.rawTranscription;
+        await saveSession(sender, session);
+        await sendMainMenuViaService(sender);
     }
-  }
+    
+    await saveSession(sender, session);
+    return session;
+}
 
   // ===========================
   // ✅ ADDED: ALSO CHECK FOR TEXT RESPONSES TO VOICE CONFIRMATION
@@ -1579,7 +1714,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     urbanContext.step = "awaiting_location";
     
     await sendMessageWithClient(sender, 
-      `Where do you need the ${URBAN_HELP_CATEGORIES[category]?.name || 'service'}?`,
+      `Where do you need the ${URBAN_HELP_CATEGORIES[category]?.name || category}?`,
       effectiveClient
     );
     
@@ -2281,7 +2416,7 @@ async function handleUrbanHelpMenu(sender, session, client) {
               `🧹 வேலைக்காரி/வீட்டு உதவி - சுத்தம், சமையல், வீட்டு உதவி\n` +
               `🔨 தச்சர் - தளபாடங்கள், கதவுகள், சன்னல்கள் பழுதுபார்ப்பு\n` +
               `🧼 சுத்தம் செய்பவர் - ஆழமான சுத்தம், வீட்டு சுத்தம்\n` +
-              `🔩 தொழில்நுட்ப வல்லுநர் - ஏசி பழுதுபார்ப்பு, சாதன சேவை\n` +
+              `🔩 தொழில்நுட்ப வல்லுநர் - ஏசி பழுதுபார்பப்பு, சாதன சேவை\n` +
               `🚗 ஓட்டுநர் - கார் ஓட்டுநர், சாரதி சேவைகள்\n` +
               `🎨 ஓவியர் - வீட்டு ஓவியம், சுவர் வண்ணம்\n\n` +
               `உங்களுக்கு என்ன தேவை என்று சொல்லுங்கள்!`;

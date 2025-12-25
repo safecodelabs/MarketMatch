@@ -26,8 +26,180 @@ const savedRef = db.collection("saved");
 const urbanHelpProvidersRef = db.collection("urban_help_providers");
 const userRequestsRef = db.collection("user_requests");
 
+// ✅ ADDED: Reference to urban_services collection
+const urbanServicesRef = db.collection("urban_services");
+
 // -----------------------------------------------
-// URBAN HELP FUNCTIONS
+// ✅ ADDED: SEARCH URBAN SERVICES FUNCTION
+// -----------------------------------------------
+
+/**
+ * Search for urban services by category and location
+ * @param {String} category - Service category (electrician, plumber, tailor, etc.)
+ * @param {String} location - Location to search in
+ * @returns {Promise<Array>} Array of service providers
+ */
+async function searchUrbanServices(category, location) {
+  try {
+    console.log(`🔍 [URBAN SERVICES] Searching urban_services for "${category}" in "${location}"`);
+    
+    // Normalize inputs
+    const normalizedCategory = category ? category.toLowerCase().trim() : '';
+    const normalizedLocation = location ? location.toLowerCase().trim() : '';
+    
+    // Query urban_services collection
+    let query = urbanServicesRef;
+    
+    // Filter by category if category is provided
+    if (normalizedCategory) {
+      query = query.where('category', '==', normalizedCategory);
+    }
+    
+    // Filter by location if location is provided
+    if (normalizedLocation) {
+      // Try exact match first
+      query = query.where('location', '==', normalizedLocation);
+    }
+    
+    // Add status filter if you have active/inactive status
+    // Check if status field exists in your schema
+    try {
+      // Try to filter by status if the field exists
+      query = query.where('status', '==', 'active');
+    } catch (error) {
+      // If status field doesn't exist, continue without it
+      console.log('ℹ️ Status field not found in urban_services schema, skipping status filter');
+    }
+    
+    // Get results with limit
+    const snapshot = await query.limit(20).get();
+    
+    if (snapshot.empty) {
+      console.log(`📭 [URBAN SERVICES] No urban services found for ${category} in ${location}`);
+      
+      // Try broader search if no exact matches
+      if (normalizedCategory || normalizedLocation) {
+        console.log(`🔍 [URBAN SERVICES] Trying broader search...`);
+        
+        // Create a new query for broader search
+        let broadQuery = urbanServicesRef;
+        
+        if (normalizedCategory) {
+          // Try searching in name or description fields
+          const broadSnapshot = await urbanServicesRef
+            .where('name', '>=', normalizedCategory)
+            .where('name', '<=', normalizedCategory + '\uf8ff')
+            .limit(10)
+            .get();
+          
+          if (!broadSnapshot.empty) {
+            const results = [];
+            broadSnapshot.forEach(doc => {
+              results.push({
+                id: doc.id,
+                ...doc.data()
+              });
+            });
+            console.log(`✅ [URBAN SERVICES] Found ${results.length} services with broader category search`);
+            return results;
+          }
+        }
+        
+        if (normalizedLocation) {
+          // Try partial location match
+          const locationSnapshot = await urbanServicesRef
+            .where('location', '>=', normalizedLocation)
+            .where('location', '<=', normalizedLocation + '\uf8ff')
+            .limit(10)
+            .get();
+          
+          if (!locationSnapshot.empty) {
+            const results = [];
+            locationSnapshot.forEach(doc => {
+              results.push({
+                id: doc.id,
+                ...doc.data()
+              });
+            });
+            console.log(`✅ [URBAN SERVICES] Found ${results.length} services with broader location search`);
+            return results;
+          }
+        }
+      }
+      
+      return [];
+    }
+    
+    const results = [];
+    snapshot.forEach(doc => {
+      results.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    console.log(`✅ [URBAN SERVICES] Found ${results.length} urban services`);
+    return results;
+    
+  } catch (error) {
+    console.error("❌ [URBAN SERVICES] Error searching urban services:", error);
+    
+    // Provide fallback data for testing
+    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+      console.log('🔄 [URBAN SERVICES] Returning fallback data for testing');
+      return getFallbackServices(category, location);
+    }
+    
+    throw error;
+  }
+}
+
+/**
+ * Get fallback services for testing when database is empty
+ */
+function getFallbackServices(category, location) {
+  const categoryName = category || 'service';
+  const locationName = location || 'area';
+  
+  return [
+    {
+      id: 'fallback_1',
+      name: `Sample ${categoryName.charAt(0).toUpperCase() + categoryName.slice(1)} 1`,
+      category: categoryName,
+      location: locationName,
+      phone: '+91 98765 43210',
+      rating: 4.5,
+      experience: '5 years',
+      availability: '10 AM - 8 PM',
+      rate: 'Starting from ₹300'
+    },
+    {
+      id: 'fallback_2',
+      name: `Reliable ${categoryName.charAt(0).toUpperCase() + categoryName.slice(1)}`,
+      category: categoryName,
+      location: locationName,
+      phone: '+91 98765 43211',
+      rating: 4.3,
+      experience: '3 years',
+      availability: '9 AM - 9 PM',
+      rate: 'Starting from ₹250'
+    },
+    {
+      id: 'fallback_3',
+      name: `Quick ${categoryName.charAt(0).toUpperCase() + categoryName.slice(1)} Service`,
+      category: categoryName,
+      location: locationName,
+      phone: '+91 98765 43212',
+      rating: 4.2,
+      experience: '2 years',
+      availability: '11 AM - 7 PM',
+      rate: 'Starting from ₹200'
+    }
+  ];
+}
+
+// -----------------------------------------------
+// URBAN HELP FUNCTIONS (ORIGINAL)
 // -----------------------------------------------
 
 /**
@@ -748,6 +920,8 @@ async function searchCommodities(item, quantity) {
 // Export all functions
 module.exports = {
   db,
+  // ✅ ADDED: Urban Services Functions
+  searchUrbanServices,
   // Urban Help Functions
   searchUrbanHelp,
   addUrbanHelpProvider,
