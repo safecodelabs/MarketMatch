@@ -30,7 +30,7 @@ const userRequestsRef = db.collection("user_requests");
 const urbanServicesRef = db.collection("urban_services");
 
 // -----------------------------------------------
-// ✅ ADDED: SEARCH URBAN SERVICES FUNCTION
+// ✅ ADDED: SEARCH URBAN SERVICES FUNCTION - FIXED
 // -----------------------------------------------
 
 /**
@@ -60,34 +60,41 @@ async function searchUrbanServices(category, location) {
     // Get results with a limit
     const snapshot = await query.limit(10).get();
     
-    if (snapshot.empty) {
-      console.log(`📭 [URBAN SERVICES] No services found for ${category} in ${location}`);
-      
-      // Try broader search without filters
-      console.log(`🔍 [URBAN SERVICES] Trying broader search...`);
-      const broadSnapshot = await urbanServicesRef.limit(5).get();
-      
-      if (broadSnapshot.empty) {
-        console.log(`📭 [URBAN SERVICES] No services found in database`);
-        return [];
-      }
-      
+    // If we found exact matches, return them
+    if (!snapshot.empty) {
       const results = [];
-      broadSnapshot.forEach(doc => {
+      snapshot.forEach(doc => {
+        const data = doc.data();
         results.push({
           id: doc.id,
-          ...doc.data()
+          name: data.name || 'Service Provider',
+          category: data.category || 'service',
+          location: data.location || 'Not specified',
+          phone: data.phone || 'Contact not available',
+          createdAt: data.createdAt || null
         });
       });
       
-      console.log(`✅ [URBAN SERVICES] Found ${results.length} services in database`);
+      console.log(`✅ [URBAN SERVICES] Found ${results.length} exact matches`);
       return results;
     }
     
-    const results = [];
-    snapshot.forEach(doc => {
+    // No exact matches found - try smarter searching
+    console.log(`📭 [URBAN SERVICES] No exact matches for ${category} in ${location}`);
+    console.log(`🔍 [URBAN SERVICES] Performing smarter search...`);
+    
+    // Get all services and filter client-side
+    const allSnapshot = await urbanServicesRef.limit(30).get();
+    
+    if (allSnapshot.empty) {
+      console.log(`📭 [URBAN SERVICES] No services in database`);
+      return [];
+    }
+    
+    const allServices = [];
+    allSnapshot.forEach(doc => {
       const data = doc.data();
-      results.push({
+      allServices.push({
         id: doc.id,
         name: data.name || 'Service Provider',
         category: data.category || 'service',
@@ -97,8 +104,76 @@ async function searchUrbanServices(category, location) {
       });
     });
     
-    console.log(`✅ [URBAN SERVICES] Found ${results.length} services`);
-    return results;
+    // Filter based on search criteria
+    const searchCategory = category ? category.toLowerCase().trim() : '';
+    const searchLocation = location ? location.toLowerCase().trim() : '';
+    
+    const filteredResults = allServices.filter(service => {
+      const serviceCategory = (service.category || '').toLowerCase();
+      const serviceLocation = (service.location || '').toLowerCase();
+      const serviceName = (service.name || '').toLowerCase();
+      
+      let matches = true;
+      
+      // If category specified, check for match in category or name
+      if (searchCategory) {
+        matches = matches && (
+          serviceCategory.includes(searchCategory) ||
+          serviceName.includes(searchCategory) ||
+          searchCategory.includes(serviceCategory)
+        );
+      }
+      
+      // If location specified, check for match
+      if (searchLocation) {
+        matches = matches && (
+          serviceLocation.includes(searchLocation) ||
+          searchLocation.includes(serviceLocation)
+        );
+      }
+      
+      return matches;
+    });
+    
+    console.log(`✅ [URBAN SERVICES] Found ${filteredResults.length} smart matches`);
+    
+    // If we have matches, return them
+    if (filteredResults.length > 0) {
+      return filteredResults.slice(0, 5); // Return top 5 matches
+    }
+    
+    // No matches at all - return services from the same location OR similar category
+    console.log(`🔍 [URBAN SERVICES] No matches, returning nearby services`);
+    
+    if (searchLocation) {
+      // Return services from same location but different category
+      const locationMatches = allServices.filter(service => 
+        (service.location || '').toLowerCase().includes(searchLocation) ||
+        searchLocation.includes((service.location || '').toLowerCase())
+      );
+      
+      if (locationMatches.length > 0) {
+        console.log(`✅ [URBAN SERVICES] Found ${locationMatches.length} services in ${location}`);
+        return locationMatches.slice(0, 3);
+      }
+    }
+    
+    if (searchCategory) {
+      // Return services with similar category but different location
+      const categoryMatches = allServices.filter(service => 
+        (service.category || '').toLowerCase().includes(searchCategory) ||
+        searchCategory.includes((service.category || '').toLowerCase())
+      );
+      
+      if (categoryMatches.length > 0) {
+        console.log(`✅ [URBAN SERVICES] Found ${categoryMatches.length} ${category} services`);
+        return categoryMatches.slice(0, 3);
+      }
+    }
+    
+    // Last resort: return top 3 services
+    console.log(`📭 [URBAN SERVICES] No matches found at all, returning top services`);
+    return allServices.slice(0, 3);
     
   } catch (error) {
     console.error("❌ [URBAN SERVICES] Error searching urban services:", error);

@@ -545,8 +545,14 @@ if (results && results.length > 0) {
   
 } else {
   // No results found
-  const noResultsMessage = `❌ No ${categoryName} found in ${location}.\n\nTry:\n• Different location\n• Broader search terms\n• Check back later`;
-  
+  const noResultsMessage = 
+    `❌ Sorry, I couldn't find any *${categoryName}* in *${location}*.\n\n` +
+    `Try:\n` +
+    `• Searching for a different service\n` +
+    `• Checking a nearby location\n` +
+    `• Using broader search terms\n\n` +
+    `You can also try saying: "electrician near me" or "plumber in Delhi"`;
+      
   await sendMessageWithClient(sender, noResultsMessage, client);
   
   // Add to user requests as pending
