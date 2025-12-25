@@ -7,7 +7,7 @@
     "dependencies": {
         "airtable": "^0.12.2",
         "axios": "^1.13.2",
-        "body-parser": "^1.20.2",
+        "body-parser": "^1.20.4",
         "choco": "^0.2.1",
         "dotenv": "^16.6.1",
         "express": "^4.21.2",

@@ -5,7 +5,13 @@ const router = express.Router();
 // Import bot handler
 const { handleIncomingMessage } = require("../chatbotController");
 // Import YOUR EXISTING WhatsApp client (messageService.js)
-const messageService = require("../src/services/messageService");
+let messageService;
+try {
+    messageService = require("../src/services/messageService");
+} catch (error) {
+    console.error("❌ Webhook: Failed to load messageService:", error.message);
+    messageService = null;
+}
 
 // Log level control
 const LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
@@ -17,24 +23,42 @@ function log(level, ...args) {
   }
 }
 
-// Fix: Sometimes WhatsApp sends raw buffer instead of JSON
-router.use((req, res, next) => {
-  if (req.is("application/json") && Buffer.isBuffer(req.body)) {
-    try {
-      req.body = JSON.parse(req.body.toString());
-    } catch (err) {
-      log('ERROR', 'JSON Parse Error');
-    }
-  }
-  next();
-});
-
 // =======================================================
 // 🚀 MAIN WEBHOOK HANDLER (POST)
 // =======================================================
 router.post("/", async (req, res) => {
+  // FIX: Set timeout for webhook processing
+  req.setTimeout(15000, () => {
+    log('WARN', 'Webhook request timeout');
+  });
+  
+  // FIX: Handle request abort
+  req.on('aborted', () => {
+    log('WARN', 'Webhook request aborted by client');
+    return;
+  });
+  
   try {
-    const entry = req.body?.entry?.[0];
+    // FIX: Check if body exists
+    if (!req.body || Object.keys(req.body).length === 0) {
+      log('INFO', 'Empty webhook request (likely health check)');
+      return res.status(200).send('OK');
+    }
+    
+    // FIX: Parse raw buffer to JSON safely
+    let body;
+    if (Buffer.isBuffer(req.body)) {
+      try {
+        body = JSON.parse(req.body.toString('utf8'));
+      } catch (parseError) {
+        log('ERROR', 'Failed to parse webhook JSON:', parseError.message);
+        return res.status(200).send('OK'); // Still return 200 to WhatsApp
+      }
+    } else {
+      body = req.body;
+    }
+    
+    const entry = body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
 
@@ -48,7 +72,7 @@ router.post("/", async (req, res) => {
           log('DEBUG', `Status update: ${value.statuses[0]?.status}`);
         }
       }
-      return res.sendStatus(200);
+      return res.status(200).send('OK');
     }
 
     const message = value.messages[0];
@@ -108,23 +132,27 @@ router.post("/", async (req, res) => {
       
       if (!audioUrl) {
         log('ERROR', 'No audio URL');
-        await messageService.sendMessage(
-          sender,
-          "🎤 I received your voice message but couldn't process it. Please try sending it again."
-        );
-        return res.sendStatus(200);
+        if (messageService) {
+          await messageService.sendMessage(
+            sender,
+            "🎤 I received your voice message but couldn't process it. Please try sending it again."
+          );
+        }
+        return res.status(200).send('OK');
       }
       
       // Log URL minimally
       log('DEBUG', `Audio URL: ${audioUrl.split('?')[0]}?mid=...`);
       
-      // Send immediate response
-      messageService.sendMessage(
-        sender,
-        "🎤 I received your voice message! Processing it now..."
-      ).catch(err => {
-        log('WARN', 'Failed to send processing message:', err.message);
-      });
+      // Send immediate response if messageService is available
+      if (messageService) {
+        messageService.sendMessage(
+          sender,
+          "🎤 I received your voice message! Processing it now..."
+        ).catch(err => {
+          log('WARN', 'Failed to send processing message:', err.message);
+        });
+      }
       
       // Mark as voice message for chatbot
       extractedText = "voice_note";
@@ -147,15 +175,17 @@ router.post("/", async (req, res) => {
     else if (message.type === "image" || message.type === "document") {
       log('INFO', `${message.type} from ${sender.substring(0, 10)}...`);
       
-      // Send response
-      messageService.sendMessage(
-        sender,
-        message.type === "image" 
-          ? "📸 I received your image! For now, please send text or voice messages."
-          : "📄 I received your document! For now, please send text or voice messages."
-      ).catch(() => { /* silent fail */ });
+      // Send response if messageService is available
+      if (messageService) {
+        messageService.sendMessage(
+          sender,
+          message.type === "image" 
+            ? "📸 I received your image! For now, please send text or voice messages."
+            : "📄 I received your document! For now, please send text or voice messages."
+        ).catch(() => { /* silent fail */ });
+      }
       
-      return res.sendStatus(200);
+      return res.status(200).send('OK');
     }
 
     // =======================================================
@@ -164,13 +194,15 @@ router.post("/", async (req, res) => {
     else {
       log('WARN', `Unsupported type: ${message.type} from ${sender.substring(0, 10)}...`);
       
-      // Send response
-      messageService.sendMessage(
-        sender,
-        `⚠️ I received a ${message.type} message. Currently, I support text, voice messages, and interactive buttons.`
-      ).catch(() => { /* silent fail */ });
+      // Send response if messageService is available
+      if (messageService) {
+        messageService.sendMessage(
+          sender,
+          `⚠️ I received a ${message.type} message. Currently, I support text, voice messages, and interactive buttons.`
+        ).catch(() => { /* silent fail */ });
+      }
       
-      return res.sendStatus(200);
+      return res.status(200).send('OK');
     }
 
     // Normalize text
@@ -182,29 +214,41 @@ router.post("/", async (req, res) => {
     // =======================================================
     // 🔥 PASS TO BOT (Non-blocking for voice to avoid timeouts)
     // =======================================================
+    // FIX: Always respond 200 immediately first
+    res.status(200).send('OK');
+    
+    // Then process asynchronously
     if (message.type === "audio" || message.type === "voice") {
       // Process voice asynchronously to avoid webhook timeout
-      handleIncomingMessage(sender, extractedText, messageMetadata, messageService)
-        .catch(err => {
+      setTimeout(async () => {
+        try {
+          await handleIncomingMessage(sender, extractedText, messageMetadata, messageService);
+        } catch (err) {
           log('ERROR', `Voice processing failed: ${err.message}`);
-          // Send error message to user
-          messageService.sendMessage(
-            sender,
-            "❌ Sorry, I encountered an error processing your voice message. Please try again."
-          ).catch(() => { /* silent fail */ });
-        });
+          // Send error message to user if messageService is available
+          if (messageService) {
+            messageService.sendMessage(
+              sender,
+              "❌ Sorry, I encountered an error processing your voice message. Please try again."
+            ).catch(() => { /* silent fail */ });
+          }
+        }
+      }, 0);
     } else {
-      // Process text/interactive messages normally
-      await handleIncomingMessage(sender, extractedText, messageMetadata, messageService);
+      // Process text/interactive messages asynchronously
+      setTimeout(async () => {
+        try {
+          await handleIncomingMessage(sender, extractedText, messageMetadata, messageService);
+        } catch (err) {
+          log('ERROR', `Message processing failed: ${err.message}`);
+        }
+      }, 0);
     }
-
-    // Always respond 200 immediately to WhatsApp
-    return res.sendStatus(200);
     
   } catch (err) {
-    log('ERROR', `Handler error: ${err.message}`);
-    console.error(err.stack);
-    return res.sendStatus(500);
+    log('ERROR', `Webhook handler error: ${err.message}`);
+    // FIX: Always return 200 to WhatsApp even on errors
+    return res.status(200).send('ERROR_RECEIVED');
   }
 });
 
@@ -216,7 +260,7 @@ router.get("/", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || "marketmatch-ai-token";
+  const verifyToken = process.env.VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || "marketmatch-ai-token";
 
   if (mode && token) {
     if (mode === "subscribe" && token === verifyToken) {
@@ -224,6 +268,7 @@ router.get("/", (req, res) => {
       return res.status(200).send(challenge);
     } else {
       log('ERROR', 'Webhook verification failed');
+      log('ERROR', `Expected: ${verifyToken}, Received: ${token}`);
       return res.sendStatus(403);
     }
   }
