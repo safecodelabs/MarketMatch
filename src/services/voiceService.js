@@ -37,9 +37,12 @@ class VoiceService {
         }
         
         // WhatsApp API Configuration
-        this.whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-        this.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-        this.whatsappApiVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
+this.whatsappAccessToken = process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN;
+this.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_ID || process.env.WHATSAPP_PHONE_NUMBER_ID; // CHANGED
+this.whatsappApiVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
+
+console.log(`🎤 [VOICE AI] WhatsApp Access Token: ${this.whatsappAccessToken ? '✅ Available' : '❌ Missing'}`);
+console.log(`🎤 [VOICE AI] WhatsApp Phone ID: ${this.whatsappPhoneNumberId ? '✅ Available' : '❌ Missing'}`);
         
         // Log level control
         this.LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';

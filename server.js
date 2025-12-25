@@ -31,22 +31,21 @@ try {
     messageService = null;
 }
 
-// Import controller
+// Import controller - YOUR FILE IS chatbotController.js
 let controller;
 try {
-    controller = require("./controller");
-    console.log("✅ Controller loaded from ./controller");
+    controller = require("./chatbotController");
+    console.log("✅ Controller loaded from ./chatbotController");
 } catch (error) {
-    try {
-        controller = require("./src/controller");
-        console.log("✅ Controller loaded from ./src/controller");
-    } catch (error2) {
-        console.error("❌ Could not find controller. Using mock.");
-        controller = {
-            setWhatsAppClient: (client) => console.log("Mock: setWhatsAppClient"),
-            handleIncomingMessage: async () => ({ step: "menu" })
-        };
-    }
+    console.error("❌ Failed to load chatbotController:", error.message);
+    console.error("❌ Full error:", error);
+    controller = {
+        setWhatsAppClient: (client) => console.log("Mock: setWhatsAppClient"),
+        handleIncomingMessage: async () => {
+            console.log("Mock: handleIncomingMessage called");
+            return { step: "menu" };
+        }
+    };
 }
 
 // Set WhatsApp credentials for voice service
@@ -61,7 +60,7 @@ if (voiceService) {
         if (typeof voiceService.setWhatsAppCredentials === 'function') {
             voiceService.setWhatsAppCredentials({
                 accessToken: whatsappToken,
-                phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+                phoneNumberId: process.env.WHATSAPP_PHONE_ID, // CHANGED: WHATSAPP_PHONE_ID
                 apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0'
             });
             console.log("✅ setWhatsAppCredentials() called");
@@ -69,14 +68,14 @@ if (voiceService) {
         // Try direct property assignment
         else if (voiceService.whatsappAccessToken !== undefined) {
             voiceService.whatsappAccessToken = whatsappToken;
-            voiceService.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_ID;
+            voiceService.whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_ID; // CHANGED
             console.log("✅ Direct property assignment");
         }
         // Try initializeWithConfig if exists
         else if (typeof voiceService.initializeWithConfig === 'function') {
             voiceService.initializeWithConfig({
                 accessToken: whatsappToken,
-                phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+                phoneNumberId: process.env.WHATSAPP_PHONE_ID, // CHANGED
                 apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0'
             });
             console.log("✅ initializeWithConfig() called");
@@ -94,6 +93,11 @@ if (voiceService) {
 if (controller && controller.setWhatsAppClient && messageService) {
     controller.setWhatsAppClient(messageService);
     console.log("✅ WhatsApp client set in controller");
+} else {
+    console.log("❌ Could not set WhatsApp client in controller");
+    console.log("   Controller available:", !!controller);
+    console.log("   Controller has setWhatsAppClient:", controller && typeof controller.setWhatsAppClient === 'function');
+    console.log("   MessageService available:", !!messageService);
 }
 
 // ---------------------------------------------------------
@@ -123,7 +127,7 @@ app.get("/webhook", (req, res) => {
     return res.sendStatus(403);
 });
 
-// Webhook handler - FIXED for raw body parsing
+// Webhook handler
 app.post("/webhook", 
     express.raw({ type: "application/json" }),
     webhookRoute
@@ -146,31 +150,25 @@ app.get("/test", (_, res) => {
         whatsapp: {
             tokenExists: !!whatsappToken,
             tokenLength: whatsappToken?.length || 0,
-            phoneNumberId: process.env.WHATSAPP_PHONE_ID || "Not set",
+            phoneNumberId: process.env.WHATSAPP_PHONE_ID || "Not set", // CHANGED
             verifyToken: process.env.VERIFY_TOKEN ? "Set" : "Not set"
         },
         voiceService: voiceService ? {
             hasAccessToken: !!voiceService.whatsappAccessToken,
             hasProcessVoiceMessage: typeof voiceService.processVoiceMessage === 'function',
             methods: Object.keys(voiceService).filter(k => typeof voiceService[k] === 'function')
+        } : null,
+        controller: controller ? {
+            methods: Object.keys(controller).filter(k => typeof controller[k] === 'function')
         } : null
     });
 });
 
-// Debug voice service
-app.get("/debug-voice", (_, res) => {
-    if (!voiceService) {
-        return res.json({ error: "Voice service not loaded" });
-    }
-    
-    res.json({
-        voiceService: {
-            constructor: voiceService.constructor?.name,
-            properties: Object.keys(voiceService),
-            methods: Object.keys(voiceService).filter(k => typeof voiceService[k] === 'function'),
-            whatsappAccessToken: voiceService.whatsappAccessToken ? "Set" : "Not set",
-            whatsappPhoneNumberId: voiceService.whatsappPhoneNumberId || "Not set"
-        }
+// Health check for Railway
+app.get("/health", (_, res) => {
+    res.json({ 
+        status: "healthy",
+        timestamp: new Date().toISOString() 
     });
 });
 
@@ -181,7 +179,7 @@ app.get("/", (_, res) => {
         <p>Status: ✅ Running</p>
         <ul>
             <li><a href="/test">Service Status</a></li>
-            <li><a href="/debug-voice">Debug Voice Service</a></li>
+            <li><a href="/health">Health Check</a></li>
             <li>Webhook: POST /webhook</li>
             <li>Verify: GET /webhook?hub.mode=subscribe&hub.verify_token=...</li>
         </ul>
@@ -212,7 +210,7 @@ app.listen(PORT, '0.0.0.0', () => {
     ========================================
     ENVIRONMENT CHECK:
     🔑 WHATSAPP_TOKEN: ${process.env.WHATSAPP_TOKEN ? '✅ Found' : '❌ Missing'}
-    📱 PHONE_NUMBER_ID: ${process.env.WHATSAPP_PHONE_ID || '❌ Missing'}
+    📱 PHONE_ID: ${process.env.WHATSAPP_PHONE_ID || '❌ Missing'}
     🔐 VERIFY_TOKEN: ${process.env.VERIFY_TOKEN ? '✅ Set' : '❌ Missing'}
     ========================================
     SERVICES:
@@ -223,7 +221,7 @@ app.listen(PORT, '0.0.0.0', () => {
     ENDPOINTS:
     📍 http://localhost:${PORT}
     📍 http://localhost:${PORT}/test
-    📍 http://localhost:${PORT}/debug-voice
+    📍 http://localhost:${PORT}/health
     📍 POST http://localhost:${PORT}/webhook
     ========================================
     `);
@@ -234,6 +232,15 @@ app.listen(PORT, '0.0.0.0', () => {
         console.log(`   Access Token: ${voiceService.whatsappAccessToken ? '✅ Set' : '❌ Missing'}`);
         console.log(`   Phone Number ID: ${voiceService.whatsappPhoneNumberId || '❌ Not set'}`);
         console.log(`   Can process voice: ${typeof voiceService.processVoiceMessage === 'function' ? '✅ Yes' : '❌ No'}`);
+    }
+    
+    // Verify controller setup
+    if (controller) {
+        console.log("🤖 Controller Methods:");
+        const methods = Object.keys(controller).filter(k => typeof controller[k] === 'function');
+        methods.forEach(method => {
+            console.log(`   ${method}`);
+        });
     }
 });
 
