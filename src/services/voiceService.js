@@ -1,5 +1,5 @@
 // ========================================
-// voiceService.js - ENHANCED WITH URBAN HELP SUPPORT
+// voiceService.js - ENHANCED WITH URBAN HELP SUPPORT & IMPROVED AUDIO CONVERSION
 // ========================================
 const fs = require('fs');
 const path = require('path');
@@ -8,6 +8,9 @@ const FormData = require('form-data');
 const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
+
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+
 
 // Safely import ALL dependencies with fallbacks
 let voiceProcessor, messageUtils, constants, multiLanguage, firestoreDb;
@@ -108,7 +111,8 @@ try {
 class VoiceService {
     constructor() {
         console.log('🎤 [VOICE AI] Initializing VoiceService...');
-        
+
+        // this.logFFmpegInfo();
         this.supportedAudioFormats = ['ogg', 'opus', 'mp3', 'wav', 'm4a'];
         this.maxAudioSize = 10 * 1024 * 1024; // 10MB
         this.tempDir = path.join(__dirname, '../../temp');
@@ -275,6 +279,8 @@ class VoiceService {
             if (audioBuffer) {
                 try {
                     const convertedAudioPath = await this.convertToWav(audioBuffer, message.id);
+                    this.log('INFO', `Converted audio to: ${path.basename(convertedAudioPath)}`);
+                    
                     transcription = await voiceProcessor.transcribeAudio(convertedAudioPath);
                     
                     // Clean up temp files
@@ -294,6 +300,16 @@ class VoiceService {
                     
                 } catch (transcribeError) {
                     this.log('ERROR', `Transcription failed: ${transcribeError.message}`);
+                    
+                    // Check if it's a format error
+                    if (transcribeError.message.includes('file must be one of the following types')) {
+                        return {
+                            success: false,
+                            error: 'Audio format not supported. Please try sending the voice message again.',
+                            userMessage: message
+                        };
+                    }
+                    
                     return {
                         success: false,
                         error: 'Could not transcribe voice message. Please try again or type your request.',
@@ -327,6 +343,164 @@ class VoiceService {
                 error: 'Voice processing error. Please try again.',
                 userMessage: message
             };
+        }
+    }
+
+    /**
+     * Convert audio to WAV format - IMPROVED for Railway
+     */
+    async convertToWav(audioBuffer, messageId) {
+        const originalPath = path.join(this.tempDir, `${messageId}_original.ogg`);
+        const wavPath = path.join(this.tempDir, `${messageId}.wav`);
+        const mp3Path = path.join(this.tempDir, `${messageId}.mp3`); // Alternative format
+
+        try {
+            // Save the original OGG file from WhatsApp
+            fs.writeFileSync(originalPath, audioBuffer);
+            this.log('INFO', `Saved audio to ${originalPath}`);
+
+            // Try multiple conversion methods
+            const conversionResults = await this.tryMultipleConversions(originalPath, messageId);
+            
+            // Return the first successful conversion
+            if (conversionResults.wav && fs.existsSync(conversionResults.wav)) {
+                this.log('INFO', 'Using WAV conversion');
+                return conversionResults.wav;
+            }
+            
+            if (conversionResults.mp3 && fs.existsSync(conversionResults.mp3)) {
+                this.log('INFO', 'Using MP3 conversion');
+                return conversionResults.mp3;
+            }
+            
+            // Fallback: Use original OGG if nothing else works
+            this.log('WARN', 'Using original OGG file (Groq may reject it)');
+            return originalPath;
+
+        } catch (error) {
+            this.log('ERROR', `Conversion failed: ${error.message}`);
+            // Return original file as last resort
+            return originalPath;
+        }
+    }
+
+/**
+ * Try multiple audio conversion methods - UPDATED
+ */
+async tryMultipleConversions(originalPath, messageId) {
+    const results = { wav: null, mp3: null };
+    
+    // Method 1: Convert to WAV using FFmpeg
+    try {
+        const wavPath = path.join(this.tempDir, `${messageId}.wav`);
+        const ffmpegCommand = `"${ffmpegPath}" -i "${originalPath}" -acodec pcm_s16le -ar 16000 -ac 1 "${wavPath}" -y`;
+        await execPromise(ffmpegCommand, { timeout: 15000 });
+        
+        if (fs.existsSync(wavPath) && fs.statSync(wavPath).size > 100) {
+            results.wav = wavPath;
+            this.log('INFO', 'FFmpeg WAV conversion successful');
+        }
+    } catch (error) {
+        this.log('WARN', `FFmpeg WAV conversion failed: ${error.message}`);
+    }
+
+    // Method 2: Convert to MP3 (more compatible)
+    try {
+        const mp3Path = path.join(this.tempDir, `${messageId}.mp3`);
+        const ffmpegCommand = `"${ffmpegPath}" -i "${originalPath}" -codec:a libmp3lame -qscale:a 2 -ar 16000 -ac 1 "${mp3Path}" -y`;
+        await execPromise(ffmpegCommand, { timeout: 15000 });
+        
+        if (fs.existsSync(mp3Path) && fs.statSync(mp3Path).size > 100) {
+            results.mp3 = mp3Path;
+            this.log('INFO', 'FFmpeg MP3 conversion successful');
+        }
+    } catch (error) {
+        this.log('WARN', `FFmpeg MP3 conversion failed: ${error.message}`);
+    }
+
+    // Method 3: Try simple copy with format change (fallback)
+    try {
+        const wavPath2 = path.join(this.tempDir, `${messageId}_simple.wav`);
+        const ffmpegCommand = `"${ffmpegPath}" -i "${originalPath}" -f wav "${wavPath2}" -y`;
+        await execPromise(ffmpegCommand, { timeout: 15000 });
+        
+        if (fs.existsSync(wavPath2) && fs.statSync(wavPath2).size > 100) {
+            results.wav = wavPath2;
+            this.log('INFO', 'Simple WAV conversion successful');
+        }
+    } catch (error) {
+        this.log('WARN', `Simple conversion failed: ${error.message}`);
+    }
+
+    return results;
+}
+
+/**
+ * Check if FFmpeg is available - UPDATED
+ */
+async checkFFmpeg() {
+    try {
+        // Test if our ffmpeg path works
+        const testCommand = `"${ffmpegPath}" -version`;
+        await execPromise(testCommand, { timeout: 5000 });
+        this.log('INFO', 'FFmpeg is available at:', ffmpegPath);
+        return true;
+    } catch (error) {
+        this.log('INFO', 'FFmpeg is NOT available at given path');
+        
+        // Try system ffmpeg as fallback
+        try {
+            await execPromise('ffmpeg -version', { timeout: 5000 });
+            this.log('INFO', 'System FFmpeg is available');
+            return true;
+        } catch (sysError) {
+            this.log('INFO', 'No FFmpeg available anywhere');
+            return false;
+        }
+    }
+}
+
+/**
+ * Log FFmpeg installation info
+ */
+logFFmpegInfo() {
+    try {
+        const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+        const ffmpegStatic = require('ffmpeg-static');
+        console.log(`🎤 [VOICE AI] FFmpeg installer path: ${ffmpegPath}`);
+        console.log(`🎤 [VOICE AI] FFmpeg static path: ${ffmpegStatic}`);
+        console.log('🎤 [VOICE AI] Using FFmpeg installer binary');
+    } catch (error) {
+        console.warn('🎤 [VOICE AI] FFmpeg path logging failed:', error.message);
+    }
+}
+
+    /**
+     * Convert using Node.js audio libraries (fallback)
+     */
+    async convertWithNodeAudio(originalPath, messageId) {
+        try {
+            // Try to use audioconvert if installed
+            let audioconvert;
+            try {
+                audioconvert = require('audioconvert');
+                this.log('INFO', 'Using audioconvert library');
+            } catch (error) {
+                this.log('WARN', 'audioconvert not available');
+                throw new Error('No audio conversion libraries available');
+            }
+            
+            const wavPath = path.join(this.tempDir, `${messageId}_node.wav`);
+            await audioconvert.convert({
+                in: originalPath,
+                out: wavPath,
+                quality: 10
+            });
+            
+            return wavPath;
+        } catch (error) {
+            this.log('WARN', `Node audio conversion failed: ${error.message}`);
+            throw error;
         }
     }
 
@@ -472,6 +646,35 @@ class VoiceService {
         }
         
         throw lastError;
+    }
+
+    /**
+     * Clean up temporary files
+     */
+    cleanupTempFiles(messageId) {
+        try {
+            const files = [
+                path.join(this.tempDir, `${messageId}_original.ogg`),
+                path.join(this.tempDir, `${messageId}.wav`),
+                path.join(this.tempDir, `${messageId}.mp3`),
+                path.join(this.tempDir, `${messageId}_node.wav`),
+                path.join(this.tempDir, `${messageId}_simple.wav`),
+                path.join(this.tempDir, `${messageId}_temp.*`)
+            ];
+
+            files.forEach(file => {
+                try {
+                    if (fs.existsSync(file)) {
+                        fs.unlinkSync(file);
+                        this.log('DEBUG', `Cleaned up: ${path.basename(file)}`);
+                    }
+                } catch (unlinkError) {
+                    // Silent cleanup
+                }
+            });
+        } catch (error) {
+            // Silent cleanup
+        }
     }
 
     /**
@@ -1594,63 +1797,6 @@ class VoiceService {
             const errorCode = error.response?.status || error.code || 'Unknown';
             this.log('WARN', `Download ${messageId.substring(0, 10)}: ${errorCode}`);
             return null;
-        }
-    }
-
-    /**
-     * Convert audio to WAV format
-     */
-    async convertToWav(audioBuffer, messageId) {
-        const originalPath = path.join(this.tempDir, `${messageId}_original`);
-        const wavPath = path.join(this.tempDir, `${messageId}.wav`);
-
-        try {
-            fs.writeFileSync(originalPath, audioBuffer);
-
-            try {
-                await execPromise('ffmpeg -version', { timeout: 5000 });
-            } catch (ffmpegError) {
-                this.log('WARN', 'FFmpeg not available, using original audio');
-                return originalPath;
-            }
-
-            const ffmpegCommand = `ffmpeg -i "${originalPath}" -acodec pcm_s16le -ar 16000 -ac 1 "${wavPath}" -y -t 30`;
-            await execPromise(ffmpegCommand, { timeout: 10000 });
-            
-            if (!fs.existsSync(wavPath)) {
-                throw new Error('FFmpeg conversion failed');
-            }
-
-            this.log('DEBUG', `Converted to WAV`);
-            return wavPath;
-        } catch (error) {
-            this.log('WARN', `Conversion failed: ${error.message}`);
-            return originalPath;
-        }
-    }
-
-    /**
-     * Clean up temporary files
-     */
-    cleanupTempFiles(messageId) {
-        try {
-            const files = [
-                path.join(this.tempDir, `${messageId}_original`),
-                path.join(this.tempDir, `${messageId}.wav`),
-                path.join(this.tempDir, `${messageId}_temp.*`)
-            ];
-
-            files.forEach(file => {
-                try {
-                    if (fs.existsSync(file)) {
-                        fs.unlinkSync(file);
-                    }
-                } catch (unlinkError) {
-                    // Silent cleanup
-                }
-            });
-        } catch (error) {
-            // Silent cleanup
         }
     }
 

@@ -1,9 +1,12 @@
 // ========================================
-// voiceProcessor.js - ENHANCED WITH URBAN HELP SUPPORT
+// voiceProcessor.js - ENHANCED WITH URBAN HELP SUPPORT & IMPROVED AUDIO CONVERSION
 // ========================================
 const Groq = require('groq-sdk');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 require('dotenv').config();
 
 // Create DEFAULT_CONSTANTS to avoid circular dependencies
@@ -214,7 +217,7 @@ class VoiceProcessor {
     }
 
     /**
-     * Transcribe audio using Groq Whisper
+     * Transcribe audio using Groq Whisper - IMPROVED for OGG files
      */
     async transcribeAudio(audioFilePath) {
         try {
@@ -225,31 +228,139 @@ class VoiceProcessor {
                 return null;
             }
 
+            // Check if GROQ_API_KEY is set
+            if (!process.env.GROQ_API_KEY) {
+                console.warn('[VOICE PROCESSOR] GROQ_API_KEY not set');
+                return null;
+            }
+
             if (!this.groq) {
                 console.warn('[VOICE PROCESSOR] Groq not available');
                 return null;
             }
 
+            // Check file extension and convert if needed
+            const fileExt = path.extname(audioFilePath).toLowerCase();
+            const supportedFormats = ['.wav', '.mp3', '.mp4', '.m4a', '.flac', '.ogg', '.opus'];
+            
+            if (!supportedFormats.includes(fileExt)) {
+                console.error('[VOICE PROCESSOR] Unsupported file format:', fileExt);
+                return null;
+            }
+
+            // If it's .ogg, try to convert it first
+            if (fileExt === '.ogg') {
+                console.log('[VOICE PROCESSOR] OGG file detected, attempting conversion...');
+                const convertedPath = await this.convertOggToWav(audioFilePath);
+                if (convertedPath) {
+                    audioFilePath = convertedPath;
+                }
+            }
+
             const audioFile = fs.createReadStream(audioFilePath);
             
-            const transcription = await this.groq.audio.transcriptions.create({
-                file: audioFile,
-                model: "whisper-large-v3",
-                response_format: "json",
-                temperature: 0.0,
-                language: 'hi'
-            });
+            try {
+                const transcription = await this.groq.audio.transcriptions.create({
+                    file: audioFile,
+                    model: "whisper-large-v3",
+                    response_format: "json",
+                    temperature: 0.0,
+                    language: 'hi' // Support Hindi
+                });
 
-            const text = transcription.text.trim();
-            console.log('[VOICE PROCESSOR] Transcription:', text.substring(0, 50));
-            
-            return text;
+                const text = transcription.text.trim();
+                console.log('[VOICE PROCESSOR] Transcription:', text.substring(0, 50));
+                
+                return text;
+
+            } catch (groqError) {
+                console.error('[VOICE PROCESSOR] Groq API error:', groqError.message);
+                
+                // If it's a format error, try to convert
+                if (groqError.message.includes('file must be one of the following types')) {
+                    console.log('[VOICE PROCESSOR] Trying to convert to MP3...');
+                    const mp3Path = await this.convertToMp3(audioFilePath);
+                    if (mp3Path) {
+                        const audioFile2 = fs.createReadStream(mp3Path);
+                        const transcription2 = await this.groq.audio.transcriptions.create({
+                            file: audioFile2,
+                            model: "whisper-large-v3",
+                            response_format: "json",
+                            temperature: 0.0
+                        });
+                        return transcription2.text.trim();
+                    }
+                }
+                
+                throw groqError;
+            }
 
         } catch (error) {
             console.error('[VOICE PROCESSOR] Transcription failed:', error.message);
             return null;
         }
     }
+
+/**
+ * Convert OGG to WAV using FFmpeg - UPDATED
+ */
+async convertOggToWav(oggPath) {
+    try {
+        const wavPath = oggPath.replace('.ogg', '_converted.wav');
+        
+        // Updated command with proper flags for Groq Whisper
+        const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+        const command = `"${ffmpegPath}" -i "${oggPath}" -acodec pcm_s16le -ar 16000 -ac 1 "${wavPath}" -y`;
+        
+        await execPromise(command, { timeout: 15000 });
+        
+        if (fs.existsSync(wavPath)) {
+            console.log('[VOICE PROCESSOR] OGG to WAV conversion successful');
+            return wavPath;
+        }
+    } catch (error) {
+        console.log('[VOICE PROCESSOR] OGG conversion failed:', error.message);
+        
+        // Try simple conversion as fallback
+        try {
+            const simpleWavPath = oggPath.replace('.ogg', '_simple.wav');
+            const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+            const simpleCommand = `"${ffmpegPath}" -i "${oggPath}" -f wav "${simpleWavPath}" -y`;
+            
+            await execPromise(simpleCommand, { timeout: 15000 });
+            
+            if (fs.existsSync(simpleWavPath)) {
+                console.log('[VOICE PROCESSOR] Simple WAV conversion successful');
+                return simpleWavPath;
+            }
+        } catch (fallbackError) {
+            console.log('[VOICE PROCESSOR] Fallback conversion also failed:', fallbackError.message);
+        }
+    }
+    return null;
+}
+
+/**
+ * Convert to MP3 using FFmpeg - UPDATED
+ */
+async convertToMp3(inputPath) {
+    try {
+        const mp3Path = inputPath.replace(path.extname(inputPath), '_converted.mp3');
+        
+        const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+        const command = `"${ffmpegPath}" -i "${inputPath}" -codec:a libmp3lame -qscale:a 2 -ar 16000 -ac 1 "${mp3Path}" -y`;
+        
+        await execPromise(command, { timeout: 15000 });
+        
+        if (fs.existsSync(mp3Path)) {
+            console.log('[VOICE PROCESSOR] MP3 conversion successful');
+            return mp3Path;
+        }
+    } catch (error) {
+        console.log('[VOICE PROCESSOR] MP3 conversion failed:', error.message);
+    }
+    return null;
+}
 
     /**
      * Extract intent and entities from transcribed text
