@@ -1409,11 +1409,45 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   console.log("🔍 [CONTROLLER DEBUG] Effective client available:", !!effectiveClient);
+  
+  if (!sender) return;
 
-    // ===========================
+  // ===========================
+  // ✅ CRITICAL FIX: Declare replyId EARLY
+  // ===========================
+  let replyId = null;
+  
+  if (metadata?.interactive?.type === "list_reply") {
+    replyId = metadata.interactive.list_reply.id;
+  } else if (metadata?.interactive?.type === "button_reply") {
+    replyId = metadata.interactive.button_reply.id;
+  }
+  
+  console.log("🔍 [CONTROLLER DEBUG] replyId:", replyId);
+  
+  const msg = String(replyId || text || "").trim();
+  const lower = msg.toLowerCase();
+  
+  console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
+  console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
+  
+  // ===========================
   // ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
   // ===========================
   if (text && !replyId) {
+    // Get session first (you need it for the posting service)
+    let session = (await getSession(sender)) || { 
+      step: "start",
+      state: 'initial',
+      housingFlow: { 
+        step: "start", 
+        data: {},
+        currentIndex: 0, 
+        listingData: null
+      },
+      isInitialized: false
+    };
+    
     const lowerText = text.toLowerCase();
     
     // CRITICAL: Check if user is offering services (I'm a cook, I am electrician, etc.)
@@ -1459,24 +1493,6 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       }
     }
   }
-  
-  if (!sender) return;
-
-  let replyId = null;
-  
-  if (metadata?.interactive?.type === "list_reply") {
-    replyId = metadata.interactive.list_reply.id;
-  } else if (metadata?.interactive?.type === "button_reply") {
-    replyId = metadata.interactive.button_reply.id;
-  }
-  
-  console.log("🔍 [CONTROLLER DEBUG] replyId:", replyId);
-  
-  const msg = String(replyId || text || "").trim();
-  const lower = msg.toLowerCase();
-  
-  console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
-  console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
 
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
