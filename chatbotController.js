@@ -1,8 +1,11 @@
 // ========================================
-// IMPORTS - UPDATED WITH VOICE SUPPORT & URBAN HELP
+// IMPORTS - UPDATED WITH VOICE SUPPORT & URBAN HELP & POSTING SYSTEM
 // ========================================
 const commandRouter = require("./src/bots/commandRouter");
 const voiceService = require("./src/services/voiceService"); // NEW: Voice service
+
+// ✅ ADDED: Posting Service
+const PostingService = require("./services/posting-service");
 
 // ✅ UPDATED: Added new session functions
 const { 
@@ -87,6 +90,44 @@ function getEffectiveClient(client) {
   }
   
   return effectiveClient;
+}
+
+// ========================================
+// POSTING SERVICE HANDLER
+// ========================================
+/**
+ * Handle posting service messages
+ */
+async function handlePostingService(sender, message, session, effectiveClient) {
+  try {
+    console.log("📝 [POSTING SERVICE] Processing message for posting flow");
+    
+    const postingService = new PostingService(sender);
+    const result = await postingService.processMessage(message);
+    
+    if (result.shouldHandle !== false) {
+      switch(result.type) {
+        case 'question':
+        case 'confirmation':
+        case 'success':
+        case 'cancelled':
+          await sendMessageWithClient(sender, result.response, effectiveClient);
+          return { handled: true, type: result.type };
+          
+        case 'error':
+          await sendMessageWithClient(sender, `⚠️ ${result.response}`, effectiveClient);
+          return { handled: true, type: 'error' };
+          
+        case 'not_posting':
+          return { handled: false };
+      }
+    }
+    
+    return { handled: false };
+  } catch (error) {
+    console.error("❌ [POSTING SERVICE] Error:", error);
+    return { handled: false };
+  }
 }
 
 // ========================================
@@ -526,43 +567,43 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
       client
     );
     
-// ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
-const results = await searchUrbanServices(category, location);
+    // ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
+    const results = await searchUrbanServices(category, location);
 
-if (results && results.length > 0) {
-  // Format and send results
-  const resultsMessage = formatUrbanHelpResults(results, userLang, categoryName);
-  await sendMessageWithClient(sender, resultsMessage, client);
-  
-  // Add to user requests
-  await addUserRequest(sender, {
-    category: category,
-    location: location,
-    status: 'matched',
-    matchedProviders: results.map(r => r.id).slice(0, 3),
-    timestamp: Date.now()
-  });
-  
-} else {
-  // No results found
-  const noResultsMessage = 
-    `❌ Sorry, I couldn't find any *${categoryName}* in *${location}*.\n\n` +
-    `Try:\n` +
-    `• Searching for a different service\n` +
-    `• Checking a nearby location\n` +
-    `• Using broader search terms\n\n` +
-    `You can also try saying: "electrician near me" or "plumber in Delhi"`;
+    if (results && results.length > 0) {
+      // Format and send results
+      const resultsMessage = formatUrbanHelpResults(results, userLang, categoryName);
+      await sendMessageWithClient(sender, resultsMessage, client);
       
-  await sendMessageWithClient(sender, noResultsMessage, client);
-  
-  // Add to user requests as pending
-  await addUserRequest(sender, {
-    category: category,
-    location: location,
-    status: 'pending',
-    timestamp: Date.now()
-  });
-}
+      // Add to user requests
+      await addUserRequest(sender, {
+        category: category,
+        location: location,
+        status: 'matched',
+        matchedProviders: results.map(r => r.id).slice(0, 3),
+        timestamp: Date.now()
+      });
+      
+    } else {
+      // No results found
+      const noResultsMessage = 
+        `❌ Sorry, I couldn't find any *${categoryName}* in *${location}*.\n\n` +
+        `Try:\n` +
+        `• Searching for a different service\n` +
+        `• Checking a nearby location\n` +
+        `• Using broader search terms\n\n` +
+        `You can also try saying: "electrician near me" or "plumber in Delhi"`;
+          
+      await sendMessageWithClient(sender, noResultsMessage, client);
+      
+      // Add to user requests as pending
+      await addUserRequest(sender, {
+        category: category,
+        location: location,
+        status: 'pending',
+        timestamp: Date.now()
+      });
+    }
     
     // Send follow-up
     const followUpText = "\n\nNeed another service? Send another voice message or type 'help'.";
@@ -1166,7 +1207,65 @@ function extractUrbanHelpFromText(text) {
 }
 
 // ========================================
-// UPDATED MAIN CONTROLLER - WITH URBAN HELP SUPPORT AND VOICE CONFIRMATION FLOW
+// POST LISTING FLOW HANDLERS
+// ========================================
+/**
+ * Handle post listing flow - UPDATED WITH DUAL OPTIONS
+ */
+async function handlePostListingFlow(sender, session = null, client = null) {
+  console.log("📝 [POST LISTING] Offering dual posting options");
+  
+  const effectiveClient = getEffectiveClient(client);
+  if (!effectiveClient) {
+    await sendMessageWithClient(sender, "❌ WhatsApp client not available.");
+    return;
+  }
+  
+  const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+  
+  let message = '';
+  if (userLang === 'hi') {
+    message = `📝 *नई लिस्टिंग पोस्ट करें*\n\n` +
+              `आप दो तरीकों से पोस्ट कर सकते हैं:\n\n` +
+              `1. 📋 *फॉर्म भरें* - एक गाइडेड फॉर्म जहां आप स्टेप बाय स्टेप भर सकते हैं\n` +
+              `2. 💬 *चैट में टाइप करें* - बस अपनी लिस्टिंग का विवरण टाइप करें\n\n` +
+              `आप कौनसा विकल्प चुनना चाहेंगे?`;
+  } else if (userLang === 'ta') {
+    message = `📝 *புதிய பட்டியலை இடுகையிடு*\n\n` +
+              `நீங்கள் இரண்டு வழிகளில் இடுகையிடலாம்:\n\n` +
+              `1. 📋 *படிவத்தை நிரப்பவும்* - ஒரு வழிகாட்டப்பட்ட படிவம்\n` +
+              `2. 💬 *அரட்டையில் தட்டச்சு செய்யவும்* - உங்கள் பட்டியல் விவரங்களை தட்டச்சு செய்யவும்\n\n` +
+              `நீங்கள் எந்த விருப்பத்தை தேர்வு செய்ய விரும்புகிறீர்கள்?`;
+  } else {
+    message = `📝 *Post a New Listing*\n\n` +
+              `You can post in two ways:\n\n` +
+              `1. 📋 *Fill out a form* - A guided step-by-step form\n` +
+              `2. 💬 *Type in chat* - Simply type your listing details\n\n` +
+              `Which option would you prefer?`;
+  }
+  
+  // Send interactive buttons
+  await sendInteractiveButtonsWithClient(
+    effectiveClient,
+    sender,
+    message,
+    [
+      { id: 'post_form', text: '📋 Use Form' },
+      { id: 'post_chat', text: '💬 Type in Chat' },
+      { id: 'post_back', text: '⬅️ Back to Menu' }
+    ]
+  );
+  
+  // Update session
+  if (session) {
+    session.postingOptions = true;
+    session.step = "awaiting_posting_option";
+    await saveSession(sender, session);
+  }
+}
+
+// ========================================
+// UPDATED MAIN CONTROLLER - WITH POSTING SYSTEM, URBAN HELP SUPPORT AND VOICE CONFIRMATION FLOW
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}, client = null) {
   console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
@@ -1333,137 +1432,155 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
   // ===========================
+  // 1) CHECK FOR POSTING SERVICE (NEW)
+  // ===========================
+  if (text && !replyId) { // Only check text messages, not button clicks
+    const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+    if (postingResult.handled) {
+      // Update session based on posting result
+      if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+        session.step = "posting_flow";
+      } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+        session.step = "menu";
+        session.state = 'initial';
+      }
+      await saveSession(sender, session);
+      return session;
+    }
+  }
+
+  // ===========================
   // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS
   // ===========================
-if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again') || 
-    replyId.startsWith('type_instead') || replyId.startsWith('use_buttons'))) {
-    
-    console.log(`🎤 [VOICE BUTTON] Detected voice confirmation button: ${replyId}`);
-    
-    // Handle both simple confirmation (confirm_yes) and AI confirmation (confirm_service_search, etc.)
-    if (replyId === 'confirm_yes' || replyId.startsWith('confirm_')) {
-        // User confirmed - extract the intent
-        let intent = 'service_search'; // Default
-        
-        if (replyId === 'confirm_yes') {
-            // From simple confirmation flow
-            intent = 'service_search'; // Default intent for voice messages
-        } else {
-            // From AI confirmation flow (e.g., confirm_service_search)
-            intent = replyId.replace('confirm_', '');
-        }
-        
-        console.log(`🎤 [VOICE BUTTON] Processing confirmation for intent: ${intent}`);
-        
-        const confirmedText = session.rawTranscription;
-        
-        if (!confirmedText) {
-            await sendMessageWithClient(sender, "❌ No transcription found. Please try again.");
-            session.state = 'initial';
-            session.step = 'menu';
-            await saveSession(sender, session);
-            await sendMainMenuViaService(sender);
-            return session;
-        }
-        
-        await sendMessageWithClient(sender, `✅ Perfect! You're looking for: *"${confirmedText}"*\n\nSearching for services...`);
-        
-        // Check if it's an urban help request
-        if (intent === 'service_search' || isUrbanHelpRequest(confirmedText)) {
-            // Extract urban help info
-            const extractedInfo = extractUrbanHelpFromText(confirmedText);
-            console.log(`🔧 [URBAN HELP] Extracted info:`, extractedInfo);
-            
-            const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-            
-            if (extractedInfo.category && extractedInfo.location) {
-                // We have both category and location, search immediately
-                await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);
-            } else if (extractedInfo.category && !extractedInfo.location) {
-                // Have category but no location - ask for location
-                await sendMessageWithClient(sender, 
-                    `Where do you need the ${extractedInfo.category}?`,
-                    effectiveClient
-                );
-                
-                session.urbanHelpContext = {
-                    ...extractedInfo,
-                    transcription: confirmedText,
-                    step: "awaiting_location"
-                };
-                session.step = "awaiting_urban_help_location";
-                await saveSession(sender, session);
-                
-            } else if (!extractedInfo.category && extractedInfo.location) {
-                // Have location but no category - ask for category
-                await sendInteractiveButtonsWithClient(
-                    effectiveClient,
-                    sender,
-                    `What type of service do you need in ${extractedInfo.location}?`,
-                    Object.entries(URBAN_HELP_CATEGORIES).slice(0, 4).map(([id, data]) => ({
-                        id: `category_${id}`,
-                        text: `${data.emoji} ${data.name}`
-                    }))
-                );
-                
-                session.urbanHelpContext = {
-                    ...extractedInfo,
-                    transcription: confirmedText,
-                    step: "awaiting_category"
-                };
-                session.step = "awaiting_urban_help_category";
-                await saveSession(sender, session);
-                
-            } else {
-                // Neither category nor location - ask user to clarify
-                await sendMessageWithClient(sender, 
-                    "I understand you need a service. Could you please specify what type of service and location?\n\nExample: 'Electrician in Rajouri Garden'",
-                    effectiveClient
-                );
-                session.state = 'initial';
-                session.step = 'menu';
-            }
-        } else {
-            // Process property-related intent
-            await voiceService.extractIntentAfterConfirmation(sender, confirmedText, session, effectiveClient);
-        }
-        
-        // Reset session
-        session.state = 'initial';
-        delete session.rawTranscription;
-        session.step = 'menu';
-        await saveSession(sender, session);
-        
-    } else if (replyId === 'try_again' || replyId === 'try_again_urban') {
-        // User wants to try again
-        await sendMessageWithClient(sender, "🔄 No problem! Please send your voice message again.");
-        session.state = 'initial';
-        session.step = 'menu';
-        delete session.rawTranscription;
-        delete session.urbanHelpContext;
-        await saveSession(sender, session);
-        
-    } else if (replyId === 'type_instead') {
-        // User wants to type
-        await sendMessageWithClient(sender, "📝 Please type what you're looking for:");
-        session.state = 'awaiting_text_input';
-        session.step = 'awaiting_text_input';
-        delete session.rawTranscription;
-        await saveSession(sender, session);
-        
-    } else if (replyId === 'use_buttons') {
-        // User wants to use menu buttons
-        await sendMessageWithClient(sender, "📋 Showing menu options...");
-        session.state = 'initial';
-        session.step = 'menu';
-        delete session.rawTranscription;
-        await saveSession(sender, session);
-        await sendMainMenuViaService(sender);
-    }
-    
-    await saveSession(sender, session);
-    return session;
-}
+  if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again') || 
+      replyId.startsWith('type_instead') || replyId.startsWith('use_buttons'))) {
+      
+      console.log(`🎤 [VOICE BUTTON] Detected voice confirmation button: ${replyId}`);
+      
+      // Handle both simple confirmation (confirm_yes) and AI confirmation (confirm_service_search, etc.)
+      if (replyId === 'confirm_yes' || replyId.startsWith('confirm_')) {
+          // User confirmed - extract the intent
+          let intent = 'service_search'; // Default
+          
+          if (replyId === 'confirm_yes') {
+              // From simple confirmation flow
+              intent = 'service_search'; // Default intent for voice messages
+          } else {
+              // From AI confirmation flow (e.g., confirm_service_search)
+              intent = replyId.replace('confirm_', '');
+          }
+          
+          console.log(`🎤 [VOICE BUTTON] Processing confirmation for intent: ${intent}`);
+          
+          const confirmedText = session.rawTranscription;
+          
+          if (!confirmedText) {
+              await sendMessageWithClient(sender, "❌ No transcription found. Please try again.");
+              session.state = 'initial';
+              session.step = 'menu';
+              await saveSession(sender, session);
+              await sendMainMenuViaService(sender);
+              return session;
+          }
+          
+          await sendMessageWithClient(sender, `✅ Perfect! You're looking for: *"${confirmedText}"*\n\nSearching for services...`);
+          
+          // Check if it's an urban help request
+          if (intent === 'service_search' || isUrbanHelpRequest(confirmedText)) {
+              // Extract urban help info
+              const extractedInfo = extractUrbanHelpFromText(confirmedText);
+              console.log(`🔧 [URBAN HELP] Extracted info:`, extractedInfo);
+              
+              const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+              
+              if (extractedInfo.category && extractedInfo.location) {
+                  // We have both category and location, search immediately
+                  await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);
+              } else if (extractedInfo.category && !extractedInfo.location) {
+                  // Have category but no location - ask for location
+                  await sendMessageWithClient(sender, 
+                      `Where do you need the ${extractedInfo.category}?`,
+                      effectiveClient
+                  );
+                  
+                  session.urbanHelpContext = {
+                      ...extractedInfo,
+                      transcription: confirmedText,
+                      step: "awaiting_location"
+                  };
+                  session.step = "awaiting_urban_help_location";
+                  await saveSession(sender, session);
+                  
+              } else if (!extractedInfo.category && extractedInfo.location) {
+                  // Have location but no category - ask for category
+                  await sendInteractiveButtonsWithClient(
+                      effectiveClient,
+                      sender,
+                      `What type of service do you need in ${extractedInfo.location}?`,
+                      Object.entries(URBAN_HELP_CATEGORIES).slice(0, 4).map(([id, data]) => ({
+                          id: `category_${id}`,
+                          text: `${data.emoji} ${data.name}`
+                      }))
+                  );
+                  
+                  session.urbanHelpContext = {
+                      ...extractedInfo,
+                      transcription: confirmedText,
+                      step: "awaiting_category"
+                  };
+                  session.step = "awaiting_urban_help_category";
+                  await saveSession(sender, session);
+                  
+              } else {
+                  // Neither category nor location - ask user to clarify
+                  await sendMessageWithClient(sender, 
+                      "I understand you need a service. Could you please specify what type of service and location?\n\nExample: 'Electrician in Rajouri Garden'",
+                      effectiveClient
+                  );
+                  session.state = 'initial';
+                  session.step = 'menu';
+              }
+          } else {
+              // Process property-related intent
+              await voiceService.extractIntentAfterConfirmation(sender, confirmedText, session, effectiveClient);
+          }
+          
+          // Reset session
+          session.state = 'initial';
+          delete session.rawTranscription;
+          session.step = 'menu';
+          await saveSession(sender, session);
+          
+      } else if (replyId === 'try_again' || replyId === 'try_again_urban') {
+          // User wants to try again
+          await sendMessageWithClient(sender, "🔄 No problem! Please send your voice message again.");
+          session.state = 'initial';
+          session.step = 'menu';
+          delete session.rawTranscription;
+          delete session.urbanHelpContext;
+          await saveSession(sender, session);
+          
+      } else if (replyId === 'type_instead') {
+          // User wants to type
+          await sendMessageWithClient(sender, "📝 Please type what you're looking for:");
+          session.state = 'awaiting_text_input';
+          session.step = 'awaiting_text_input';
+          delete session.rawTranscription;
+          await saveSession(sender, session);
+          
+      } else if (replyId === 'use_buttons') {
+          // User wants to use menu buttons
+          await sendMessageWithClient(sender, "📋 Showing menu options...");
+          session.state = 'initial';
+          session.step = 'menu';
+          delete session.rawTranscription;
+          await saveSession(sender, session);
+          await sendMainMenuViaService(sender);
+      }
+      
+      await saveSession(sender, session);
+      return session;
+  }
 
   // ===========================
   // ✅ ADDED: ALSO CHECK FOR TEXT RESPONSES TO VOICE CONFIRMATION
@@ -1550,7 +1667,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
 
   // ===========================
-  // 1) PRIORITY: CHECK FLOW SUBMISSION
+  // 2) PRIORITY: CHECK FLOW SUBMISSION
   // ===========================
   const flowHandled = await handleFlowSubmission(metadata, sender);
   if (flowHandled) {
@@ -1559,7 +1676,76 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
 
   // ===========================
-  // 2) CHECK FOR URBAN HELP CONFIRMATION RESPONSES
+  // 3) CHECK FOR POSTING OPTION SELECTION (NEW)
+  // ===========================
+  if (msg === 'post_form' && session.step === 'awaiting_posting_option') {
+    console.log("📋 User selected form posting");
+    
+    // Send WhatsApp Flow
+    const { sendListingFlow } = require('./core/flows/whatsappFlows/postListingFlow');
+    try {
+      await sendListingFlow(sender);
+      session.step = "awaiting_flow_completion";
+      await saveSession(sender, session);
+    } catch (error) {
+      console.error("❌ Error sending flow:", error);
+      await sendMessageWithClient(sender, "❌ Could not load the form. Please try the chat option instead.");
+      session.step = "menu";
+      await saveSession(sender, session);
+    }
+    return session;
+  }
+
+  if (msg === 'post_chat' && session.step === 'awaiting_posting_option') {
+    console.log("💬 User selected chat posting");
+    
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+    
+    let message = '';
+    if (userLang === 'hi') {
+      message = `💬 *चैट में टाइप करके पोस्ट करें*\n\n` +
+                `बस अपनी लिस्टिंग का विवरण टाइप करें, जैसे:\n\n` +
+                `• "मेरे पास सेक्टर 62 में 2BHK फ्लैट किराए पर है"\n` +
+                `• "मैं गुड़गांव में इलेक्ट्रीशियन की सेवा देता हूं"\n` +
+                `• "1BHK पीजी रूम उपलब्ध है, 8000 रुपये प्रति माह"\n\n` +
+                `मैं आपसे जरूरी जानकारी एक-एक करके पूछूंगा।`;
+    } else if (userLang === 'ta') {
+      message = `💬 *அரட்டையில் தட்டச்சு செய்து இடுகையிடு*\n\n` +
+                `உங்கள் பட்டியல் விவரங்களை தட்டச்சு செய்யவும், உதாரணம்:\n\n` +
+                `• "செக்டர் 62-ல் 2BHK அடுக்குமாடி குடியிருப்பு கிடைக்கிறது"\n` +
+                `• "குர்காவில் மின்தொழிலாளி சேவை செய்கிறேன்"\n` +
+                `• "1BHK PG அறை கிடைக்கிறது, மாதத்திற்கு ₹8000"\n\n` +
+                `நான் உங்களிடம் தேவையான தகவல்களை ஒவ்வொன்றாக கேட்பேன்.`;
+    } else {
+      message = `💬 *Type to Post in Chat*\n\n` +
+                `Simply type your listing details, for example:\n\n` +
+                `• "I have a 2BHK flat for rent in Sector 62"\n` +
+                `• "I provide electrician services in Gurgaon"\n` +
+                `• "1BHK PG room available, ₹8000 per month"\n\n` +
+                `I'll ask you for required information one by one.`;
+    }
+    
+    await sendMessageWithClient(sender, message);
+    
+    // Initialize posting service - will start when user types next message
+    session.step = "awaiting_listing_description";
+    session.state = 'initial';
+    await saveSession(sender, session);
+    
+    return session;
+  }
+
+  if (msg === 'post_back' && session.step === 'awaiting_posting_option') {
+    console.log("⬅️ User went back to menu");
+    session.step = "menu";
+    session.state = 'initial';
+    await saveSession(sender, session);
+    await sendMainMenuViaService(sender);
+    return session;
+  }
+
+  // ===========================
+  // 4) CHECK FOR URBAN HELP CONFIRMATION RESPONSES
   // ===========================
   if (session.step.startsWith("awaiting_urban_help_") && replyId) {
     console.log("🔧 [URBAN HELP] Processing response:", msg);
@@ -1567,7 +1753,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
 
   // ===========================
-  // 3) CHECK FOR VOICE CONFIRMATION RESPONSES (OLD FLOW)
+  // 5) CHECK FOR VOICE CONFIRMATION RESPONSES (OLD FLOW)
   // ===========================
   if (session.step === "awaiting_voice_confirmation" && replyId) {
     console.log("🎤 [VOICE] Processing confirmation response");
@@ -1575,7 +1761,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
 
   // ===========================
-  // 4) CHECK FOR VOICE SEARCH OPTIONS
+  // 6) CHECK FOR VOICE SEARCH OPTIONS
   // ===========================
   if (msg.startsWith("voice_")) {
     return await handleVoiceSearchOptions(sender, msg, session, effectiveClient);
@@ -1587,7 +1773,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   const isNewUser = !user && !session.isInitialized;
 
   // ===========================
-  // 5) NEW USER INTRO
+  // 7) NEW USER INTRO
   // ===========================
   if (isGreeting && isNewUser) {
     await sendMessageWithClient(
@@ -1605,7 +1791,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
 
   // ===========================
-  // 6) EXISTING USER GREETING
+  // 8) EXISTING USER GREETING
   // ===========================
   if (isGreeting && !isNewUser) {
     session.housingFlow.listingData = null;
@@ -1618,7 +1804,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
 
   // ===========================
-  // 7) LANGUAGE SELECTION
+  // 9) LANGUAGE SELECTION
   // ===========================
   if (session.housingFlow?.awaitingLangSelection) {
     const parsed = parseLangFromText(msg);
@@ -1645,7 +1831,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
   
   // ===========================
-  // 8) URBAN HELP TEXT INPUT
+  // 10) URBAN HELP TEXT INPUT
   // ===========================
   if (session.step === "awaiting_urban_help_text" && text) {
     console.log("🔧 [URBAN HELP] Processing text input:", text);
@@ -1654,7 +1840,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
   
   // ===========================
-  // 9) TEXT INPUT AFTER VOICE CONFIRMATION
+  // 11) TEXT INPUT AFTER VOICE CONFIRMATION
   // ===========================
   if (session.state === 'awaiting_text_input' && text) {
     console.log("📝 [TEXT INPUT] Processing text after voice fallback:", text);
@@ -1702,7 +1888,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
   
   // ===========================
-  // 10) URBAN HELP CATEGORY SELECTION
+  // 12) URBAN HELP CATEGORY SELECTION
   // ===========================
   if (msg.startsWith("text_category_") && session.step === "awaiting_urban_help_category") {
     const category = msg.replace("text_category_", "");
@@ -1723,7 +1909,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
   
   // ===========================
-  // 11) URBAN HELP LOCATION INPUT
+  // 13) URBAN HELP LOCATION INPUT
   // ===========================
   if (session.step === "awaiting_urban_help_location" && text) {
     const urbanContext = session.urbanHelpContext || {};
@@ -1741,7 +1927,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
   
   // ==========================================
-  // 12) MANAGE LISTINGS INTERACTIVE HANDLING
+  // 14) MANAGE LISTINGS INTERACTIVE HANDLING
   // ==========================================
   
   // Handle listing selection from manage listings
@@ -1752,7 +1938,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   }
   
   // ==========================================
-  // 13) DELETE FLOW HANDLING
+  // 15) DELETE FLOW HANDLING
   // ==========================================
   
   // Handle delete button click (shows confirmation)
@@ -1820,7 +2006,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 14) EDIT FLOW HANDLING
+  // 16) EDIT FLOW HANDLING
   // ==========================================
   
   // Handle edit button click (starts edit flow)
@@ -1867,7 +2053,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 15) EDIT FIELD SELECTION HANDLING
+  // 17) EDIT FIELD SELECTION HANDLING
   // ==========================================
   
   // Handle edit flow field selection
@@ -1977,7 +2163,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 16) EDIT FIELD VALUE INPUT (TEXT-BASED)
+  // 18) EDIT FIELD VALUE INPUT (TEXT-BASED)
   // ==========================================
   if (session.editFlow?.step === "awaiting_field_value" && text) {
     console.log("🔍 [CONTROLLER] Field value received:", text);
@@ -1986,7 +2172,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 17) CANCEL MANAGE (Back button)
+  // 19) CANCEL MANAGE (Back button)
   // ==========================================
   if (msg === "cancel_manage" && session.manageListings?.step === "awaiting_action") {
     console.log("🔍 [CONTROLLER] Back to listing list");
@@ -1995,7 +2181,7 @@ What would you like to do with this listing?`;
   }
   
   // ==========================================
-  // 18) SAVED LISTINGS INTERACTIVE HANDLING
+  // 20) SAVED LISTINGS INTERACTIVE HANDLING
   // ==========================================
 
   // Handle saved listing selection
@@ -2117,7 +2303,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 19) TEXT-BASED LISTING INPUT (FALLBACK)
+  // 21) TEXT-BASED LISTING INPUT (FALLBACK)
   // ==========================================
   if (session.step === "awaiting_post_details" && text) {
     console.log("📝 [CONTROLLER] Processing text-based listing input");
@@ -2126,7 +2312,7 @@ What would you like to do with this saved listing?`;
   }
   
   // ==========================================
-  // 20) INTERACTIVE LISTING ACTIONS
+  // 22) INTERACTIVE LISTING ACTIONS
   // ==========================================
   if (session.step === "awaiting_listing_action" && replyId) {
     console.log(`🔄 Handling listing action: ${msg}`);
@@ -2216,7 +2402,7 @@ What would you like to do with this saved listing?`;
   }
 
   // ===========================
-  // 21) MENU COMMAND HANDLING
+  // 23) MENU COMMAND HANDLING
   // ===========================
   switch (lower) {
     case "view_listings":
@@ -2229,9 +2415,9 @@ What would you like to do with this saved listing?`;
 
     case "post_listing":
       console.log("📝 Menu: Post Listing selected");
-      // Use WhatsApp Flow for posting
-      await handlePostListingFlow(sender);
-      return session; // Return early since handlePostListingFlow handles session
+      // Offer dual posting options
+      await handlePostListingFlow(sender, session, effectiveClient);
+      return session;
 
     case "manage_listings":
       console.log("⚙️ Menu: Manage Listings selected");
@@ -3022,23 +3208,6 @@ What would you like to do with this saved listing?`;
 // ========================================
 // PLACEHOLDER FUNCTIONS FOR MISSING IMPLEMENTATIONS
 // ========================================
-
-/**
- * Handle post listing flow - PLACEHOLDER
- */
-async function handlePostListingFlow(sender) {
-  console.log("📝 [POST LISTING] Placeholder - function not fully implemented");
-  await sendMessageWithClient(sender, "The post listing feature is currently unavailable. Please try again later.");
-  
-  // Update session
-  const session = await getSession(sender);
-  if (session) {
-    session.step = "menu";
-    session.state = 'initial';
-    await saveSession(sender, session);
-    await sendMainMenuViaService(sender);
-  }
-}
 
 /**
  * Handle flow submission - PLACEHOLDER
