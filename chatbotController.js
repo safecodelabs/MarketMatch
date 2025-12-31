@@ -5,7 +5,7 @@ const commandRouter = require("./src/bots/commandRouter");
 const voiceService = require("./src/services/voiceService"); // NEW: Voice service
 
 // ✅ ADDED: Posting Service
-const PostingService = require("./services/posting-service");
+const PostingService = require("./src/services/posting-service");
 
 // ✅ UPDATED: Added new session functions
 const { 
