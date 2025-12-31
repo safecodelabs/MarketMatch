@@ -1646,61 +1646,10 @@ if (text && !replyId) {
   console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
   console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
-  // ===========================
-  // 1) CHECK FOR POSTING SERVICE (NEW) - WITH CONTEXT DETECTION
-  // ===========================
-  if (text && !replyId) { // Only check text messages, not button clicks
-    
-    // FIRST: Check if it's an urban help request
-    if (isUrbanHelpRequest(text)) {
-      console.log("🔧 [URBAN HELP] Text request detected");
-      
-      // CRITICAL: DETERMINE CONTEXT FIRST
-      const context = detectIntentContext(text);
-      const isOffering = isUserOfferingServices(text);
-      
-      console.log(`🔍 [CONTEXT] Detected: "${text}"`);
-      console.log(`🔍 [CONTEXT] Context: ${context}, IsOffering: ${isOffering}`);
-      
-      if (context === 'offer' || isOffering) {
-        // USER IS OFFERING SERVICES → USE POSTING SERVICE
-        console.log("🔧 [URBAN HELP] User is OFFERING services");
-        
-        // Send more specific acknowledgment
-        const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-        let ackMessage = '';
-        
-        if (userLang === 'hi') {
-          ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
-        } else if (userLang === 'ta') {
-          ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
-        } else {
-          ackMessage = "🔧 I see you're offering services. Let me help you post this...";
-        }
-        
-        await sendMessageWithClient(sender, ackMessage, effectiveClient);
-        
-        // Process with posting service
-        const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-        if (postingResult.handled) {
-          // Update session based on posting result
-          if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-            session.step = "posting_flow";
-          } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-            session.step = "menu";
-            session.state = 'initial';
-          }
-          await saveSession(sender, session);
-          return session;
-        }
-      } else {
-        // USER IS LOOKING → SHOW BUTTONS (current behavior)
-        console.log("🔧 [URBAN HELP] User is LOOKING FOR services");
-        await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
-        return session;
-      }
-    }
-    
+// ===========================
+// 1) CHECK FOR POSTING SERVICE (NEW) - FOR NON-URBAN HELP REQUESTS
+// ===========================
+if (text && !replyId) { // Only check text messages, not button clicks
     // SECOND: Check general posting service for non-urban help requests
     const postingResult = await handlePostingService(sender, text, session, effectiveClient);
     if (postingResult.handled) {
@@ -1714,7 +1663,7 @@ if (text && !replyId) {
       await saveSession(sender, session);
       return session;
     }
-  }
+}
 
   // ===========================
   // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS
