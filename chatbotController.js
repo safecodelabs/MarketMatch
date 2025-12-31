@@ -1431,57 +1431,58 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
   console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
   
-  // ===========================
-  // ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
-  // ===========================
-  if (text && !replyId) {
-    // Get session first (you need it for the posting service)
-    let session = (await getSession(sender)) || { 
-      step: "start",
-      state: 'initial',
-      housingFlow: { 
-        step: "start", 
-        data: {},
-        currentIndex: 0, 
-        listingData: null
-      },
-      isInitialized: false
-    };
+// ===========================
+// ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
+// ===========================
+if (text && !replyId) {
+  // Get session first
+  let session = (await getSession(sender)) || { 
+    step: "start",
+    state: 'initial',
+    housingFlow: { 
+      step: "start", 
+      data: {},
+      currentIndex: 0, 
+      listingData: null
+    },
+    isInitialized: false
+  };
+  
+  const lowerText = text.toLowerCase();
+  
+  // FIRST: Check if it's an urban help request
+  if (isUrbanHelpRequest(text)) {
+    console.log("🔧 [URBAN HELP] Text request detected");
     
-    const lowerText = text.toLowerCase();
+    // CRITICAL: DETERMINE CONTEXT FIRST
+    const context = detectIntentContext(text);
+    const isOffering = isUserOfferingServices(text);
     
-    // CRITICAL: Check if user is offering services (I'm a cook, I am electrician, etc.)
-    const isOffering = 
-      lowerText.includes("i'm ") || 
-      lowerText.includes("i am ") || 
-      lowerText.includes("i have ") ||
-      lowerText.includes("i provide") ||
-      lowerText.includes("i offer") ||
-      lowerText.includes("available") ||
-      lowerText.includes("professional") ||
-      lowerText.includes("experienced") ||
-      lowerText.includes("for hire") ||
-      lowerText.includes("for rent") ||
-      lowerText.includes("selling") ||
-      /i('?m| am) (a |an )?/i.test(lowerText);
+    console.log(`🔍 [CONTEXT] Detected: "${text}"`);
+    console.log(`🔍 [CONTEXT] Context: ${context}, IsOffering: ${isOffering}`);
     
-    // Check if it contains service keywords
-    const hasServiceKeyword = Object.keys(URBAN_HELP_CATEGORIES).some(category => 
-      URBAN_HELP_CATEGORIES[category].keywords.some(keyword => 
-        lowerText.includes(keyword)
-      )
-    );
-    
-    if (isOffering && hasServiceKeyword) {
-      console.log("🚨 [EMERGENCY FIX] Detected user OFFERING services!");
-      console.log(`   Text: "${text}"`);
-      console.log(`   IsOffering: ${isOffering}, HasServiceKeyword: ${hasServiceKeyword}`);
+    if (context === 'offer' || isOffering) {
+      // USER IS OFFERING SERVICES → USE POSTING SERVICE
+      console.log("🔧 [URBAN HELP] User is OFFERING services");
       
-      // Send to posting service immediately
-      await sendMessageWithClient(sender, "🔧 I see you're offering services. Let me help you post this...", effectiveClient);
+      // Send more specific acknowledgment
+      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+      let ackMessage = '';
       
+      if (userLang === 'hi') {
+        ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+      } else if (userLang === 'ta') {
+        ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+      } else {
+        ackMessage = "🔧 I see you're offering services. Let me help you post this...";
+      }
+      
+      await sendMessageWithClient(sender, ackMessage, effectiveClient);
+      
+      // Process with posting service
       const postingResult = await handlePostingService(sender, text, session, effectiveClient);
       if (postingResult.handled) {
+        // Update session based on posting result
         if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
           session.step = "posting_flow";
         } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
@@ -1489,10 +1490,30 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           session.state = 'initial';
         }
         await saveSession(sender, session);
-        return session;
+        return session; // ✅ RETURN IMMEDIATELY
       }
+    } else {
+      // USER IS LOOKING → SHOW BUTTONS
+      console.log("🔧 [URBAN HELP] User is LOOKING FOR services");
+      await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
+      return session; // ✅ RETURN IMMEDIATELY
     }
   }
+  
+  // SECOND: Check general posting service for non-urban help requests
+  const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+  if (postingResult.handled) {
+    // Update session based on posting result
+    if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+      session.step = "posting_flow";
+    } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+      session.step = "menu";
+      session.state = 'initial';
+    }
+    await saveSession(sender, session);
+    return session; // ✅ RETURN IMMEDIATELY
+  }
+}
 
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
