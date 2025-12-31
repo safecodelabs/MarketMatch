@@ -17,7 +17,7 @@ console.log("🔍 VERIFY_TOKEN exists:", !!(process.env.VERIFY_TOKEN));
 console.log("🔧 Initializing Posting System...");
 let initCollections;
 try {
-    initCollections = require("./database/init-collection");
+    initCollections = require("./database/init-collections");
     console.log("✅ Posting System collections module loaded");
 } catch (error) {
     console.error("❌ Failed to load posting system collections:", error.message);
@@ -63,7 +63,7 @@ try {
 // ============================================
 let CleanupService;
 try {
-    CleanupService = require("./services/cleanup-service");
+    CleanupService = require("./src/services/cleanup-service");
     console.log("✅ CleanupService loaded");
 } catch (error) {
     console.warn("⚠️ CleanupService not found, creating minimal version:", error.message);
@@ -90,7 +90,7 @@ try {
 // ============================================
 let flowWebhookRouter;
 try {
-    flowWebhookRouter = require("./routes/flow-webhook");
+    flowWebhookRouter = require("./routes/webhook");
     console.log("✅ Flow webhook router loaded");
 } catch (error) {
     console.warn("⚠️ Flow webhook router not found:", error.message);
@@ -107,7 +107,7 @@ try {
 // ============================================
 let postingFlowModule;
 try {
-    postingFlowModule = require("./core/flows/whatsappFlows/postListingFlow");
+    postingFlowModule = require("./src/flows/postListingFlow");
     console.log("✅ Posting flow module loaded");
 } catch (error) {
     console.warn("⚠️ Posting flow module not found:", error.message);

@@ -1,5 +1,5 @@
 // File: /database/session-manager.js
-const { db } = require('./firestore.js');
+const { db } = require('./firestore');
 const { Timestamp } = require('firebase/firestore');
 
 class SessionManager {
