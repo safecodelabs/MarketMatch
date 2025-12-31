@@ -91,6 +91,133 @@ function getEffectiveClient(client) {
   
   return effectiveClient;
 }
+// ========================================
+// INTENT CONTEXT DETECTION (NEW) - CRITICAL FIX
+// ========================================
+
+/**
+ * Detect if user is OFFERING or LOOKING FOR services
+ * @param {String} text - User's message
+ * @returns {String|null} 'offer', 'find', or null
+ */
+function detectIntentContext(text) {
+  if (!text || typeof text !== 'string') return null;
+  
+  const lower = text.toLowerCase();
+  
+  // OFFERING patterns (I am/I'm/I have) - USER IS POSTING THEIR SERVICES
+  const offeringPatterns = [
+    /i('?m| am) (a |an )?/i,
+    /i have (a |an )?/i,
+    /i provide/i,
+    /i offer/i,
+    /available/i,
+    /looking to provide/i,
+    /i can provide/i,
+    /i do/i,
+    /i work as/i,
+    /i am available/i,
+    /contact me for/i,
+    /call me for/i,
+    /message me for/i,
+    /whatsapp me for/i,
+    /i sell/i,
+    /i am selling/i,
+    /for sale/i,
+    /available for/i,
+    /service provided/i,
+    /services available/i,
+    /hire me/i,
+    /i am expert/i,
+    /professional/i,
+    /experienced/i
+  ];
+  
+  // LOOKING patterns (I need/I want/looking for) - USER IS SEARCHING FOR SERVICES
+  const lookingPatterns = [
+    /i need/i,
+    /i want/i,
+    /looking for/i,
+    /searching for/i,
+    /find (a |an )?/i,
+    /need (a |an )?/i,
+    /want (a |an )?/i,
+    /require/i,
+    /require (a |an )?/i,
+    /i require/i,
+    /i am looking/i,
+    /i'm looking/i,
+    /searching/i,
+    /find me/i,
+    /show me/i,
+    /give me/i,
+    /get me/i,
+    /help me find/i,
+    /where can i find/i,
+    /how to get/i,
+    /where to get/i,
+    /i am in need/i,
+    /i need help finding/i,
+    /i want to buy/i,
+    /i want to purchase/i,
+    /i want to hire/i,
+    /i want to book/i,
+    /need to hire/i,
+    /want to hire/i,
+    /looking to hire/i,
+    /need to buy/i,
+    /want to buy/i,
+    /looking to buy/i
+  ];
+  
+  if (offeringPatterns.some(pattern => pattern.test(lower))) {
+    return 'offer'; // User is offering services/goods
+  }
+  
+  if (lookingPatterns.some(pattern => pattern.test(lower))) {
+    return 'find'; // User is looking for services/goods
+  }
+  
+  // Default based on other clues
+  if (lower.includes('hire') || lower.includes('book') || lower.includes('require') || 
+      lower.includes('buy') || lower.includes('purchase') || lower.includes('rent') ||
+      lower.includes('want') || lower.includes('need') || lower.includes('looking')) {
+    return 'find';
+  }
+  
+  if (lower.includes('available') || lower.includes('contact me') || lower.includes('call me') ||
+      lower.includes('sell') || lower.includes('sale') || lower.includes('provide') ||
+      lower.includes('offer') || lower.includes('service') || lower.includes('work')) {
+    return 'offer';
+  }
+  
+  return null; // Can't determine
+}
+
+// Quick check for offering services (for simple detection)
+function isUserOfferingServices(text) {
+  if (!text || typeof text !== 'string') return false;
+  
+  const offeringKeywords = ["i'm", "i am", "i have", "available", "provide", "offer", "sell", "selling", "for sale", "professional", "experienced"];
+  const lowerText = text.toLowerCase();
+  
+  // Check for offering patterns
+  const offeringPatterns = [
+    /i('?m| am) (a |an )?/i,
+    /i have (a |an )?/i,
+    /i provide/i,
+    /i offer/i,
+    /available/i
+  ];
+  
+  // Check keywords
+  const hasKeyword = offeringKeywords.some(word => lowerText.includes(word));
+  
+  // Check patterns
+  const hasPattern = offeringPatterns.some(pattern => pattern.test(lowerText));
+  
+  return hasKeyword || hasPattern;
+}
 
 // ========================================
 // POSTING SERVICE HANDLER
@@ -1127,7 +1254,7 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
 }
 
 /**
- * Extract urban help info from text - UPDATED FOR FLEXIBLE EXTRACTION
+ * Extract urban help info from text - UPDATED WITH CONTEXT DETECTION
  */
 function extractUrbanHelpFromText(text) {
   const lowerText = text.toLowerCase();
@@ -1135,15 +1262,18 @@ function extractUrbanHelpFromText(text) {
     category: null,
     location: null,
     timing: null,
-    rawText: text
+    rawText: text,
+    context: detectIntentContext(text) // ADD THIS LINE
   };
   
   console.log(`🔍 [EXTRACT] Analyzing text: "${text}"`);
+  console.log(`🔍 [CONTEXT] Detected: ${result.context}`);
   
   // Common service keywords to remove when extracting category
   const commonWords = ['i', 'need', 'want', 'looking', 'for', 'a', 'an', 'the', 
                        'in', 'at', 'near', 'around', 'mein', 'please', 'mujhe',
-                       'chahiye', 'required', 'service', 'services', 'karwana', 'find'];
+                       'chahiye', 'required', 'service', 'services', 'karwana', 'find',
+                       'am', 'provide', 'offer', 'available']; // Added offering words
   
   // 1. Extract location first (easier to identify)
   const locationMatch = lowerText.match(/\b(in|at|near|around|mein|पर|में)\s+([^,.!?]+)/i);
@@ -1187,10 +1317,8 @@ function extractUrbanHelpFromText(text) {
   for (const [knownCategory, data] of Object.entries(URBAN_HELP_CATEGORIES)) {
     if (data.keywords.some(keyword => lowerText.includes(keyword))) {
       console.log(`✅ Matches known category: ${knownCategory}`);
-      // If we didn't extract a category, use this known one
-      if (!result.category) {
-        result.category = knownCategory;
-      }
+      // ALWAYS use the known category for consistency
+      result.category = knownCategory;
       break;
     }
   }
@@ -1281,6 +1409,56 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
   
   console.log("🔍 [CONTROLLER DEBUG] Effective client available:", !!effectiveClient);
+
+    // ===========================
+  // ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
+  // ===========================
+  if (text && !replyId) {
+    const lowerText = text.toLowerCase();
+    
+    // CRITICAL: Check if user is offering services (I'm a cook, I am electrician, etc.)
+    const isOffering = 
+      lowerText.includes("i'm ") || 
+      lowerText.includes("i am ") || 
+      lowerText.includes("i have ") ||
+      lowerText.includes("i provide") ||
+      lowerText.includes("i offer") ||
+      lowerText.includes("available") ||
+      lowerText.includes("professional") ||
+      lowerText.includes("experienced") ||
+      lowerText.includes("for hire") ||
+      lowerText.includes("for rent") ||
+      lowerText.includes("selling") ||
+      /i('?m| am) (a |an )?/i.test(lowerText);
+    
+    // Check if it contains service keywords
+    const hasServiceKeyword = Object.keys(URBAN_HELP_CATEGORIES).some(category => 
+      URBAN_HELP_CATEGORIES[category].keywords.some(keyword => 
+        lowerText.includes(keyword)
+      )
+    );
+    
+    if (isOffering && hasServiceKeyword) {
+      console.log("🚨 [EMERGENCY FIX] Detected user OFFERING services!");
+      console.log(`   Text: "${text}"`);
+      console.log(`   IsOffering: ${isOffering}, HasServiceKeyword: ${hasServiceKeyword}`);
+      
+      // Send to posting service immediately
+      await sendMessageWithClient(sender, "🔧 I see you're offering services. Let me help you post this...", effectiveClient);
+      
+      const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+      if (postingResult.handled) {
+        if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+          session.step = "posting_flow";
+        } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+          session.step = "menu";
+          session.state = 'initial';
+        }
+        await saveSession(sender, session);
+        return session;
+      }
+    }
+  }
   
   if (!sender) return;
 
@@ -1432,9 +1610,61 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
   // ===========================
-  // 1) CHECK FOR POSTING SERVICE (NEW)
+  // 1) CHECK FOR POSTING SERVICE (NEW) - WITH CONTEXT DETECTION
   // ===========================
   if (text && !replyId) { // Only check text messages, not button clicks
+    
+    // FIRST: Check if it's an urban help request
+    if (isUrbanHelpRequest(text)) {
+      console.log("🔧 [URBAN HELP] Text request detected");
+      
+      // CRITICAL: DETERMINE CONTEXT FIRST
+      const context = detectIntentContext(text);
+      const isOffering = isUserOfferingServices(text);
+      
+      console.log(`🔍 [CONTEXT] Detected: "${text}"`);
+      console.log(`🔍 [CONTEXT] Context: ${context}, IsOffering: ${isOffering}`);
+      
+      if (context === 'offer' || isOffering) {
+        // USER IS OFFERING SERVICES → USE POSTING SERVICE
+        console.log("🔧 [URBAN HELP] User is OFFERING services");
+        
+        // Send more specific acknowledgment
+        const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+        let ackMessage = '';
+        
+        if (userLang === 'hi') {
+          ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+        } else if (userLang === 'ta') {
+          ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+        } else {
+          ackMessage = "🔧 I see you're offering services. Let me help you post this...";
+        }
+        
+        await sendMessageWithClient(sender, ackMessage, effectiveClient);
+        
+        // Process with posting service
+        const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+        if (postingResult.handled) {
+          // Update session based on posting result
+          if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+            session.step = "posting_flow";
+          } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+            session.step = "menu";
+            session.state = 'initial';
+          }
+          await saveSession(sender, session);
+          return session;
+        }
+      } else {
+        // USER IS LOOKING → SHOW BUTTONS (current behavior)
+        console.log("🔧 [URBAN HELP] User is LOOKING FOR services");
+        await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
+        return session;
+      }
+    }
+    
+    // SECOND: Check general posting service for non-urban help requests
     const postingResult = await handlePostingService(sender, text, session, effectiveClient);
     if (postingResult.handled) {
       // Update session based on posting result
