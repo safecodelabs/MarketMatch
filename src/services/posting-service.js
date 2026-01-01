@@ -1,214 +1,111 @@
 // File: /services/posting-service.js
 const SessionManager = require('../../database/session-manager');
 const DraftManager = require('../../database/draft-manager');
-const FIELD_CONFIGS = require('../../utils/field-config');
 const { db } = require('../../database/firestore');
 const { Timestamp } = require('firebase/firestore');
 
-// Import FIELD_CONFIGS from your config file
-let FIELD_CONFIGS;
-try {
-  // Try multiple possible paths
-  FIELD_CONFIGS = require('../utils/field-config');
-} catch (e1) {
+// ✅ FIXED: Use const and avoid multiple let declarations
+// Load FIELD_CONFIGS safely
+function loadFieldConfigs() {
   try {
-    FIELD_CONFIGS = require('../../utils/field-config');
-  } catch (e2) {
+    return require('../../utils/field-config');
+  } catch (e1) {
     try {
-      FIELD_CONFIGS = require('./config/field-config');
-    } catch (e3) {
+      return require('../utils/field-config');
+    } catch (e2) {
       console.log("⚠️ FIELD_CONFIGS not found, using default config");
-      FIELD_CONFIGS = {
+      // Return default config (same as before)
+      return {
         urban_help: {
           displayName: 'Urban Help',
           required: ['serviceType', 'description', 'location.area'],
           fields: {
-            serviceType: {
-              question: 'What service do you provide? (e.g., Plumber, Electrician, Cook)'
-            },
-            description: {
-              question: 'Please describe your service:'
-            },
-            experience: {
-              question: 'How many years of experience do you have?'
-            },
-            rate: {
-              question: 'What is your rate? (e.g., ₹500/hour, ₹3000/month)'
-            },
-            'location.area': {
-              question: 'Where are you located? (Area/Neighborhood)'
-            },
-            'location.city': {
-              question: 'Which city?'
-            },
-            availability: {
-              question: 'When are you available?'
-            },
-            phone: {
-              question: 'Contact number:'
-            }
+            serviceType: { question: 'What service do you provide? (e.g., Plumber, Electrician, Cook)' },
+            description: { question: 'Please describe your service:' },
+            experience: { question: 'How many years of experience do you have?' },
+            rate: { question: 'What is your rate? (e.g., ₹500/hour, ₹3000/month)' },
+            'location.area': { question: 'Where are you located? (Area/Neighborhood)' },
+            'location.city': { question: 'Which city?' },
+            availability: { question: 'When are you available?' },
+            phone: { question: 'Contact number:' }
           }
         },
         housing: {
           displayName: 'Housing',
           required: ['unitType', 'rent', 'location.area'],
           fields: {
-            unitType: {
-              question: 'What type of property? (1BHK, 2BHK, 3BHK, Room, PG, etc.)'
-            },
-            propertyType: {
-              question: 'Property type? (Apartment, House, Villa, etc.)'
-            },
-            rent: {
-              question: 'Monthly rent? (e.g., ₹15,000)'
-            },
-            deposit: {
-              question: 'Security deposit amount?'
-            },
-            furnishing: {
-              question: 'Furnishing type? (Fully, Semi, Unfurnished)'
-            },
-            'location.area': {
-              question: 'Area/Neighborhood?'
-            },
-            'location.city': {
-              question: 'City?'
-            },
-            'location.fullAddress': {
-              question: 'Full address? (Optional, will be shared after contact)'
-            },
-            amenities: {
-              question: 'Amenities available?'
-            },
-            description: {
-              question: 'Property description:'
-            }
+            unitType: { question: 'What type of property? (1BHK, 2BHK, 3BHK, Room, PG, etc.)' },
+            propertyType: { question: 'Property type? (Apartment, House, Villa, etc.)' },
+            rent: { question: 'Monthly rent? (e.g., ₹15,000)' },
+            deposit: { question: 'Security deposit amount?' },
+            furnishing: { question: 'Furnishing type? (Fully, Semi, Unfurnished)' },
+            'location.area': { question: 'Area/Neighborhood?' },
+            'location.city': { question: 'City?' },
+            'location.fullAddress': { question: 'Full address? (Optional, will be shared after contact)' },
+            amenities: { question: 'Amenities available?' },
+            description: { question: 'Property description:' }
           }
         },
         commodity: {
           displayName: 'Commodity',
           required: ['itemName', 'price', 'location.area'],
           fields: {
-            itemName: {
-              question: 'What item are you selling?'
-            },
-            price: {
-              question: 'Price?'
-            },
-            condition: {
-              question: 'Condition? (New, Like New, Good, Fair)'
-            },
-            description: {
-              question: 'Item description:'
-            },
-            'location.area': {
-              question: 'Location?'
-            }
+            itemName: { question: 'What item are you selling?' },
+            price: { question: 'Price?' },
+            condition: { question: 'Condition? (New, Like New, Good, Fair)' },
+            description: { question: 'Item description:' },
+            'location.area': { question: 'Location?' }
           }
         },
         vehicle: {
           displayName: 'Vehicle',
           required: ['vehicleType', 'brand', 'price', 'location.area'],
           fields: {
-            vehicleType: {
-              question: 'Type of vehicle? (Car, Bike, Scooter, etc.)'
-            },
-            brand: {
-              question: 'Brand?'
-            },
-            model: {
-              question: 'Model?'
-            },
-            year: {
-              question: 'Manufacturing year?'
-            },
-            price: {
-              question: 'Price?'
-            },
-            condition: {
-              question: 'Condition?'
-            },
-            description: {
-              question: 'Description:'
-            },
-            'location.area': {
-              question: 'Location?'
-            }
+            vehicleType: { question: 'Type of vehicle? (Car, Bike, Scooter, etc.)' },
+            brand: { question: 'Brand?' },
+            model: { question: 'Model?' },
+            year: { question: 'Manufacturing year?' },
+            price: { question: 'Price?' },
+            condition: { question: 'Condition?' },
+            description: { question: 'Description:' },
+            'location.area': { question: 'Location?' }
           }
         },
         electronics: {
           displayName: 'Electronics',
           required: ['itemType', 'brand', 'price', 'location.area'],
           fields: {
-            itemType: {
-              question: 'Type of electronic item?'
-            },
-            brand: {
-              question: 'Brand?'
-            },
-            model: {
-              question: 'Model?'
-            },
-            price: {
-              question: 'Price?'
-            },
-            condition: {
-              question: 'Condition?'
-            },
-            description: {
-              question: 'Description:'
-            },
-            'location.area': {
-              question: 'Location?'
-            }
+            itemType: { question: 'Type of electronic item?' },
+            brand: { question: 'Brand?' },
+            model: { question: 'Model?' },
+            price: { question: 'Price?' },
+            condition: { question: 'Condition?' },
+            description: { question: 'Description:' },
+            'location.area': { question: 'Location?' }
           }
         },
         furniture: {
           displayName: 'Furniture',
           required: ['itemType', 'price', 'location.area'],
           fields: {
-            itemType: {
-              question: 'Type of furniture?'
-            },
-            price: {
-              question: 'Price?'
-            },
-            condition: {
-              question: 'Condition?'
-            },
-            description: {
-              question: 'Description:'
-            },
-            'location.area': {
-              question: 'Location?'
-            }
+            itemType: { question: 'Type of furniture?' },
+            price: { question: 'Price?' },
+            condition: { question: 'Condition?' },
+            description: { question: 'Description:' },
+            'location.area': { question: 'Location?' }
           }
         },
         job: {
           displayName: 'Job',
           required: ['jobPosition', 'jobType', 'location.area'],
           fields: {
-            jobPosition: {
-              question: 'Job position/title?'
-            },
-            jobType: {
-              question: 'Job type? (Full-time, Part-time, Contract, Internship)'
-            },
-            salary: {
-              question: 'Salary/compensation?'
-            },
-            company: {
-              question: 'Company name?'
-            },
-            experienceRequired: {
-              question: 'Experience required?'
-            },
-            description: {
-              question: 'Job description:'
-            },
-            'location.area': {
-              question: 'Location?'
-            }
+            jobPosition: { question: 'Job position/title?' },
+            jobType: { question: 'Job type? (Full-time, Part-time, Contract, Internship)' },
+            salary: { question: 'Salary/compensation?' },
+            company: { question: 'Company name?' },
+            experienceRequired: { question: 'Experience required?' },
+            description: { question: 'Job description:' },
+            'location.area': { question: 'Location?' }
           }
         }
       };
@@ -216,25 +113,23 @@ try {
   }
 }
 
-// Try different import paths for IntentClassifier
-let IntentClassifier;
-try {
-  // Try multiple possible paths
-  IntentClassifier = require('../core/ai/intentClassifier');
-} catch (e1) {
+// ✅ FIXED: Use const instead of let
+const FIELD_CONFIGS = loadFieldConfigs();
+
+// Load IntentClassifier safely
+function loadIntentClassifier() {
   try {
-    IntentClassifier = require('../../src/core/ai/intentClassifier');
-  } catch (e2) {
+    return require('../../src/core/ai/intentClassifier');
+  } catch (e1) {
     try {
-      IntentClassifier = require('./intentClassifier');
-    } catch (e3) {
+      return require('../core/ai/intentClassifier');
+    } catch (e2) {
       console.log("⚠️ IntentClassifier not found, using fallback");
-      IntentClassifier = {
+      return {
         classify: async (text) => {
           console.log(`🤖 [FALLBACK] Classifying: "${text}"`);
           const lower = text.toLowerCase();
           
-          // Simple fallback classification
           const result = {
             intent: 'general_help',
             confidence: 0.1,
@@ -243,7 +138,6 @@ try {
             isConfident: false
           };
           
-          // Detect context
           if (lower.includes("i'm") || lower.includes("i am") || 
               lower.includes("i provide") || lower.includes("available")) {
             result.context = 'offer';
@@ -252,7 +146,6 @@ try {
             result.context = 'find';
           }
           
-          // Simple entity extraction
           const serviceTypes = [
             'electrician', 'plumber', 'cook', 'maid', 'cleaner', 'driver', 
             'tutor', 'carpenter', 'painter', 'technician', 'mechanic'
@@ -274,7 +167,6 @@ try {
             }
           }
           
-          // Housing detection
           if (lower.includes('bhk') || lower.includes('room') || lower.includes('flat') || 
               lower.includes('apartment') || lower.includes('rent')) {
             result.intent = 'property_rent';
@@ -287,6 +179,9 @@ try {
     }
   }
 }
+
+// ✅ FIXED: Use const instead of let
+const IntentClassifier = loadIntentClassifier();
 
 class PostingService {
   constructor(userId) {
