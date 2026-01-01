@@ -1,7 +1,8 @@
 // File: /services/posting-service.js
-const SessionManager = require('../database/session-manager');
-const DraftManager = require('../database/draft-manager');
-const { db } = require('../database/firestore');
+const SessionManager = require('../../database/session-manager');
+const DraftManager = require('../../database/draft-manager');
+const FIELD_CONFIGS = require('../../utils/field-config');
+const { db } = require('../../database/firestore');
 const { Timestamp } = require('firebase/firestore');
 
 // Import FIELD_CONFIGS from your config file
