@@ -4,14 +4,67 @@ const DraftManager = require('../../database/draft-manager');
 const FIELD_CONFIGS = require('../../utils/field-config');
 const { db } = require('../../database/firestore');
 const { Timestamp } = require('firebase/firestore');
-const IntentClassifier = require('./intent-classifier'); // Import your intent classifier
+
+// Try different import paths for IntentClassifier
+let IntentClassifier;
+try {
+  // Try the most common path first
+  IntentClassifier = require('../../src/core/ai/intentClassifier');
+} catch (e1) {
+  try {
+    // Try another common path
+    IntentClassifier = require('../core/ai/intentClassifier');
+  } catch (e2) {
+    try {
+      // Try root path
+      IntentClassifier = require('../core/ai/intentClassifier');
+    } catch (e3) {
+      // If IntentClassifier is not found, create a minimal version
+      console.log("⚠️ IntentClassifier not found, using fallback");
+      IntentClassifier = {
+        classify: async (text) => {
+          console.log(`🤖 [FALLBACK] Classifying: "${text}"`);
+          const lower = text.toLowerCase();
+          
+          // Simple fallback classification
+          const result = {
+            intent: 'general_help',
+            confidence: 0.1,
+            entities: {},
+            originalText: text,
+            isConfident: false
+          };
+          
+          // Detect context
+          if (lower.includes("i'm") || lower.includes("i am") || 
+              lower.includes("i provide") || lower.includes("available")) {
+            result.context = 'offer';
+          } else if (lower.includes("need") || lower.includes("want") || 
+                     lower.includes("looking for")) {
+            result.context = 'find';
+          }
+          
+          // Simple entity extraction
+          if (lower.includes('electrician')) result.entities.service_type = 'electrician';
+          if (lower.includes('plumber')) result.entities.service_type = 'plumber';
+          if (lower.includes('cook')) result.entities.service_type = 'cook';
+          if (lower.includes('maid')) result.entities.service_type = 'maid';
+          if (lower.includes('noida')) result.entities.location = 'Noida';
+          if (lower.includes('delhi')) result.entities.location = 'Delhi';
+          if (lower.includes('gurgaon')) result.entities.location = 'Gurgaon';
+          
+          return result;
+        }
+      };
+    }
+  }
+}
 
 class PostingService {
   constructor(userId) {
     this.userId = userId;
     this.sessionManager = new SessionManager(userId);
     this.draftManager = new DraftManager();
-    this.intentClassifier = IntentClassifier; // Use your intent classifier
   }
 
   async processMessage(message) {
@@ -23,8 +76,20 @@ class PostingService {
     }
     
     // Check if this is a new posting request using intent classifier
-    const intentResult = await this.intentClassifier.classify(message);
-    console.log("📝 [POSTING SERVICE] Intent classification result:", intentResult);
+    let intentResult;
+    try {
+      intentResult = await IntentClassifier.classify(message);
+      console.log("📝 [POSTING SERVICE] Intent classification result:", intentResult);
+    } catch (error) {
+      console.log("⚠️ [POSTING SERVICE] Intent classifier failed, using fallback");
+      intentResult = {
+        intent: 'general_help',
+        confidence: 0.1,
+        entities: {},
+        context: null,
+        isConfident: false
+      };
+    }
     
     if (await this.isPostingIntent(message, intentResult)) {
       return await this.startNewPosting(message, intentResult);
@@ -36,7 +101,7 @@ class PostingService {
   // ✅ UPDATED: Use intent classifier for better detection
   async isPostingIntent(message, intentResult = null) {
     // First check with intent classifier if result provided
-    if (intentResult) {
+    if (intentResult && intentResult.intent) {
       const postingIntents = [
         'property_sale', 'property_rent', 'service_offer', 'commodity_sell',
         'vehicle_sell', 'electronics_sell', 'furniture_sell', 'job_offer'
@@ -78,13 +143,25 @@ class PostingService {
       console.log("📝 [POSTING SERVICE] Initial message:", initialMessage);
       
       // Use intent classifier to understand the message
-      const intentResult = await this.intentClassifier.classify(initialMessage);
-      console.log("📝 [POSTING SERVICE] Intent analysis:", intentResult);
+      let intentResult;
+      try {
+        intentResult = await IntentClassifier.classify(initialMessage);
+        console.log("📝 [POSTING SERVICE] Intent analysis:", intentResult);
+      } catch (error) {
+        console.log("⚠️ [POSTING SERVICE] Intent classifier failed, using simple detection");
+        intentResult = {
+          intent: 'general_help',
+          confidence: 0.1,
+          entities: {},
+          context: null
+        };
+      }
       
       // Check if this is actually an offering
       const isOffering = intentResult.context === 'offer' || 
                         ['service_offer', 'property_sale', 'commodity_sell', 
-                         'vehicle_sell', 'job_offer'].includes(intentResult.intent);
+                         'vehicle_sell', 'job_offer'].includes(intentResult.intent) ||
+                        this.isUserOfferingServices(initialMessage);
       
       if (!isOffering) {
         console.log("📝 [POSTING SERVICE] Not an offering message, using regular flow");
@@ -113,8 +190,7 @@ class PostingService {
         category: category,
         draftId: draft.id,
         expectedField: null,
-        isVoiceInitiated: true, // Mark as voice-initiated
-        originalIntent: intentResult
+        isVoiceInitiated: true // Mark as voice-initiated
       });
       
       // Extract initial info using intent classifier entities
@@ -162,7 +238,17 @@ class PostingService {
   async startNewPosting(message, intentResult = null) {
     // Use intent classifier if result not provided
     if (!intentResult) {
-      intentResult = await this.intentClassifier.classify(message);
+      try {
+        intentResult = await IntentClassifier.classify(message);
+      } catch (error) {
+        console.log("⚠️ [POSTING SERVICE] Intent classifier failed");
+        intentResult = {
+          intent: 'general_help',
+          confidence: 0.1,
+          entities: {},
+          context: null
+        };
+      }
     }
     
     // Determine category from message using intent classifier
@@ -184,8 +270,7 @@ class PostingService {
       category: category,
       draftId: draft.id,
       expectedField: null,
-      isVoiceInitiated: false,
-      originalIntent: intentResult
+      isVoiceInitiated: false
     });
     
     // Try to extract initial info using intent classifier
@@ -227,7 +312,7 @@ class PostingService {
     };
     
     // Check intent mapping first
-    if (intentToCategory[intentResult.intent]) {
+    if (intentResult.intent && intentToCategory[intentResult.intent]) {
       return intentToCategory[intentResult.intent];
     }
     
@@ -235,10 +320,53 @@ class PostingService {
     return this.detectCategory(message);
   }
 
+  // ✅ ADDED: Check if user is offering services
+  isUserOfferingServices(text) {
+    const lower = text.toLowerCase();
+    
+    const offeringPatterns = [
+      /i('?m| am) (a |an )?/i,
+      /i have (a |an )?/i,
+      /i provide/i,
+      /i offer/i,
+      /available/i,
+      /looking to provide/i,
+      /i can provide/i,
+      /i do/i,
+      /i work as/i,
+      /i am available/i,
+      /contact me for/i,
+      /call me for/i,
+      /message me for/i,
+      /whatsapp me for/i,
+      /i sell/i,
+      /i am selling/i,
+      /for sale/i,
+      /available for/i,
+      /service provided/i,
+      /services available/i,
+      /hire me/i,
+      /i am expert/i,
+      /professional/i,
+      /experienced/i
+    ];
+    
+    const offeringKeywords = ["i'm", "i am", "i have", "available", "provide", "offer", "sell", "selling", "for sale", "professional", "experienced"];
+    
+    // Check for offering patterns
+    const hasPattern = offeringPatterns.some(pattern => pattern.test(lower));
+    
+    // Check keywords
+    const hasKeyword = offeringKeywords.some(word => lower.includes(word));
+    
+    return hasPattern || hasKeyword;
+  }
+
   // ✅ ADDED: Extract info from intent classifier
   async extractInfoFromIntent(intentResult, message, category) {
     const info = {};
     const entities = intentResult.entities || {};
+    const lowerMsg = message.toLowerCase();
     
     console.log("📝 [POSTING SERVICE] Extracting info from intent entities:", entities);
     
@@ -246,29 +374,35 @@ class PostingService {
       // Use service_type from intent classifier
       if (entities.service_type) {
         info.serviceType = entities.service_type;
-      } else if (intentResult.intent === 'service_offer') {
+      } else if (intentResult.intent === 'service_offer' || intentResult.context === 'offer') {
         // Try to extract from message
         const serviceMatch = message.match(/\b(electrician|plumber|carpenter|cleaner|repair|technician|painter|mechanic|driver|maid|cook|babysitter|security|guard|tutor|teacher)\b/i);
         if (serviceMatch) {
           info.serviceType = serviceMatch[0].toLowerCase();
+        } else {
+          // If no specific service found, extract from "I am a [service]" pattern
+          const offeringMatch = lowerMsg.match(/i('?m| am| mai| main| mein) (a |an )?(.+?)( in| at| near|$)/i);
+          if (offeringMatch && offeringMatch[3]) {
+            info.serviceType = offeringMatch[3].trim();
+          } else {
+            info.serviceType = 'service';
+          }
         }
       }
       
       // Use location from intent classifier
       if (entities.location) {
         info.location = entities.location;
+      } else {
+        // Try to extract location from message
+        const locationMatch = message.match(/\b(in|at|near|around|mein|me|main)\s+([^,.!?]+)/i);
+        if (locationMatch && locationMatch[2]) {
+          info.location = locationMatch[2].trim();
+        }
       }
       
       // Use description
       info.description = message;
-      
-      // If serviceType not found but context is offering, try to extract
-      if (!info.serviceType && intentResult.context === 'offer') {
-        const offeringMatch = message.toLowerCase().match(/i('?m| am| mai| main| mein) (a |an )?(.+?)( in| at| near|$)/i);
-        if (offeringMatch && offeringMatch[3]) {
-          info.serviceType = offeringMatch[3].trim();
-        }
-      }
       
     } else if (category === 'housing') {
       // Use entities from intent classifier
@@ -478,7 +612,18 @@ class PostingService {
   // Legacy method (kept for compatibility)
   async extractInitialInfo(message, draftId, category) {
     // This is now handled by extractInfoFromIntent
-    const intentResult = await this.intentClassifier.classify(message);
+    let intentResult;
+    try {
+      intentResult = await IntentClassifier.classify(message);
+    } catch (error) {
+      intentResult = {
+        intent: 'general_help',
+        confidence: 0.1,
+        entities: {},
+        context: null
+      };
+    }
+    
     const extractedInfo = await this.extractInfoFromIntent(intentResult, message, category);
     if (extractedInfo) {
       await this.saveExtractedInfo(draftId, category, extractedInfo);
