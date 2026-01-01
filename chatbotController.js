@@ -228,9 +228,12 @@ function isUserOfferingServices(text) {
 async function handlePostingService(sender, message, session, effectiveClient) {
   try {
     console.log("📝 [POSTING SERVICE] Processing message for posting flow");
+    console.log("📝 [POSTING SERVICE] Message content:", message);
     
     const postingService = new PostingService(sender);
     const result = await postingService.processMessage(message);
+    
+    console.log("📝 [POSTING SERVICE] Result from posting service:", result);
     
     if (result.shouldHandle !== false) {
       switch(result.type) {
@@ -246,10 +249,12 @@ async function handlePostingService(sender, message, session, effectiveClient) {
           return { handled: true, type: 'error' };
           
         case 'not_posting':
+          console.log("📝 [POSTING SERVICE] Service says: not_posting");
           return { handled: false };
       }
     }
     
+    console.log("📝 [POSTING SERVICE] Returning handled: false");
     return { handled: false };
   } catch (error) {
     console.error("❌ [POSTING SERVICE] Error:", error);
@@ -680,6 +685,27 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
  */
 async function executeUrbanHelpSearch(sender, entities, session, client, userLang) {
   try {
+    // Check if this is actually an offering request
+    const originalText = session.urbanHelpContext?.transcription || 
+                        session.urbanHelpContext?.text || 
+                        session.rawTranscription || '';
+    
+    if (isUserOfferingServices(originalText)) {
+      console.log("❌ [URBAN HELP] User is OFFERING services, not searching");
+      await sendMessageWithClient(
+        sender,
+        "I see you're offering services. Please use the '📝 Post Listing' option from the menu or type your service details again.",
+        client
+      );
+      
+      // Clear context and return to menu
+      delete session.urbanHelpContext;
+      session.step = "menu";
+      session.state = 'initial';
+      await saveSession(sender, session);
+      return;
+    }
+    
     const { category, location } = entities;
     
     console.log(`🔍 [URBAN HELP] Searching for "${category}" in "${location}"`);
@@ -1199,10 +1225,49 @@ const MENU_ROWS = [
 ];
 
 // ========================================
-// URBAN HELP TEXT HANDLER
+// URBAN HELP TEXT HANDLER - UPDATED WITH OFFERING DETECTION
 // ========================================
 async function handleUrbanHelpTextRequest(sender, text, session, client) {
   const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+  
+  // First check if user is OFFERING services
+  const context = detectIntentContext(text);
+  const isOffering = isUserOfferingServices(text);
+  
+  console.log(`🔍 [URBAN HELP TEXT] Context: ${context}, IsOffering: ${isOffering}`);
+  
+  if (isOffering) {
+    // User is OFFERING services → route to posting service
+    console.log("🔧 [URBAN HELP TEXT] User is OFFERING services, routing to posting");
+    
+    let ackMessage = '';
+    if (userLang === 'hi') {
+      ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+    } else if (userLang === 'ta') {
+      ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+    } else {
+      ackMessage = "🔧 I see you're offering services. Let me help you post this...";
+    }
+    
+    await sendMessageWithClient(sender, ackMessage, client);
+    
+    // Process with posting service
+    const postingResult = await handlePostingService(sender, text, session, client);
+    if (postingResult.handled) {
+      // Update session based on posting result
+      if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+        session.step = "posting_flow";
+      } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+        session.step = "menu";
+        session.state = 'initial';
+      }
+      await saveSession(sender, session);
+    }
+    return;
+  }
+  
+  // Only proceed with urban help search if user is LOOKING FOR services
+  console.log("🔧 [URBAN HELP TEXT] User is LOOKING FOR services");
   
   // Extract category and location from text
   const extractedInfo = extractUrbanHelpFromText(text);
@@ -1285,32 +1350,60 @@ function extractUrbanHelpFromText(text) {
     console.log(`📍 Extracted location: ${result.location}`);
   }
   
-  // 2. Extract category by removing location and common words
-  let categoryText = lowerText;
-  
-  // Remove location from text
-  if (result.location) {
-    const locationLower = result.location.toLowerCase();
-    categoryText = categoryText.replace(new RegExp(`\\b${locationLower}\\b`, 'g'), '');
-    categoryText = categoryText.replace(/\s+/g, ' ').trim();
-  }
-  
-  // Remove common words
-  commonWords.forEach(word => {
-    const regex = new RegExp(`\\b${word}\\b`, 'gi');
-    categoryText = categoryText.replace(regex, '');
-  });
-  
-  // Clean up the text
-  categoryText = categoryText
-    .replace(/\s+/g, ' ')
-    .replace(/[^\w\s]/gi, '')
-    .trim();
-  
-  // If we have meaningful text left, that's likely the category
-  if (categoryText && categoryText.length > 2 && !/^\d+$/.test(categoryText)) {
-    result.category = categoryText;
-    console.log(`🔧 Extracted category: ${result.category}`);
+  // 2. Extract category based on context
+  if (result.context === 'offer') {
+    // Extract service being offered
+    let serviceText = lowerText;
+    
+    // Remove offering phrases
+    const offeringPhrases = ['i am', 'i\'m', 'i provide', 'i offer', 'available', 'services', 'service'];
+    offeringPhrases.forEach(phrase => {
+      serviceText = serviceText.replace(new RegExp(`\\b${phrase}\\b`, 'gi'), '');
+    });
+    
+    // Remove location
+    if (result.location) {
+      const locationLower = result.location.toLowerCase();
+      serviceText = serviceText.replace(new RegExp(`\\b${locationLower}\\b`, 'g'), '');
+    }
+    
+    // Clean and set as category
+    serviceText = serviceText
+      .replace(/\s+/g, ' ')
+      .replace(/[^\w\s]/gi, '')
+      .trim();
+    
+    if (serviceText && serviceText.length > 2) {
+      result.category = serviceText;
+      console.log(`🔧 Extracted offering category: ${result.category}`);
+    }
+  } else {
+    // Extract category for 'find' context
+    let categoryText = lowerText;
+    
+    // Remove location from text
+    if (result.location) {
+      const locationLower = result.location.toLowerCase();
+      categoryText = categoryText.replace(new RegExp(`\\b${locationLower}\\b`, 'g'), '');
+      categoryText = categoryText.replace(/\s+/g, ' ').trim();
+    }
+    
+    // Remove common words
+    commonWords.forEach(word => {
+      const regex = new RegExp(`\\b${word}\\b`, 'gi');
+      categoryText = categoryText.replace(regex, '');
+    });
+    
+    // Clean up the text
+    categoryText = categoryText
+      .replace(/\s+/g, ' ')
+      .replace(/[^\w\s]/gi, '')
+      .trim();
+    
+    if (categoryText && categoryText.length > 2 && !/^\d+$/.test(categoryText)) {
+      result.category = categoryText;
+      console.log(`🔧 Extracted searching category: ${result.category}`);
+    }
   }
   
   // 3. Check if it matches any known categories (for better display, not for filtering)
@@ -1431,89 +1524,95 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
   console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
   
-// ===========================
-// ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
-// ===========================
-if (text && !replyId) {
-  // Get session first
-  let session = (await getSession(sender)) || { 
-    step: "start",
-    state: 'initial',
-    housingFlow: { 
-      step: "start", 
-      data: {},
-      currentIndex: 0, 
-      listingData: null
-    },
-    isInitialized: false
-  };
-  
-  const lowerText = text.toLowerCase();
-  
-  // FIRST: Check if it's an urban help request
-  if (isUrbanHelpRequest(text)) {
-    console.log("🔧 [URBAN HELP] Text request detected");
+  // ===========================
+  // ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
+  // ===========================
+  if (text && !replyId) {
+    // Get session first
+    let session = (await getSession(sender)) || { 
+      step: "start",
+      state: 'initial',
+      housingFlow: { 
+        step: "start", 
+        data: {},
+        currentIndex: 0, 
+        listingData: null
+      },
+      isInitialized: false
+    };
     
-    // CRITICAL: DETERMINE CONTEXT FIRST
-    const context = detectIntentContext(text);
-    const isOffering = isUserOfferingServices(text);
+    const lowerText = text.toLowerCase();
     
-    console.log(`🔍 [CONTEXT] Detected: "${text}"`);
-    console.log(`🔍 [CONTEXT] Context: ${context}, IsOffering: ${isOffering}`);
-    
-    if (context === 'offer' || isOffering) {
-      // USER IS OFFERING SERVICES → USE POSTING SERVICE
-      console.log("🔧 [URBAN HELP] User is OFFERING services");
+    // FIRST: Check if it's an urban help request
+    if (isUrbanHelpRequest(text)) {
+      console.log("🔧 [URBAN HELP] Text request detected");
       
-      // Send more specific acknowledgment
-      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-      let ackMessage = '';
+      // CRITICAL: DETERMINE CONTEXT FIRST
+      const context = detectIntentContext(text);
+      const isOffering = isUserOfferingServices(text);
       
-      if (userLang === 'hi') {
-        ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
-      } else if (userLang === 'ta') {
-        ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
-      } else {
-        ackMessage = "🔧 I see you're offering services. Let me help you post this...";
-      }
+      console.log(`🔍 [CONTEXT] Detected: "${text}"`);
+      console.log(`🔍 [CONTEXT] Context: ${context}, IsOffering: ${isOffering}`);
       
-      await sendMessageWithClient(sender, ackMessage, effectiveClient);
-      
-      // Process with posting service
-      const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-      if (postingResult.handled) {
-        // Update session based on posting result
-        if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-          session.step = "posting_flow";
-        } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-          session.step = "menu";
-          session.state = 'initial';
+      if (context === 'offer' || isOffering) {
+        // USER IS OFFERING SERVICES → USE POSTING SERVICE
+        console.log("🔧 [URBAN HELP] User is OFFERING services");
+        
+        // Send more specific acknowledgment
+        const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+        let ackMessage = '';
+        
+        if (userLang === 'hi') {
+          ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+        } else if (userLang === 'ta') {
+          ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+        } else {
+          ackMessage = "🔧 I see you're offering services. Let me help you post this...";
         }
-        await saveSession(sender, session);
-        return session; // ✅ RETURN IMMEDIATELY
+        
+        await sendMessageWithClient(sender, ackMessage, effectiveClient);
+        
+        // Process with posting service
+        const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+        if (postingResult.handled) {
+          // Update session based on posting result
+          if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+            session.step = "posting_flow";
+          } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+            session.step = "menu";
+            session.state = 'initial';
+          }
+          await saveSession(sender, session);
+          return session; // ✅ RETURN IMMEDIATELY
+        } else {
+          // If posting service didn't handle it, fall through to regular urban help
+          console.log("🔧 [URBAN HELP] Posting service didn't handle, trying urban help flow");
+        }
       }
-    } else {
-      // USER IS LOOKING → SHOW BUTTONS
-      console.log("🔧 [URBAN HELP] User is LOOKING FOR services");
+      
+      // If user is LOOKING or context couldn't be determined
+      console.log("🔧 [URBAN HELP] User is LOOKING FOR services or context unclear");
       await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
       return session; // ✅ RETURN IMMEDIATELY
     }
-  }
-  
-  // SECOND: Check general posting service for non-urban help requests
-  const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-  if (postingResult.handled) {
-    // Update session based on posting result
-    if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-      session.step = "posting_flow";
-    } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-      session.step = "menu";
-      session.state = 'initial';
+    
+    // SECOND: Check general posting service for non-urban help requests
+    const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+    if (postingResult.handled) {
+      // Update session based on posting result
+      if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+        session.step = "posting_flow";
+      } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+        session.step = "menu";
+        session.state = 'initial';
+      }
+      await saveSession(sender, session);
+      return session; // ✅ RETURN IMMEDIATELY
     }
+    
+    // Save the session after all checks
     await saveSession(sender, session);
-    return session; // ✅ RETURN IMMEDIATELY
   }
-}
 
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
@@ -1646,10 +1745,10 @@ if (text && !replyId) {
   console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
   console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
-// ===========================
-// 1) CHECK FOR POSTING SERVICE (NEW) - FOR NON-URBAN HELP REQUESTS
-// ===========================
-if (text && !replyId) { // Only check text messages, not button clicks
+  // ===========================
+  // 1) CHECK FOR POSTING SERVICE (NEW) - FOR NON-URBAN HELP REQUESTS
+  // ===========================
+  if (text && !replyId) { // Only check text messages, not button clicks
     // SECOND: Check general posting service for non-urban help requests
     const postingResult = await handlePostingService(sender, text, session, effectiveClient);
     if (postingResult.handled) {
@@ -1663,31 +1762,18 @@ if (text && !replyId) { // Only check text messages, not button clicks
       await saveSession(sender, session);
       return session;
     }
-}
+  }
 
   // ===========================
-  // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS
+  // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS - UPDATED WITH OFFERING DETECTION
   // ===========================
   if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again') || 
       replyId.startsWith('type_instead') || replyId.startsWith('use_buttons'))) {
       
       console.log(`🎤 [VOICE BUTTON] Detected voice confirmation button: ${replyId}`);
       
-      // Handle both simple confirmation (confirm_yes) and AI confirmation (confirm_service_search, etc.)
-      if (replyId === 'confirm_yes' || replyId.startsWith('confirm_')) {
-          // User confirmed - extract the intent
-          let intent = 'service_search'; // Default
-          
-          if (replyId === 'confirm_yes') {
-              // From simple confirmation flow
-              intent = 'service_search'; // Default intent for voice messages
-          } else {
-              // From AI confirmation flow (e.g., confirm_service_search)
-              intent = replyId.replace('confirm_', '');
-          }
-          
-          console.log(`🎤 [VOICE BUTTON] Processing confirmation for intent: ${intent}`);
-          
+      // Handle all confirmation types
+      if (replyId.startsWith('confirm_')) {
           const confirmedText = session.rawTranscription;
           
           if (!confirmedText) {
@@ -1699,62 +1785,63 @@ if (text && !replyId) { // Only check text messages, not button clicks
               return session;
           }
           
-          await sendMessageWithClient(sender, `✅ Perfect! You're looking for: *"${confirmedText}"*\n\nSearching for services...`);
+          // First, check the context of what they said
+          const extractedInfo = extractUrbanHelpFromText(confirmedText);
+          const isOffering = extractedInfo.context === 'offer' || isUserOfferingServices(confirmedText);
           
-          // Check if it's an urban help request
-          if (intent === 'service_search' || isUrbanHelpRequest(confirmedText)) {
-              // Extract urban help info
-              const extractedInfo = extractUrbanHelpFromText(confirmedText);
-              console.log(`🔧 [URBAN HELP] Extracted info:`, extractedInfo);
+          console.log(`🔍 [VOICE] Extracted context: ${extractedInfo.context}, IsOffering: ${isOffering}`);
+          
+          if (isOffering) {
+              // USER IS OFFERING A SERVICE → GO TO POSTING SERVICE
+              console.log("🔧 [VOICE] User is OFFERING services, routing to posting service");
+              
+              const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+              let ackMessage = '';
+              
+              if (userLang === 'hi') {
+                  ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+              } else if (userLang === 'ta') {
+                  ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+              } else {
+                  ackMessage = "🔧 I see you're offering services. Let me help you post this...";
+              }
+              
+              await sendMessageWithClient(sender, ackMessage);
+              
+              // Process with posting service
+              const postingResult = await handlePostingService(sender, confirmedText, session, effectiveClient);
+              if (postingResult.handled) {
+                  // Update session based on posting result
+                  if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+                      session.step = "posting_flow";
+                  } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+                      session.step = "menu";
+                      session.state = 'initial';
+                  }
+                  await saveSession(sender, session);
+              } else {
+                  // If posting service didn't handle it, fall back to menu
+                  await sendMessageWithClient(sender, "I understand you're offering services. Please use the '📝 Post Listing' option from the menu.");
+                  session.state = 'initial';
+                  session.step = 'menu';
+                  await saveSession(sender, session);
+                  await sendMainMenuViaService(sender);
+              }
+              
+          } else if (isUrbanHelpRequest(confirmedText)) {
+              // USER IS LOOKING FOR A SERVICE → SEARCH FOR PROVIDERS
+              console.log(`🔧 [URBAN HELP] User is LOOKING FOR services`);
+              
+              await sendMessageWithClient(sender, `✅ Perfect! You're looking for: *"${confirmedText}"*\n\nSearching for services...`);
               
               const userLang = multiLanguage.getUserLanguage(sender) || 'en';
               
               if (extractedInfo.category && extractedInfo.location) {
                   // We have both category and location, search immediately
                   await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);
-              } else if (extractedInfo.category && !extractedInfo.location) {
-                  // Have category but no location - ask for location
-                  await sendMessageWithClient(sender, 
-                      `Where do you need the ${extractedInfo.category}?`,
-                      effectiveClient
-                  );
-                  
-                  session.urbanHelpContext = {
-                      ...extractedInfo,
-                      transcription: confirmedText,
-                      step: "awaiting_location"
-                  };
-                  session.step = "awaiting_urban_help_location";
-                  await saveSession(sender, session);
-                  
-              } else if (!extractedInfo.category && extractedInfo.location) {
-                  // Have location but no category - ask for category
-                  await sendInteractiveButtonsWithClient(
-                      effectiveClient,
-                      sender,
-                      `What type of service do you need in ${extractedInfo.location}?`,
-                      Object.entries(URBAN_HELP_CATEGORIES).slice(0, 4).map(([id, data]) => ({
-                          id: `category_${id}`,
-                          text: `${data.emoji} ${data.name}`
-                      }))
-                  );
-                  
-                  session.urbanHelpContext = {
-                      ...extractedInfo,
-                      transcription: confirmedText,
-                      step: "awaiting_category"
-                  };
-                  session.step = "awaiting_urban_help_category";
-                  await saveSession(sender, session);
-                  
               } else {
-                  // Neither category nor location - ask user to clarify
-                  await sendMessageWithClient(sender, 
-                      "I understand you need a service. Could you please specify what type of service and location?\n\nExample: 'Electrician in Rajouri Garden'",
-                      effectiveClient
-                  );
-                  session.state = 'initial';
-                  session.step = 'menu';
+                  // Need more info
+                  await handleUrbanHelpTextRequest(sender, confirmedText, session, effectiveClient);
               }
           } else {
               // Process property-related intent
@@ -1823,11 +1910,36 @@ if (text && !replyId) { // Only check text messages, not button clicks
       
       await sendMessageWithClient(sender, `✅ Perfect! You said: *"${confirmedText}"*\n\nLet me help you with that...`);
       
-      // Check if it's an urban help request
-      if (isUrbanHelpRequest(confirmedText)) {
-        // Extract urban help info
-        const extractedInfo = extractUrbanHelpFromText(confirmedText);
+      // Check context first
+      const extractedInfo = extractUrbanHelpFromText(confirmedText);
+      const isOffering = extractedInfo.context === 'offer' || isUserOfferingServices(confirmedText);
+      
+      if (isOffering) {
+        // User is offering services
+        let ackMessage = '';
+        if (userLang === 'hi') {
+          ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+        } else if (userLang === 'ta') {
+          ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+        } else {
+          ackMessage = "🔧 I see you're offering services. Let me help you post this...";
+        }
         
+        await sendMessageWithClient(sender, ackMessage);
+        
+        // Process with posting service
+        const postingResult = await handlePostingService(sender, confirmedText, session, effectiveClient);
+        if (postingResult.handled) {
+          // Update session based on posting result
+          if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+            session.step = "posting_flow";
+          } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+            session.step = "menu";
+            session.state = 'initial';
+          }
+        }
+      } else if (isUrbanHelpRequest(confirmedText)) {
+        // Check if it's an urban help request (looking for services)
         if (extractedInfo.category && extractedInfo.location) {
           // We have both category and location, search immediately
           await executeUrbanHelpSearch(sender, extractedInfo, session, effectiveClient, userLang);

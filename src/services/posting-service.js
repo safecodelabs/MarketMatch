@@ -28,17 +28,20 @@ class PostingService {
     return { type: 'not_posting', shouldHandle: false };
   }
 
-  async isPostingIntent(message) {
-    const lowerMsg = message.toLowerCase();
-    const postingKeywords = [
-      'post', 'list', 'add', 'create', 'offer', 'available',
-      'rent', 'sell', 'service', 'help', 'looking for', 'need',
-      '1bhk', '2bhk', '3bhk', 'flat', 'apartment', 'room',
-      'plumber', 'electrician', 'cleaner', 'tutor'
-    ];
-    
-    return postingKeywords.some(keyword => lowerMsg.includes(keyword));
-  }
+async isPostingIntent(message) {
+  const lowerMsg = message.toLowerCase();
+  const postingKeywords = [
+    'post', 'list', 'add', 'create', 'offer', 'available',
+    'rent', 'sell', 'service', 'help', 'looking for', 'need',
+    '1bhk', '2bhk', '3bhk', 'flat', 'apartment', 'room',
+    'plumber', 'electrician', 'cleaner', 'tutor', 'maid', 'cook',
+    'carpenter', 'painter', 'driver', 'technician',
+    'i\'m', 'i am', 'available for', 'provide', 'professional',
+    'experienced', 'for hire', 'for rent', 'selling'
+  ];
+  
+  return postingKeywords.some(keyword => lowerMsg.includes(keyword));
+}
 
   async startNewPosting(message) {
     // Determine category from message
