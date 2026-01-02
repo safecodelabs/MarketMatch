@@ -232,6 +232,12 @@ async function handlePostingService(sender, message, session, effectiveClient) {
     console.log("📝 [POSTING SERVICE] Session step:", session?.step);
     console.log("📝 [POSTING SERVICE] Session state:", session?.state);
     
+    if (session.mode === 'posting' && session.draftId) {
+      console.log("📝 [POSTING SERVICE] User already in posting mode, continuing session");
+      const postingService = new PostingService(sender);
+      return await postingService.continuePosting(message, session);
+    }
+    
     const postingService = new PostingService(sender);
     
     // Check if this is a voice-initiated offering
@@ -1808,25 +1814,152 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
   console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
-  // ===========================
-  // 1) CHECK FOR POSTING SERVICE (NEW) - FOR NON-URBAN HELP REQUESTS
-  // ===========================
-  if (text && !replyId) { // Only check text messages, not button clicks
-    // SECOND: Check general posting service for non-urban help requests
-    const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-    if (postingResult.handled) {
-      // Update session based on posting result
-      if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-        session.step = "posting_flow";
-      } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-        session.step = "menu";
-        session.state = 'initial';
+// ===========================
+// ✅ UPDATED: CHECK FOR POSTING SERVICE - INCLUDES CONFIRMATION HANDLING
+// ===========================
+if (text && !replyId) { // Only check text messages, not button clicks
+  // Check if user is already in posting flow
+  if (session.mode === 'posting' && session.draftId) {
+    console.log(`📝 [CONTROLLER] User in posting flow, continuing with draft: ${session.draftId}`);
+    
+    // Create posting service instance
+    const postingService = new PostingService(sender);
+    
+    // Continue the posting session
+    const result = await postingService.continuePosting(text, session);
+    
+    if (result && result.shouldHandle !== false) {
+      console.log(`📝 [CONTROLLER] Posting service handled: ${result.type}`);
+      
+      // Handle different response types
+      switch(result.type) {
+        case 'question':
+        case 'confirmation':
+          await sendMessageWithClient(sender, result.response, effectiveClient);
+          // Update session for confirmation flow
+          if (result.type === 'confirmation') {
+            session.step = "posting_flow";
+            session.expectedField = 'confirmation';
+          }
+          break;
+          
+        case 'confirmation_with_buttons':
+          // Send interactive buttons for confirmation
+          console.log(`📝 [CONTROLLER] Sending confirmation with buttons`);
+          await sendInteractiveButtonsWithClient(
+            effectiveClient,
+            sender,
+            result.response,
+            result.buttons
+          );
+          session.step = "posting_flow";
+          session.expectedField = 'confirmation';
+          break;
+          
+        case 'success':
+          await sendMessageWithClient(sender, result.response, effectiveClient);
+          session.step = "menu";
+          session.state = 'initial';
+          delete session.mode;
+          delete session.draftId;
+          delete session.expectedField;
+          break;
+          
+        case 'cancelled':
+          await sendMessageWithClient(sender, result.response, effectiveClient);
+          session.step = "menu";
+          session.state = 'initial';
+          delete session.mode;
+          delete session.draftId;
+          delete session.expectedField;
+          break;
+          
+        case 'error':
+          await sendMessageWithClient(sender, `⚠️ ${result.response}`, effectiveClient);
+          session.step = "menu";
+          session.state = 'initial';
+          delete session.mode;
+          delete session.draftId;
+          delete session.expectedField;
+          break;
       }
+      
       await saveSession(sender, session);
       return session;
     }
   }
+  
+  // If not in posting flow, check if it's a new posting request
+  const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+  if (postingResult.handled) {
+    // Update session based on posting result
+    if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+      session.step = "posting_flow";
+    } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+      session.step = "menu";
+      session.state = 'initial';
+    }
+    await saveSession(sender, session);
+    return session;
+  }
+}
 
+// ===========================
+// ✅ CRITICAL FIX: Check for POSTING FLOW confirmation responses
+// ===========================
+if (text && !replyId && session.step === "posting_flow") {
+  console.log(`📝 [POSTING FLOW] Processing posting flow response: "${text}"`);
+  
+  // Create posting service instance
+  const postingService = new PostingService(sender);
+  
+  // Check if user already has a posting session
+  const userSession = await getSession(sender);
+  
+  if (userSession.mode === 'posting' && userSession.draftId) {
+    // User is in posting mode, continue with posting service
+    const result = await postingService.continuePosting(text, userSession);
+    
+    if (result && result.shouldHandle !== false) {
+      switch(result.type) {
+        case 'question':
+        case 'confirmation':
+          await sendMessageWithClient(sender, result.response, effectiveClient);
+          // Update session
+          if (result.type === 'confirmation') {
+            session.step = "posting_flow";
+            session.expectedField = 'confirmation';
+          }
+          break;
+          
+        case 'success':
+          await sendMessageWithClient(sender, result.response, effectiveClient);
+          session.step = "menu";
+          session.state = 'initial';
+          delete session.mode;
+          delete session.draftId;
+          break;
+          
+        case 'cancelled':
+          await sendMessageWithClient(sender, result.response, effectiveClient);
+          session.step = "menu";
+          session.state = 'initial';
+          delete session.mode;
+          delete session.draftId;
+          break;
+          
+        case 'error':
+          await sendMessageWithClient(sender, `⚠️ ${result.response}`, effectiveClient);
+          session.step = "menu";
+          session.state = 'initial';
+          break;
+      }
+      
+      await saveSession(sender, session);
+      return session;
+    }
+  }
+}
 // ===========================
 // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS - UPDATED WITH OFFERING DETECTION
 // ===========================
@@ -1968,6 +2101,71 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
     
     await saveSession(sender, session);
     return session;
+}
+// ===========================
+// ✅ ADDED: CHECK FOR POSTING CONFIRMATION BUTTON CLICKS
+// ===========================
+if (replyId && replyId.startsWith('confirm_') && 
+    (session.mode === 'posting' || session.step === 'posting_flow')) {
+  console.log(`📝 [POSTING BUTTON] Detected posting confirmation button: ${replyId}`);
+  
+  // Check if user has an active posting session
+  if (session.mode === 'posting' && session.draftId) {
+    const postingService = new PostingService(sender);
+    const draft = await postingService.draftManager.getDraft(session.draftId);
+    
+    if (draft) {
+      // Create a message object with button data for the posting service
+      const buttonMessage = {
+        button: {
+          payload: replyId
+        }
+      };
+      
+      // Handle the confirmation with the posting service
+      const result = await postingService.handleConfirmation(buttonMessage, draft);
+      
+      if (result && result.shouldHandle !== false) {
+        switch(result.type) {
+          case 'success':
+            await sendMessageWithClient(sender, result.response, effectiveClient);
+            session.step = "menu";
+            session.state = 'initial';
+            delete session.mode;
+            delete session.draftId;
+            delete session.expectedField;
+            break;
+            
+          case 'cancelled':
+            await sendMessageWithClient(sender, result.response, effectiveClient);
+            session.step = "menu";
+            session.state = 'initial';
+            delete session.mode;
+            delete session.draftId;
+            delete session.expectedField;
+            break;
+            
+          case 'error':
+            await sendMessageWithClient(sender, result.response, effectiveClient);
+            session.step = "menu";
+            session.state = 'initial';
+            delete session.mode;
+            delete session.draftId;
+            delete session.expectedField;
+            break;
+            
+          case 'question':
+            // User wants to edit, continue with editing
+            await sendMessageWithClient(sender, result.response, effectiveClient);
+            session.step = "posting_flow";
+            break;
+        }
+        
+        await saveSession(sender, session);
+        return session;
+      }
+    }
+  }
 }
 
   // ===========================

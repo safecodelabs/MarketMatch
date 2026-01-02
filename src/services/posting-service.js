@@ -819,61 +819,94 @@ async extractInfoFromIntent(intentResult, message, category) {
     }
   }
 
-  async handleConfirmation(message, draft) {
-    const lowerMsg = message.toLowerCase().trim();
-    
-    if (lowerMsg === 'yes' || lowerMsg === 'y' || lowerMsg === '✅' || lowerMsg === 'confirm' ||
-        lowerMsg === 'haan' || lowerMsg === 'han' || lowerMsg === 'ha' || lowerMsg === 'sahi' ||
-        lowerMsg === 'correct' || lowerMsg === 'right') {
-      // Publish listing
-      const result = await this.publishListing(draft);
-      
-      if (result.success) {
-        await this.sessionManager.clearSession();
-        return {
-          type: 'success',
-          response: '🎉 Your listing has been published successfully!\n\n' +
-                   'You can view it from the "Manage Listings" option.',
-          shouldHandle: true
-        };
-      } else {
-        return {
-          type: 'error',
-          response: 'Failed to publish. Please try again.',
-          shouldHandle: true
-        };
-      }
-    } else if (lowerMsg === 'no' || lowerMsg === 'n' || lowerMsg === '❌' || lowerMsg === 'cancel' ||
-               lowerMsg === 'nahi' || lowerMsg === 'na' || lowerMsg === 'galat' ||
-               lowerMsg === 'wrong' || lowerMsg === 'incorrect') {
-      await this.draftManager.deleteDraft(draft.id);
-      await this.sessionManager.clearSession();
-      return {
-        type: 'cancelled',
-        response: 'Listing cancelled. You can start a new one anytime.',
-        shouldHandle: true
-      };
-    } else if (lowerMsg === 'edit' || lowerMsg === 'change' || lowerMsg.includes('modify')) {
-      // Get first field for editing
-      const firstField = this.getNextRequiredField(draft);
-      if (firstField) {
-        await this.sessionManager.updateSession({ expectedField: firstField });
-        const question = this.getFieldQuestion(firstField, draft.category);
-        
-        return {
-          type: 'question',
-          response: `Let's edit your listing. ${question}`,
-          shouldHandle: true
-        };
-      }
+async handleConfirmation(message, draft) {
+  const lowerMsg = message.toLowerCase().trim();
+
+  if (message.button) {
+    // Handle button click
+    if (message.button.payload === 'confirm_yes') {
+      return await this.publishAndRespond(draft);
+    } else if (message.button.payload === 'confirm_no') {
+      return await this.cancelAndRespond(draft);
+    } else if (message.button.payload === 'confirm_edit') {
+      return await this.editAndRespond(draft);
     }
-    
+  }
+  
+  // Fallback for text input (optional)
+  if (this.isYesMessage(lowerMsg)) {
+    return await this.publishAndRespond(draft);
+  } else if (this.isNoMessage(lowerMsg)) {
+    return await this.cancelAndRespond(draft);
+  }
+  
+  
+  // 🟢 SEND BUTTONS INSTEAD:
+  const summary = await this.generateSummary(draft);
+  return {
+    type: 'confirmation_with_buttons',
+    response: `${summary}\n\n✅ Is this correct?`,
+    buttons: [
+      { id: 'confirm_yes', title: '✅ Yes, Post It' },
+      { id: 'confirm_edit', title: '✏️ Edit Details' },
+      { id: 'confirm_no', title: '❌ Cancel' }
+    ],
+    shouldHandle: true
+  };
+}
+
+// Helper methods for fallback text support
+isYesMessage(text) {
+  const yesPatterns = ['yes', 'y', 'haan', 'han', 'ha', 'sahi', 'correct', 'right', 'confirm'];
+  return yesPatterns.includes(text);
+}
+
+isNoMessage(text) {
+  const noPatterns = ['no', 'n', 'nahi', 'na', 'galat', 'wrong', 'incorrect', 'cancel'];
+  return noPatterns.includes(text);
+}
+
+async publishAndRespond(draft) {
+  const result = await this.publishListing(draft);
+  if (result.success) {
+    await this.sessionManager.clearSession();
     return {
-      type: 'question',
-      response: 'Please reply "YES" to post or "NO" to cancel.',
+      type: 'success',
+      response: '🎉 Your listing has been published successfully!\n\n' +
+               'You can view it from the "Manage Listings" option.',
+      shouldHandle: true
+    };
+  } else {
+    return {
+      type: 'error',
+      response: 'Failed to publish. Please try again.',
       shouldHandle: true
     };
   }
+}
+
+async cancelAndRespond(draft) {
+  await this.draftManager.deleteDraft(draft.id);
+  await this.sessionManager.clearSession();
+  return {
+    type: 'cancelled',
+    response: 'Listing cancelled. You can start a new one anytime.',
+    shouldHandle: true
+  };
+}
+
+async editAndRespond(draft) {
+  const firstField = this.getNextRequiredField(draft);
+  if (firstField) {
+    await this.sessionManager.updateSession({ expectedField: firstField });
+    const question = this.getFieldQuestion(firstField, draft.category);
+    return {
+      type: 'question',
+      response: `Let's edit your listing. ${question}`,
+      shouldHandle: true
+    };
+  }
+}
 
   detectCategory(message) {
     const lowerMsg = message.toLowerCase();
