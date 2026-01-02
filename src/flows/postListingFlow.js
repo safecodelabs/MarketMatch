@@ -1,6 +1,6 @@
 // File: /core/flows/whatsappFlows/postListingFlow.js
 const axios = require("axios");
-const PostingService = require("../../../services/posting-service");
+const PostingService = require("../services/posting-service");
 
 async function sendListingFlow(to) {
   return axios.post(

@@ -2,9 +2,9 @@
 // IMPORTS - UPDATED WITH VOICE SUPPORT & URBAN HELP & POSTING SYSTEM
 // ========================================
 const commandRouter = require("./src/bots/commandRouter");
-const voiceService = require("./src/services/voiceService"); // NEW: Voice service
+const voiceService = require("./src/services/voiceService");
 
-// ✅ ADDED: Posting Service
+// ✅ FIXED: Correct path to posting-service
 const PostingService = require("./src/services/posting-service");
 
 // ✅ UPDATED: Added new session functions
@@ -31,9 +31,9 @@ const {
   removeSavedListing,
   getUserSavedListings,
   isListingSaved,
-  searchListingsByCriteria, // NEW: For voice search results
+  searchListingsByCriteria,
   // ✅ ADDED: Urban Help Functions
-  searchUrbanServices, // ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
+  searchUrbanServices,
   addUrbanHelpProvider,
   getProviderById,
   updateProviderAvailability,
@@ -42,14 +42,13 @@ const {
 
 // ✅ UPDATED: Added sendSavedListingCard
 const { 
-    sendMessageWithClient, // ✅ Use the actual name
-    sendList, 
-    sendReplyButtons, 
-    sendListingCard,
-    sendSavedListingCard,
-    sendInteractiveButtonsWithClient // ✅ Use the actual name
+  sendMessageWithClient,
+  sendList, 
+  sendReplyButtons, 
+  sendListingCard,
+  sendSavedListingCard,
+  sendInteractiveButtonsWithClient
 } = require("./src/services/messageService");
-const { db } = require("./database/firestore");
 
 // ✅ ADDED: Environment variables for Flow
 const WHATSAPP_FLOW_ID = process.env.WHATSAPP_FLOW_ID;
