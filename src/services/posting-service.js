@@ -498,64 +498,87 @@ class PostingService {
         category = 'urban_help'; // Default for service offers
       }
       
-      console.log(`📝 [POSTING SERVICE] Determined category: ${category}`);
-      
-      if (!category) {
-        return {
-          type: 'question',
-          response: 'What type of listing are you creating? (Housing, Urban Help, Vehicle, Electronics, Furniture, Commodity, or Job)',
-          shouldHandle: true
-        };
-      }
-      
-      // Check if user already has an active draft
-      const existingDraft = await this.draftManager.getUserActiveDraft(this.userId);
-      if (existingDraft) {
-        return {
-          type: 'question',
-          response: `You already have a draft in progress. Do you want to continue with that or start a new ${category} listing?`,
-          shouldHandle: true,
-          options: ['Continue draft', 'Start new']
-        };
-      }
-      
-      // Create new draft
-      const draft = await this.draftManager.createDraft(this.userId, category);
-      console.log(`📝 [POSTING SERVICE] Created draft: ${draft.id}`);
-      
-      // Update session
-      await this.sessionManager.updateSession({
-        mode: 'posting',
-        category: category,
-        draftId: draft.id,
-        expectedField: null,
-        isVoiceInitiated: false
-      });
-      
-      // Try to extract initial info using intent classifier
-      const extractedInfo = await this.extractInfoFromIntent(intentResult, message, category);
-      if (extractedInfo) {
-        await this.saveExtractedInfo(draft.id, category, extractedInfo);
-      }
-      
-      // Get next question
-      const nextQuestion = await this.getNextQuestion(draft.id);
-      
+    console.log(`📝 [POSTING SERVICE] Determined category: ${category}`);
+    
+    if (!category) {
       return {
         type: 'question',
-        response: nextQuestion,
-        shouldHandle: true
-      };
-      
-    } catch (error) {
-      console.error("❌ [POSTING SERVICE] Error starting new posting:", error);
-      return {
-        type: 'error',
-        response: "Sorry, I couldn't start your listing. Please try again.",
+        response: 'What type of listing are you creating? (Housing, Urban Help, Vehicle, Electronics, Furniture, Commodity, or Job)',
         shouldHandle: true
       };
     }
+    
+    // Check if user already has an active draft
+    const existingDraft = await this.draftManager.getUserActiveDraft(this.userId);
+    if (existingDraft) {
+      return {
+        type: 'question',
+        response: `You already have a draft in progress. Do you want to continue with that or start a new ${category} listing?`,
+        shouldHandle: true,
+        options: ['Continue draft', 'Start new']
+      };
+    }
+    
+    // Create new draft
+    const draft = await this.draftManager.createDraft(this.userId, category);
+    console.log(`📝 [POSTING SERVICE] Created draft: ${draft.id}`);
+    
+    // ✅ CRITICAL FIX: Extract and save info BEFORE getting next question
+    const extractedInfo = await this.extractInfoFromIntent(intentResult, message, category);
+    console.log("📝 [POSTING SERVICE] Extracted info:", extractedInfo);
+    
+    if (extractedInfo) {
+      await this.saveExtractedInfo(draft.id, category, extractedInfo);
+      console.log("📝 [POSTING SERVICE] Saved extracted info to draft");
+    }
+    
+    // Update session
+    await this.sessionManager.updateSession({
+      mode: 'posting',
+      category: category,
+      draftId: draft.id,
+      expectedField: null,
+      step: 'posting_flow',
+      isVoiceInitiated: false
+    });
+    
+    // ✅ Get the ACTUAL next required field with updated draft data
+    const updatedDraft = await this.draftManager.getDraft(draft.id);
+    console.log("📝 [POSTING SERVICE] Draft after saving extracted info:", updatedDraft.data);
+    
+    const nextField = this.getNextRequiredField(updatedDraft);
+    console.log(`📝 [POSTING SERVICE] Next required field: ${nextField}`);
+    
+    if (nextField) {
+      await this.sessionManager.updateSession({ expectedField: nextField });
+      const question = this.getFieldQuestion(nextField, category);
+      
+      return {
+        type: 'question',
+        response: question,
+        shouldHandle: true
+      };
+    } else {
+      // All required fields are already filled! Show summary
+      const summary = await this.generateSummary(updatedDraft);
+      await this.sessionManager.updateSession({ expectedField: 'confirmation' });
+      
+      return {
+        type: 'confirmation',
+        response: `${summary}\n\n✅ Is this correct?\nReply "YES" to post or "NO" to cancel.`,
+        shouldHandle: true
+      };
+    }
+    
+  } catch (error) {
+    console.error("❌ [POSTING SERVICE] Error starting new posting:", error);
+    return {
+      type: 'error',
+      response: "Sorry, I couldn't start your listing. Please try again.",
+      shouldHandle: true
+    };
   }
+}
 
   detectCategoryFromIntent(intentResult, message) {
     const lowerMsg = message.toLowerCase();
@@ -633,51 +656,53 @@ class PostingService {
     return false;
   }
 
-  async extractInfoFromIntent(intentResult, message, category) {
-    const info = {};
-    const entities = intentResult.entities || {};
-    const lowerMsg = message.toLowerCase();
-    
-    console.log("📝 [POSTING SERVICE] Extracting info from intent entities:", entities);
-    
-    if (category === 'urban_help') {
-      // Use service_type from intent classifier
-      if (entities.service_type) {
-        info.serviceType = entities.service_type;
-      } else if (intentResult.intent === 'service_offer' || intentResult.context === 'offer') {
-        // Try to extract from "I am a [profession]" pattern
-        const offeringMatch = lowerMsg.match(/i('?m| am| mai| main| mein)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+(in|at|near|$)/i);
-        if (offeringMatch && offeringMatch[3]) {
-          const profession = offeringMatch[3].trim();
-          // Clean up the profession text
-          const cleanedProfession = profession
-            .replace(/^\s*(a|an|the)\s+/i, '') // Remove leading articles
-            .replace(/\s+in\s+.*$/i, '') // Remove location part
-            .trim();
-          
-          if (cleanedProfession && cleanedProfession.length > 0) {
-            info.serviceType = cleanedProfession;
-          } else {
-            info.serviceType = 'service';
-          }
-        } else {
-          info.serviceType = 'service';
+async extractInfoFromIntent(intentResult, message, category) {
+  const info = {};
+  const entities = intentResult.entities || {};
+  const lowerMsg = message.toLowerCase();
+  
+  console.log("📝 [POSTING SERVICE] Extracting info from intent entities:", entities);
+  console.log("📝 [POSTING SERVICE] Full intent result:", intentResult);
+  
+  if (category === 'urban_help') {
+    // Use service_type from intent classifier
+    if (entities.service_type) {
+      info.serviceType = entities.service_type;
+      console.log(`✅ Extracted service_type: ${info.serviceType}`);
+    } else {
+      // Try to extract from "I am a [profession]" pattern
+      const offeringMatch = lowerMsg.match(/i('?m| am| mai| main| mein)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+(in|at|near|$)/i);
+      if (offeringMatch && offeringMatch[3]) {
+        const profession = offeringMatch[3].trim();
+        // Clean up
+        const cleanedProfession = profession
+          .replace(/^\s*(a|an|the)\s+/i, '')
+          .replace(/\s+in\s+.*$/i, '')
+          .trim();
+        
+        if (cleanedProfession && cleanedProfession.length > 0) {
+          info.serviceType = cleanedProfession;
+          console.log(`✅ Extracted serviceType from pattern: ${info.serviceType}`);
         }
       }
-      
-      // Use location from intent classifier
-      if (entities.location) {
-        info.location = entities.location;
-      } else {
-        // Try to extract location from message
-        const locationMatch = message.match(/\b(in|at|near|around|mein|me|main)\s+([^,.!?]+)/i);
-        if (locationMatch && locationMatch[2]) {
-          info.location = locationMatch[2].trim();
-        }
+    }
+    
+    // Use location from intent classifier
+    if (entities.location) {
+      info.location = entities.location;
+      console.log(`✅ Extracted location: ${info.location}`);
+    } else {
+      // Try to extract location from message
+      const locationMatch = message.match(/\b(in|at|near|around|mein|me|main)\s+([^,.!?]+)/i);
+      if (locationMatch && locationMatch[2]) {
+        info.location = locationMatch[2].trim();
+        console.log(`✅ Extracted location from pattern: ${info.location}`);
       }
-      
-      // Use description
-      info.description = message;
+    }
+    
+    // Use the whole message as initial description
+    info.description = message;
+    console.log(`✅ Using message as description: ${info.description.substring(0, 50)}...`);
       
     } else if (category === 'housing') {
       // Use entities from intent classifier
@@ -708,6 +733,7 @@ class PostingService {
       if (entities.type) info.jobType = entities.type;
     }
     
+    console.log("📝 [POSTING SERVICE] Final extracted info:", info);
     return Object.keys(info).length > 0 ? info : null;
   }
 
@@ -993,19 +1019,23 @@ class PostingService {
   }
 
   async saveExtractedInfo(draftId, category, info) {
-    try {
-      console.log(`📝 [POSTING SERVICE] Saving extracted info for ${category}:`, info);
-      
-      if (category === 'urban_help') {
-        if (info.serviceType) {
-          await this.draftManager.updateDraftField(draftId, 'serviceType', info.serviceType);
-        }
-        if (info.description) {
-          await this.draftManager.updateDraftField(draftId, 'description', info.description);
-        }
-        if (info.location) {
-          await this.draftManager.updateDraftField(draftId, 'location.area', info.location);
-        }
+  try {
+    console.log(`📝 [POSTING SERVICE] Saving extracted info for ${category}:`, info);
+    console.log(`📝 [POSTING SERVICE] Draft ID: ${draftId}`);
+    
+    if (category === 'urban_help') {
+      if (info.serviceType) {
+        console.log(`📝 [POSTING SERVICE] Saving serviceType: ${info.serviceType}`);
+        await this.draftManager.updateDraftField(draftId, 'serviceType', info.serviceType);
+      }
+      if (info.description) {
+        console.log(`📝 [POSTING SERVICE] Saving description: ${info.description}`);
+        await this.draftManager.updateDraftField(draftId, 'description', info.description);
+      }
+      if (info.location) {
+        console.log(`📝 [POSTING SERVICE] Saving location.area: ${info.location}`);
+        await this.draftManager.updateDraftField(draftId, 'location.area', info.location);
+      }
       } else if (category === 'housing') {
         if (info.unitType) {
           await this.draftManager.updateDraftField(draftId, 'unitType', info.unitType);
@@ -1046,8 +1076,13 @@ class PostingService {
       }
       
       console.log(`📝 [POSTING SERVICE] Saved info to draft ${draftId}`);
+
+      const updatedDraft = await this.draftManager.getDraft(draftId);
+      console.log(`📝 [POSTING SERVICE] Draft after save:`, updatedDraft.data);
+
     } catch (error) {
       console.error(`❌ [POSTING SERVICE] Error saving extracted info:`, error);
+      console.error(`❌ Error stack:`, error.stack);
     }
   }
 
@@ -1132,27 +1167,49 @@ class PostingService {
     }
   }
 
-  async getNextQuestion(draftId) {
-    try {
-      const draft = await this.draftManager.getDraft(draftId);
-      if (!draft) {
-        return 'Sorry, I could not find your draft. Please start over.';
-      }
-      
-      const nextField = this.getNextRequiredField(draft);
-      
-      if (nextField) {
-        await this.sessionManager.updateSession({ expectedField: nextField });
-        return this.getFieldQuestion(nextField, draft.category);
-      }
-      
-      return 'Please provide more details about your listing.';
-      
-    } catch (error) {
-      console.error(`❌ [POSTING SERVICE] Error getting next question:`, error);
-      return 'Sorry, there was an error. Please try again.';
+async getNextQuestion(draftId) {
+  try {
+    const draft = await this.draftManager.getDraft(draftId);
+    if (!draft) {
+      return 'Sorry, I could not find your draft. Please start over.';
     }
+    
+    console.log(`📝 [POSTING SERVICE] Getting next question for draft:`, draft.data);
+    
+    const nextField = this.getNextRequiredField(draft);
+    
+    if (nextField) {
+      await this.sessionManager.updateSession({ expectedField: nextField });
+      const question = this.getFieldQuestion(nextField, draft.category);
+      
+      // ✅ Add context to the question
+      let contextualQuestion = question;
+      
+      if (draft.category === 'urban_help') {
+        const serviceType = draft.data?.urban_help?.serviceType || '';
+        const location = draft.data?.location?.area || '';
+        
+        if (serviceType && location) {
+          contextualQuestion = `For your ${serviceType} service in ${location}, ${question}`;
+        } else if (serviceType) {
+          contextualQuestion = `For your ${serviceType} service, ${question}`;
+        }
+      }
+      
+      return contextualQuestion;
+    } else {
+      // All required fields are filled
+      const summary = await this.generateSummary(draft);
+      await this.sessionManager.updateSession({ expectedField: 'confirmation' });
+      
+      return `${summary}\n\n✅ Is this correct?\nReply "YES" to post or "NO" to cancel.`;
+    }
+    
+  } catch (error) {
+    console.error(`❌ [POSTING SERVICE] Error getting next question:`, error);
+    return 'Sorry, there was an error. Please try again.';
   }
+}
 
   async generateSummary(draft) {
     try {
