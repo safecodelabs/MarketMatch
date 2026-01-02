@@ -1,8 +1,7 @@
 // File: /services/posting-service.js
+const admin = require('firebase-admin');
 const SessionManager = require('../../database/session-manager');
 const DraftManager = require('../../database/draft-manager');
-const { db } = require('../../database/firestore');
-const { Timestamp } = require('firebase/firestore');
 
 // ✅ FIXED: Use const and avoid multiple let declarations
 // Load FIELD_CONFIGS safely
@@ -1120,37 +1119,44 @@ class PostingService {
     return number.toLocaleString('en-IN');
   }
 
-  async publishListing(draft) {
-    try {
-      console.log(`📝 [POSTING SERVICE] Publishing listing from draft: ${draft.id}`);
-      
-      // Create listing in listings collection
-      const listingId = `listing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      const listingRef = db.collection('listings').doc(listingId);
-      
-      // Prepare listing data
-      const listingData = {
-        id: listingId,
-        status: 'active',
-        category: draft.category,
-        subCategory: draft.data?.[draft.category]?.serviceType || 
-                    draft.data?.[draft.category]?.unitType || 
-                    draft.data?.[draft.category]?.itemType ||
-                    draft.data?.[draft.category]?.vehicleType ||
-                    draft.data?.[draft.category]?.jobPosition ||
-                    draft.category,
-        data: draft.data,
-        owner: {
-          userId: this.userId,
-          phone: this.userId // Assuming userId is phone number
-        },
-        createdAt: Timestamp.now(),
-        expiresAt: Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
-        metrics: {
-          views: 0,
-          contacts: 0
-        }
-      };
+async publishListing(draft) {
+  try {
+    console.log(`📝 [POSTING SERVICE] Publishing listing from draft: ${draft.id}`);
+    
+    // ✅ Use admin from firestore.js or import it
+    const { db } = require('../../database/firestore');
+    
+    const listingId = `listing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const listingRef = db.collection('listings').doc(listingId);
+    
+    // ✅ Use db.FieldValue.serverTimestamp()
+    const listingData = {
+      id: listingId,
+      status: 'active',
+      category: draft.category,
+      subCategory: draft.data?.[draft.category]?.serviceType || 
+                  draft.data?.[draft.category]?.unitType || 
+                  draft.data?.[draft.category]?.itemType ||
+                  draft.data?.[draft.category]?.vehicleType ||
+                  draft.data?.[draft.category]?.jobPosition ||
+                  draft.category,
+      data: draft.data,
+      owner: {
+        userId: this.userId,
+        phone: this.userId
+      },
+      createdAt: db.FieldValue.serverTimestamp(), // ✅ Fixed
+      expiresAt: db.FieldValue.serverTimestamp(), // This will set current time
+      metrics: {
+        views: 0,
+        contacts: 0
+      }
+    };
+    
+    // Add 30 days for expiration
+    const expiresAtDate = new Date();
+    expiresAtDate.setDate(expiresAtDate.getDate() + 30);
+    listingData.expiresAt = expiresAtDate.getTime();
       
       // Add title based on category
       if (draft.category === 'urban_help') {

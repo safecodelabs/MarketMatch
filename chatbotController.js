@@ -1298,34 +1298,65 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
     return;
   }
   
+  // Check if we're continuing a previous urban help session
+  if (session.urbanHelpContext && session.urbanHelpContext.category && !session.urbanHelpContext.location) {
+    console.log("🔧 [URBAN HELP] Continuing session for location input");
+    // User already selected category, now providing location
+    session.urbanHelpContext.location = text;
+    session.urbanHelpContext.text = session.urbanHelpContext.text || text;
+    session.urbanHelpContext.step = "awaiting_confirmation";
+    
+    await sendUrbanHelpConfirmation(sender, 
+      session.urbanHelpContext.text, 
+      session.urbanHelpContext, 
+      userLang, 
+      client
+    );
+    
+    session.step = "awaiting_urban_help_confirmation";
+    await saveSession(sender, session);
+    return;
+  }
+  
   // Only proceed with urban help search if user is LOOKING FOR services
   console.log("🔧 [URBAN HELP TEXT] User is LOOKING FOR services");
   
   // Extract category and location from text
   const extractedInfo = extractUrbanHelpFromText(text);
   
+  console.log(`🔧 [URBAN HELP] Extracted info:`, extractedInfo);
+  
   if (!extractedInfo.category) {
-    // Ask for category
+    // Ask for category (show only 3 buttons max!)
+    const categories = Object.entries(URBAN_HELP_CATEGORIES).slice(0, 3);
+    const buttons = categories.map(([id, data]) => ({
+      id: `text_category_${id}`,
+      text: `${data.emoji} ${data.name}`
+    }));
+    
+    // Add "Other" option as third button if we have space
+    if (buttons.length < 3) {
+      buttons.push({ id: 'text_category_other', text: '🔧 Other Service' });
+    }
+    
     await sendInteractiveButtonsWithClient(
       client,
       sender,
       "What type of service do you need?",
-      Object.entries(URBAN_HELP_CATEGORIES).slice(0, 4).map(([id, data]) => ({
-        id: `text_category_${id}`,
-        text: `${data.emoji} ${data.name}`
-      }))
+      buttons
     );
     
     session.urbanHelpContext = {
       text: text,
-      step: "awaiting_category"
+      step: "awaiting_category",
+      location: extractedInfo.location || null
     };
     session.step = "awaiting_urban_help_category";
     
   } else if (!extractedInfo.location) {
-    // Ask for location
+    // Ask for location - NO BUTTONS, just text
     await sendMessageWithClient(sender, 
-      `Where do you need the ${extractedInfo.category}?`,
+      `Where do you need the ${URBAN_HELP_CATEGORIES[extractedInfo.category]?.name || extractedInfo.category}?`,
       client
     );
     
@@ -2272,13 +2303,22 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
   // ===========================
   // 12) URBAN HELP CATEGORY SELECTION
   // ===========================
-  if (msg.startsWith("text_category_") && session.step === "awaiting_urban_help_category") {
-    const category = msg.replace("text_category_", "");
-    const urbanContext = session.urbanHelpContext || {};
+if (msg.startsWith("text_category_") && session.step === "awaiting_urban_help_category") {
+  const category = msg.replace("text_category_", "");
+  const urbanContext = session.urbanHelpContext || {};
+  
+  urbanContext.category = category;
+  urbanContext.step = "awaiting_location";
+  
+  // If we already have location from previous message, use it
+  if (urbanContext.location) {
+    // We have both category and location, show confirmation
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+    await sendUrbanHelpConfirmation(sender, urbanContext.text || category, urbanContext, userLang, effectiveClient);
     
-    urbanContext.category = category;
-    urbanContext.step = "awaiting_location";
-    
+    session.urbanHelpContext = urbanContext;
+    session.step = "awaiting_urban_help_confirmation";
+  } else {
     await sendMessageWithClient(sender, 
       `Where do you need the ${URBAN_HELP_CATEGORIES[category]?.name || category}?`,
       effectiveClient
@@ -2286,27 +2326,30 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
     
     session.urbanHelpContext = urbanContext;
     session.step = "awaiting_urban_help_location";
-    await saveSession(sender, session);
-    return session;
   }
+  
+  await saveSession(sender, session);
+  return session;
+}
   
   // ===========================
   // 13) URBAN HELP LOCATION INPUT
   // ===========================
-  if (session.step === "awaiting_urban_help_location" && text) {
-    const urbanContext = session.urbanHelpContext || {};
-    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-    
-    urbanContext.location = text;
-    urbanContext.step = "awaiting_confirmation";
-    
-    await sendUrbanHelpConfirmation(sender, urbanContext.text || text, urbanContext, userLang, effectiveClient);
-    
-    session.urbanHelpContext = urbanContext;
-    session.step = "awaiting_urban_help_confirmation";
-    await saveSession(sender, session);
-    return session;
-  }
+// In handleIncomingMessage function, handle location input:
+if (session.step === "awaiting_urban_help_location" && text) {
+  const urbanContext = session.urbanHelpContext || {};
+  const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+  
+  urbanContext.location = text;
+  urbanContext.step = "awaiting_confirmation";
+  
+  await sendUrbanHelpConfirmation(sender, urbanContext.text || text, urbanContext, userLang, effectiveClient);
+  
+  session.urbanHelpContext = urbanContext;
+  session.step = "awaiting_urban_help_confirmation";
+  await saveSession(sender, session);
+  return session;
+}
   
   // ==========================================
   // 14) MANAGE LISTINGS INTERACTIVE HANDLING
