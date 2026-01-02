@@ -1246,87 +1246,87 @@ class PostingService {
     return number.toLocaleString('en-IN');
   }
 
-  async publishListing(draft) {
-    try {
-      console.log(`📝 [POSTING SERVICE] Publishing listing from draft: ${draft.id}`);
-      
-      // ✅ Use admin from firestore.js or import it
-      const { db } = require('../../database/firestore');
-      
-      const listingId = `listing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      const listingRef = db.collection('listings').doc(listingId);
-      
-      // ✅ Use db.FieldValue.serverTimestamp()
-      const listingData = {
-        id: listingId,
-        status: 'active',
-        category: draft.category,
-        subCategory: draft.data?.[draft.category]?.serviceType || 
-                    draft.data?.[draft.category]?.unitType || 
-                    draft.data?.[draft.category]?.itemType ||
-                    draft.data?.[draft.category]?.vehicleType ||
-                    draft.data?.[draft.category]?.jobPosition ||
-                    draft.category,
-        data: draft.data,
-        owner: {
-          userId: this.userId,
-          phone: this.userId
-        },
-        createdAt: db.FieldValue.serverTimestamp(), // ✅ Fixed
-        expiresAt: db.FieldValue.serverTimestamp(), // This will set current time
-        metrics: {
-          views: 0,
-          contacts: 0
-        }
-      };
-      
-      // Add 30 days for expiration
-      const expiresAtDate = new Date();
-      expiresAtDate.setDate(expiresAtDate.getDate() + 30);
-      listingData.expiresAt = expiresAtDate.getTime();
-        
-        // Add title based on category
-        if (draft.category === 'urban_help') {
-          const serviceType = draft.data?.['urban_help']?.serviceType || 'Service';
-          const location = draft.data?.location?.area || '';
-          listingData.title = `${serviceType.charAt(0).toUpperCase() + serviceType.slice(1)}${location ? ` in ${location}` : ''}`;
-        } else if (draft.category === 'housing') {
-          const unitType = draft.data?.['housing']?.unitType || 'Property';
-          const location = draft.data?.location?.area || '';
-          listingData.title = `${unitType.toUpperCase()}${location ? ` in ${location}` : ''} for Rent`;
-        } else if (draft.category === 'vehicle') {
-          const vehicleType = draft.data?.['vehicle']?.vehicleType || 'Vehicle';
-          const brand = draft.data?.['vehicle']?.brand || '';
-          listingData.title = `${brand ? brand + ' ' : ''}${vehicleType} for Sale`;
-        } else if (draft.category === 'electronics') {
-          const itemType = draft.data?.['electronics']?.itemType || 'Electronic Item';
-          const brand = draft.data?.['electronics']?.brand || '';
-          listingData.title = `${brand ? brand + ' ' : ''}${itemType} for Sale`;
-        } else if (draft.category === 'furniture') {
-          const itemType = draft.data?.['furniture']?.itemType || 'Furniture';
-          listingData.title = `${itemType} for Sale`;
-        } else if (draft.category === 'commodity') {
-          const itemName = draft.data?.['commodity']?.itemName || 'Item';
-          listingData.title = `${itemName} for Sale`;
-        } else if (draft.category === 'job') {
-          const jobPosition = draft.data?.['job']?.jobPosition || 'Job';
-          listingData.title = `${jobPosition} Position Available`;
-        }
-        
-        console.log(`📝 [POSTING SERVICE] Saving listing to Firestore:`, listingData);
-        await listingRef.set(listingData);
-        
-        // Delete draft
-        await this.draftManager.deleteDraft(draft.id);
-        
-        console.log(`📝 [POSTING SERVICE] Listing published successfully: ${listingId}`);
-        return { success: true, listingId };
-        
-      } catch (error) {
-        console.error('❌ [POSTING SERVICE] Publish Listing Error:', error);
-        return { success: false, error: error.message };
+async publishListing(draft) {
+  try {
+    console.log(`📝 [POSTING SERVICE] Publishing listing from draft: ${draft.id}`);
+    
+    // ✅ Use admin from firestore.js or import it
+    const { db } = require('../../database/firestore');
+    const admin = require('firebase-admin'); // ADD THIS
+    
+    const listingId = `listing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const listingRef = db.collection('listings').doc(listingId);
+    
+    // ✅ Use admin.firestore.FieldValue.serverTimestamp() correctly
+    const listingData = {
+      id: listingId,
+      status: 'active',
+      category: draft.category,
+      subCategory: draft.data?.[draft.category]?.serviceType || 
+                  draft.data?.[draft.category]?.unitType || 
+                  draft.data?.[draft.category]?.itemType ||
+                  draft.data?.[draft.category]?.vehicleType ||
+                  draft.data?.[draft.category]?.jobPosition ||
+                  draft.category,
+      data: draft.data,
+      owner: {
+        userId: this.userId,
+        phone: this.userId
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(), // ✅ FIXED
+      metrics: {
+        views: 0,
+        contacts: 0
       }
+    };
+    
+    // Add 30 days for expiration
+    const expiresAtDate = new Date();
+    expiresAtDate.setDate(expiresAtDate.getDate() + 30);
+    listingData.expiresAt = expiresAtDate.getTime();
+    
+    // Add title based on category
+    if (draft.category === 'urban_help') {
+      const serviceType = draft.data?.['urban_help']?.serviceType || 'Service';
+      const location = draft.data?.location?.area || '';
+      listingData.title = `${serviceType.charAt(0).toUpperCase() + serviceType.slice(1)}${location ? ` in ${location}` : ''}`;
+    } else if (draft.category === 'housing') {
+      const unitType = draft.data?.['housing']?.unitType || 'Property';
+      const location = draft.data?.location?.area || '';
+      listingData.title = `${unitType.toUpperCase()}${location ? ` in ${location}` : ''} for Rent`;
+    } else if (draft.category === 'vehicle') {
+      const vehicleType = draft.data?.['vehicle']?.vehicleType || 'Vehicle';
+      const brand = draft.data?.['vehicle']?.brand || '';
+      listingData.title = `${brand ? brand + ' ' : ''}${vehicleType} for Sale`;
+    } else if (draft.category === 'electronics') {
+      const itemType = draft.data?.['electronics']?.itemType || 'Electronic Item';
+      const brand = draft.data?.['electronics']?.brand || '';
+      listingData.title = `${brand ? brand + ' ' : ''}${itemType} for Sale`;
+    } else if (draft.category === 'furniture') {
+      const itemType = draft.data?.['furniture']?.itemType || 'Furniture';
+      listingData.title = `${itemType} for Sale`;
+    } else if (draft.category === 'commodity') {
+      const itemName = draft.data?.['commodity']?.itemName || 'Item';
+      listingData.title = `${itemName} for Sale`;
+    } else if (draft.category === 'job') {
+      const jobPosition = draft.data?.['job']?.jobPosition || 'Job';
+      listingData.title = `${jobPosition} Position Available`;
     }
+    
+    console.log(`📝 [POSTING SERVICE] Saving listing to Firestore:`, listingData);
+    await listingRef.set(listingData);
+    
+    // Delete draft
+    await this.draftManager.deleteDraft(draft.id);
+    
+    console.log(`📝 [POSTING SERVICE] Listing published successfully: ${listingId}`);
+    return { success: true, listingId };
+    
+  } catch (error) {
+    console.error('❌ [POSTING SERVICE] Publish Listing Error:', error);
+    return { success: false, error: error.message };
+  }
+}
     
     // Helper method to clear user session
     async clearUserSession() {

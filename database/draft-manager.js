@@ -1,6 +1,7 @@
-// File: /database/draft-manager.js - FIXED VERSION
-const { db } = require('./firestore.js'); // This uses firebase-admin
+// File: /database/draft-manager.js - COMPLETELY FIXED VERSION
+const { db } = require('./firestore.js');
 const { v4: uuidv4 } = require('uuid');
+const admin = require('firebase-admin'); // ADD THIS
 
 class DraftManager {
   constructor() {
@@ -11,7 +12,7 @@ class DraftManager {
     const draftId = `draft_${uuidv4().slice(0, 8)}`;
     const draftRef = db.collection(this.collection).doc(draftId);
     
-    // ✅ FIX: Use admin.firestore.FieldValue.serverTimestamp()
+    // ✅ FIX: Use admin.firestore.FieldValue.serverTimestamp() correctly
     const draftData = {
       ownerId: userId,
       status: 'draft',
@@ -22,8 +23,8 @@ class DraftManager {
         location: {}
       },
       filledFields: [],
-      createdAt: db.FieldValue.serverTimestamp(), // ✅ Use serverTimestamp
-      updatedAt: db.FieldValue.serverTimestamp()  // ✅ Use serverTimestamp
+      createdAt: admin.firestore.FieldValue.serverTimestamp(), // ✅ FIXED
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()  // ✅ FIXED
     };
 
     await draftRef.set(draftData);
@@ -67,7 +68,7 @@ class DraftManager {
       }
       
       // Update timestamp
-      updateData.updatedAt = db.FieldValue.serverTimestamp();
+      updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp(); // ✅ FIXED
       
       await draftRef.update(updateData);
       return await this.getDraft(draftId);
@@ -103,8 +104,38 @@ class DraftManager {
       return { id: draftDoc.id, ...draftDoc.data() };
     } catch (error) {
       console.error('Get User Draft Error:', error);
-      // Return null instead of throwing to allow flow to continue
-      return null;
+      
+      // Fallback: Get all drafts and filter client-side
+      try {
+        const allSnapshot = await db.collection(this.collection)
+          .where('ownerId', '==', userId)
+          .get();
+        
+        if (allSnapshot.empty) return null;
+        
+        const drafts = [];
+        allSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.status === 'draft') {
+            drafts.push({
+              id: doc.id,
+              ...data
+            });
+          }
+        });
+        
+        // Sort by updatedAt manually
+        drafts.sort((a, b) => {
+          const timeA = a.updatedAt?.toDate?.().getTime() || 0;
+          const timeB = b.updatedAt?.toDate?.().getTime() || 0;
+          return timeB - timeA; // Descending
+        });
+        
+        return drafts[0] || null;
+      } catch (fallbackError) {
+        console.error('Fallback query also failed:', fallbackError);
+        return null;
+      }
     }
   }
 }

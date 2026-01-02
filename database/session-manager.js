@@ -1,5 +1,6 @@
+// File: /database/session-manager.js - FIXED VERSION
 const { db } = require('./firestore');
-// REMOVE: const { Timestamp } = require('firebase/firestore'); // ❌ Wrong SDK
+const admin = require('firebase-admin'); // ADD THIS
 
 class SessionManager {
   constructor(userId) {
@@ -22,8 +23,8 @@ class SessionManager {
         category: null,
         draftId: null,
         expectedField: null,
-        updatedAt: db.FieldValue.serverTimestamp(), // ✅ Use serverTimestamp
-        createdAt: db.FieldValue.serverTimestamp()  // ✅ Use serverTimestamp
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(), // ✅ FIXED
+        createdAt: admin.firestore.FieldValue.serverTimestamp()  // ✅ FIXED
       };
       
       await sessionRef.set(defaultSession);
@@ -38,7 +39,7 @@ class SessionManager {
   async updateSession(updates) {
     try {
       const sessionRef = db.collection(this.collection).doc(this.userId);
-      updates.updatedAt = db.FieldValue.serverTimestamp(); // ✅ Use serverTimestamp
+      updates.updatedAt = admin.firestore.FieldValue.serverTimestamp(); // ✅ FIXED
       await sessionRef.set(updates, { merge: true });
       return true;
     } catch (error) {
@@ -55,7 +56,7 @@ class SessionManager {
         category: null,
         draftId: null,
         expectedField: null,
-        updatedAt: db.FieldValue.serverTimestamp() // ✅ Use serverTimestamp
+        updatedAt: admin.firestore.FieldValue.serverTimestamp() // ✅ FIXED
       });
     } catch (error) {
       console.error('Clear Session Error:', error);
