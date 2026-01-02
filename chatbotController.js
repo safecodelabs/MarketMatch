@@ -2186,6 +2186,79 @@ if (replyId && replyId.startsWith('confirm_') &&
   }
 }
 
+// ===========================
+// ✅ ADDED: CHECK FOR DRAFT CONFLICT BUTTONS
+// ===========================
+if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_listing' || replyId === 'cancel_draft_conflict') && 
+    (session.step === "posting_flow" || session.mode === 'posting')) {
+  console.log(`📝 [DRAFT CONFLICT] Handling draft conflict: ${replyId}`);
+  
+  const postingService = new PostingService(sender);
+  
+  if (replyId === 'continue_existing_draft') {
+    // Get existing draft and continue
+    const existingDraft = await postingService.draftManager.getUserActiveDraft(sender);
+    if (existingDraft) {
+      await postingService.sessionManager.updateSession({
+        mode: 'posting',
+        category: existingDraft.category,
+        draftId: existingDraft.id,
+        expectedField: null,
+        step: 'posting_flow'
+      });
+      
+      // Get next question
+      const nextQuestion = await postingService.getNextQuestion(existingDraft.id);
+      await sendMessageWithClient(sender, `↪️ Continuing your draft...\n\n${nextQuestion}`, effectiveClient);
+      
+      session.step = "posting_flow";
+      session.mode = 'posting';
+      session.draftId = existingDraft.id;
+      await saveSession(sender, session);
+    }
+    
+  } else if (replyId === 'start_new_listing') {
+    // Delete old draft and start new
+    const existingDraft = await postingService.draftManager.getUserActiveDraft(sender);
+    if (existingDraft) {
+      await postingService.draftManager.deleteDraft(existingDraft.id);
+    }
+    
+    // Get the original message from session context
+    const originalMessage = session.rawTranscription || session.lastMessage || '';
+    if (originalMessage) {
+      await sendMessageWithClient(sender, "🆕 Starting new listing...", effectiveClient);
+      
+      // Process the original message again
+      const result = await postingService.processMessage(originalMessage);
+      if (result && result.shouldHandle !== false) {
+        if (result.type === 'confirmation_with_buttons') {
+          await sendInteractiveButtonsWithClient(
+            effectiveClient,
+            sender,
+            result.response,
+            result.buttons
+          );
+          session.step = "posting_flow";
+          session.expectedField = 'confirmation';
+        }
+      }
+    }
+    
+  } else if (replyId === 'cancel_draft_conflict') {
+    await sendMessageWithClient(sender, "❌ Draft conflict cancelled. Returning to menu.", effectiveClient);
+    session.step = "menu";
+    session.state = 'initial';
+    delete session.mode;
+    delete session.draftId;
+    await saveSession(sender, session);
+    await sendMainMenuViaService(sender);
+  }
+  
+  await saveSession(sender, session);
+  return session;
+}
+
   // ===========================
   // ✅ ADDED: ALSO CHECK FOR TEXT RESPONSES TO VOICE CONFIRMATION
   // ===========================

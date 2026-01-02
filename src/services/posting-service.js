@@ -508,16 +508,20 @@ class PostingService {
       };
     }
     
-    // Check if user already has an active draft
-    const existingDraft = await this.draftManager.getUserActiveDraft(this.userId);
-    if (existingDraft) {
-      return {
-        type: 'question',
-        response: `You already have a draft in progress. Do you want to continue with that or start a new ${category} listing?`,
-        shouldHandle: true,
-        options: ['Continue draft', 'Start new']
-      };
-    }
+// Check if user already has an active draft
+const existingDraft = await this.draftManager.getUserActiveDraft(this.userId);
+if (existingDraft) {
+  return {
+    type: 'confirmation_with_buttons',
+    response: `📝 *Draft Conflict*\n\nYou already have a draft in progress.\n\nWhat would you like to do?`,
+    buttons: [
+      { id: 'continue_existing_draft', title: '↪️ Continue Existing Draft' },
+      { id: 'start_new_listing', title: '🆕 Start New Listing' },
+      { id: 'cancel_draft_conflict', title: '❌ Cancel' }
+    ],
+    shouldHandle: true
+  };
+}
     
     // Create new draft
     const draft = await this.draftManager.createDraft(this.userId, category);
@@ -559,15 +563,20 @@ class PostingService {
         shouldHandle: true
       };
     } else {
-      // All required fields are already filled! Show summary
-      const summary = await this.generateSummary(updatedDraft);
-      await this.sessionManager.updateSession({ expectedField: 'confirmation' });
-      
-      return {
-        type: 'confirmation',
-        response: `${summary}\n\n✅ Is this correct?\nReply "YES" to post or "NO" to cancel.`,
-        shouldHandle: true
-      };
+// All required fields are already filled! Show summary with buttons
+const summary = await this.generateSummary(updatedDraft);
+await this.sessionManager.updateSession({ expectedField: 'confirmation' });
+
+return {
+  type: 'confirmation_with_buttons',
+  response: `${summary}\n\n✅ Is this correct?`,
+  buttons: [
+    { id: 'confirm_yes', title: '✅ Yes, Post It' },
+    { id: 'confirm_edit', title: '✏️ Edit Details' },
+    { id: 'confirm_no', title: '❌ Cancel' }
+  ],
+  shouldHandle: true
+};
     }
     
   } catch (error) {
@@ -1265,17 +1274,17 @@ async getNextQuestion(draftId) {
           summary += `📝 ${shortDesc}\n`;
         }
       } else if (category === 'urban_help') {
-        const serviceType = data.serviceType || 'Service';
-        const serviceName = serviceType.charAt(0).toUpperCase() + serviceType.slice(1);
-        summary += `🔧 ${serviceName}\n`;
-        if (data.description) {
-          const shortDesc = data.description.length > 50 ? 
-            data.description.slice(0, 50) + '...' : data.description;
-          summary += `📝 ${shortDesc}\n`;
-        }
-        if (data.experience) summary += `⭐ Experience: ${data.experience}\n`;
-        if (data.rate) summary += `💰 Rate: ${data.rate}\n`;
-        if (data.availability) summary += `⏰ Available: ${data.availability}\n`;
+      const serviceType = data.serviceType || 'Service';
+      const serviceName = serviceType.charAt(0).toUpperCase() + serviceType.slice(1);
+      summary += `🔧 *Service:* ${serviceName}\n`;
+      if (data.description) {
+        const shortDesc = data.description.length > 100 ? 
+          data.description.slice(0, 100) + '...' : data.description;
+        summary += `📝 *Description:* ${shortDesc}\n`;
+      }
+      if (data.experience) summary += `⭐ *Experience:* ${data.experience}\n`;
+      if (data.rate) summary += `💰 *Rate:* ${data.rate}\n`;
+      if (data.availability) summary += `⏰ *Available:* ${data.availability}\n`;
       } else if (category === 'vehicle') {
         if (data.vehicleType) summary += `🚗 Type: ${data.vehicleType}\n`;
         if (data.brand) summary += `🏷️ Brand: ${data.brand}\n`;
