@@ -1,4 +1,4 @@
-// File: /services/posting-service.js
+// File: /services/posting-service.js - COMPLETELY FIXED VERSION
 const admin = require('firebase-admin');
 const SessionManager = require('../../database/session-manager');
 const DraftManager = require('../../database/draft-manager');
@@ -146,8 +146,85 @@ function loadIntentClassifier() {
           }
           
           const serviceTypes = [
-            'electrician', 'plumber', 'cook', 'maid', 'cleaner', 'driver', 
-            'tutor', 'carpenter', 'painter', 'technician', 'mechanic'
+            // Core home services
+            'electrician',
+            'plumber',
+            'carpenter',
+            'painter',
+            'mason',
+            'welder',
+            'fitter',
+            'mechanic',
+            'technician',
+            'repair',
+            'installer',
+            'fabricator',
+            
+            // Domestic help
+            'maid',
+            'cook',
+            'cleaner',
+            'helper',
+            'assistant',
+            'babysitter',
+            'caretaker',
+            'ayah',
+            'househelp',
+            
+            // Driving & transport
+            'driver',
+            'delivery',
+            'loader',
+            'packer',
+            'mover',
+            
+            // Construction & labour
+            'contractor',
+            'labour',
+            'worker',
+            'construction',
+            'siteworker',
+            'operator',
+            'supervisor',
+            
+            // Appliance & home tech
+            'ac technician',
+            'refrigerator repair',
+            'washing machine repair',
+            'tv repair',
+            'ro service',
+            'geyser repair',
+            'cctv installer',
+            'internet technician',
+            
+            // Furniture & fittings
+            'furniture repair',
+            'sofa repair',
+            'polish worker',
+            'modular kitchen installer',
+            'false ceiling worker',
+            
+            // Cleaning & maintenance
+            'deep cleaning',
+            'pest control',
+            'water tank cleaning',
+            'drain cleaning',
+            
+            // Exterior & misc
+            'gardener',
+            'mali',
+            'security guard',
+            'watchman',
+            
+            // Education / personal
+            'tutor',
+            'home tutor',
+            
+            // Local generic (VERY IMPORTANT for search matching)
+            'local service',
+            'local help',
+            'home service',
+            'nearby service'
           ];
           
           for (const service of serviceTypes) {
@@ -274,7 +351,8 @@ class PostingService {
       'i\'m', 'i am', 'available for', 'provide', 'professional',
       'experienced', 'for hire', 'for rent', 'selling',
       'mai', 'main', 'mein', 'hun', 'hoon', // Hindi: I am
-      'deta', 'deti', 'dete', 'deti hoon', 'deta hoon' // Hindi: provide
+      'deta', 'deti', 'dete', 'deti hoon', 'deta hoon', // Hindi: provide
+      'mason', 'worker', 'labour', 'contractor' // ADDED: Construction keywords
     ];
     
     const hasKeyword = postingKeywords.some(keyword => lowerMsg.includes(keyword));
@@ -389,6 +467,7 @@ class PostingService {
   async startNewPosting(message, intentResult = null) {
     try {
       console.log("📝 [POSTING SERVICE] Starting new posting");
+      console.log("📝 [POSTING SERVICE] Message:", message);
       
       // Use intent classifier if result not provided
       if (!intentResult) {
@@ -407,7 +486,18 @@ class PostingService {
       }
       
       // Determine category from message using intent classifier
-      const category = this.detectCategoryFromIntent(intentResult, message);
+      let category = this.detectCategoryFromIntent(intentResult, message);
+      
+      // If no category from intent, try direct detection
+      if (!category) {
+        category = this.detectCategory(message);
+      }
+      
+      // If still no category but user is offering something
+      if (!category && (intentResult.context === 'offer' || this.isUserOfferingServices(message))) {
+        category = 'urban_help'; // Default for service offers
+      }
+      
       console.log(`📝 [POSTING SERVICE] Determined category: ${category}`);
       
       if (!category) {
@@ -502,41 +592,45 @@ class PostingService {
     const lower = text.toLowerCase();
     
     const offeringPatterns = [
-      /i('?m| am) (a |an )?/i,
-      /i have (a |an )?/i,
-      /i provide/i,
-      /i offer/i,
-      /available/i,
-      /looking to provide/i,
-      /i can provide/i,
-      /i do/i,
-      /i work as/i,
-      /i am available/i,
-      /contact me for/i,
-      /call me for/i,
-      /message me for/i,
-      /whatsapp me for/i,
-      /i sell/i,
-      /i am selling/i,
-      /for sale/i,
-      /available for/i,
-      /service provided/i,
-      /services available/i,
-      /hire me/i,
-      /i am expert/i,
-      /professional/i,
-      /experienced/i
+      /i('?m| am)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+(in|at|near|for|available)/i,
+      /i\s+(have|provide|offer|do|work\s+as|am\s+available|am\s+expert)/i,
+      /(available|provide|offer|sell|selling|for\s+sale|for\s+hire|service|professional|experienced)/i,
+      /(mai|main|mein)\s+(hun|hoon|hu)\s+(.+?)\s+(ka|ki|ke)/i, // Hindi patterns
+      /(karta|karti)\s+hu/i // Hindi: I do
     ];
     
-    const offeringKeywords = ["i'm", "i am", "i have", "available", "provide", "offer", "sell", "selling", "for sale", "professional", "experienced"];
+    const offeringKeywords = [
+      "i'm", "i am", "i have", "available", "provide", "offer", 
+      "sell", "selling", "for sale", "professional", "experienced",
+      "worker", "mason", "contractor", "labour", "service",
+      "charges", "rate", "price", "fee", "cost",
+      "hun", "hoon", "hu" // Hindi: am
+    ];
     
-    // Check for offering patterns
-    const hasPattern = offeringPatterns.some(pattern => pattern.test(lower));
+    // Check patterns
+    for (const pattern of offeringPatterns) {
+      if (pattern.test(lower)) {
+        console.log(`✅ Offering pattern matched: ${pattern}`);
+        return true;
+      }
+    }
     
     // Check keywords
-    const hasKeyword = offeringKeywords.some(word => lower.includes(word));
+    for (const keyword of offeringKeywords) {
+      if (lower.includes(keyword)) {
+        console.log(`✅ Offering keyword matched: ${keyword}`);
+        return true;
+      }
+    }
     
-    return hasPattern || hasKeyword;
+    // Special case: "I'm a [profession] in [location]"
+    const professionPattern = /i('?m| am)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+in\s+([^,.!?]+)/i;
+    if (professionPattern.test(lower)) {
+      console.log("✅ Profession pattern matched (I'm a [profession] in [location])");
+      return true;
+    }
+    
+    return false;
   }
 
   async extractInfoFromIntent(intentResult, message, category) {
@@ -551,18 +645,23 @@ class PostingService {
       if (entities.service_type) {
         info.serviceType = entities.service_type;
       } else if (intentResult.intent === 'service_offer' || intentResult.context === 'offer') {
-        // Try to extract from message
-        const serviceMatch = message.match(/\b(electrician|plumber|carpenter|cleaner|repair|technician|painter|mechanic|driver|maid|cook|babysitter|security|guard|tutor|teacher)\b/i);
-        if (serviceMatch) {
-          info.serviceType = serviceMatch[0].toLowerCase();
-        } else {
-          // If no specific service found, extract from "I am a [service]" pattern
-          const offeringMatch = lowerMsg.match(/i('?m| am| mai| main| mein) (a |an )?(.+?)( in| at| near|$)/i);
-          if (offeringMatch && offeringMatch[3]) {
-            info.serviceType = offeringMatch[3].trim();
+        // Try to extract from "I am a [profession]" pattern
+        const offeringMatch = lowerMsg.match(/i('?m| am| mai| main| mein)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+(in|at|near|$)/i);
+        if (offeringMatch && offeringMatch[3]) {
+          const profession = offeringMatch[3].trim();
+          // Clean up the profession text
+          const cleanedProfession = profession
+            .replace(/^\s*(a|an|the)\s+/i, '') // Remove leading articles
+            .replace(/\s+in\s+.*$/i, '') // Remove location part
+            .trim();
+          
+          if (cleanedProfession && cleanedProfession.length > 0) {
+            info.serviceType = cleanedProfession;
           } else {
             info.serviceType = 'service';
           }
+        } else {
+          info.serviceType = 'service';
         }
       }
       
@@ -753,12 +852,24 @@ class PostingService {
   detectCategory(message) {
     const lowerMsg = message.toLowerCase();
     
-    // Urban Help services
+    // EMERGENCY FIX: If message contains "I'm a" or "I am a", treat as urban help
+    if (/i('?m| am)\s+(a\s+|an\s+|)/i.test(lowerMsg)) {
+      console.log("🚨 EMERGENCY DETECTION: 'I am a' pattern detected -> Urban Help");
+      return 'urban_help';
+    }
+    
+    // Urban Help services - EXPANDED
     const urbanHelpKeywords = [
       'plumber', 'electrician', 'cleaner', 'tutor', 'maid', 'cook',
       'carpenter', 'painter', 'driver', 'technician', 'service',
       'help', 'mechanic', 'gardener', 'welder', 'repair',
-      'beautician', 'salon', 'barber', 'tailor', 'laundry'
+      'beautician', 'salon', 'barber', 'tailor', 'laundry',
+      // ADDED:
+      'mason', 'contractor', 'labour', 'worker', 'construction',
+      'fitter', 'helper', 'assistant', 'operator', 'installer',
+      'fabricator', 'handyman', 'technician', 'repairman',
+      'nurse', 'caretaker', 'security', 'guard', 'watchman',
+      'delivery', 'packer', 'mover', 'shifting', 'transport'
     ];
     
     // Housing keywords
@@ -799,49 +910,65 @@ class PostingService {
       'hiring', 'recruiting', 'opportunity', 'opening'
     ];
     
-    // Check categories in order
+    // Check categories in order with better matching
     for (const keyword of urbanHelpKeywords) {
-      if (lowerMsg.includes(keyword)) {
+      // Better matching: check if word exists (not just substring)
+      const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+      if (regex.test(lowerMsg)) {
+        console.log(`✅ Urban help keyword matched: ${keyword}`);
         return 'urban_help';
       }
     }
     
     for (const keyword of housingKeywords) {
       if (lowerMsg.includes(keyword)) {
+        console.log(`✅ Housing keyword matched: ${keyword}`);
         return 'housing';
       }
     }
     
     for (const keyword of vehicleKeywords) {
       if (lowerMsg.includes(keyword)) {
+        console.log(`✅ Vehicle keyword matched: ${keyword}`);
         return 'vehicle';
       }
     }
     
     for (const keyword of electronicsKeywords) {
       if (lowerMsg.includes(keyword)) {
+        console.log(`✅ Electronics keyword matched: ${keyword}`);
         return 'electronics';
       }
     }
     
     for (const keyword of furnitureKeywords) {
       if (lowerMsg.includes(keyword)) {
+        console.log(`✅ Furniture keyword matched: ${keyword}`);
         return 'furniture';
       }
     }
     
     for (const keyword of jobKeywords) {
       if (lowerMsg.includes(keyword)) {
+        console.log(`✅ Job keyword matched: ${keyword}`);
         return 'job';
       }
     }
     
     for (const keyword of commodityKeywords) {
       if (lowerMsg.includes(keyword)) {
+        console.log(`✅ Commodity keyword matched: ${keyword}`);
         return 'commodity';
       }
     }
     
+    // If no category found but user is offering something
+    if (this.isUserOfferingServices(lowerMsg)) {
+      console.log("✅ User is offering services but no specific category found, defaulting to urban_help");
+      return 'urban_help';
+    }
+    
+    console.log("❌ No category detected");
     return null;
   }
 
@@ -1119,121 +1246,121 @@ class PostingService {
     return number.toLocaleString('en-IN');
   }
 
-async publishListing(draft) {
-  try {
-    console.log(`📝 [POSTING SERVICE] Publishing listing from draft: ${draft.id}`);
-    
-    // ✅ Use admin from firestore.js or import it
-    const { db } = require('../../database/firestore');
-    
-    const listingId = `listing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const listingRef = db.collection('listings').doc(listingId);
-    
-    // ✅ Use db.FieldValue.serverTimestamp()
-    const listingData = {
-      id: listingId,
-      status: 'active',
-      category: draft.category,
-      subCategory: draft.data?.[draft.category]?.serviceType || 
-                  draft.data?.[draft.category]?.unitType || 
-                  draft.data?.[draft.category]?.itemType ||
-                  draft.data?.[draft.category]?.vehicleType ||
-                  draft.data?.[draft.category]?.jobPosition ||
-                  draft.category,
-      data: draft.data,
-      owner: {
-        userId: this.userId,
-        phone: this.userId
-      },
-      createdAt: db.FieldValue.serverTimestamp(), // ✅ Fixed
-      expiresAt: db.FieldValue.serverTimestamp(), // This will set current time
-      metrics: {
-        views: 0,
-        contacts: 0
-      }
-    };
-    
-    // Add 30 days for expiration
-    const expiresAtDate = new Date();
-    expiresAtDate.setDate(expiresAtDate.getDate() + 30);
-    listingData.expiresAt = expiresAtDate.getTime();
-      
-      // Add title based on category
-      if (draft.category === 'urban_help') {
-        const serviceType = draft.data?.['urban_help']?.serviceType || 'Service';
-        const location = draft.data?.location?.area || '';
-        listingData.title = `${serviceType.charAt(0).toUpperCase() + serviceType.slice(1)}${location ? ` in ${location}` : ''}`;
-      } else if (draft.category === 'housing') {
-        const unitType = draft.data?.['housing']?.unitType || 'Property';
-        const location = draft.data?.location?.area || '';
-        listingData.title = `${unitType.toUpperCase()}${location ? ` in ${location}` : ''} for Rent`;
-      } else if (draft.category === 'vehicle') {
-        const vehicleType = draft.data?.['vehicle']?.vehicleType || 'Vehicle';
-        const brand = draft.data?.['vehicle']?.brand || '';
-        listingData.title = `${brand ? brand + ' ' : ''}${vehicleType} for Sale`;
-      } else if (draft.category === 'electronics') {
-        const itemType = draft.data?.['electronics']?.itemType || 'Electronic Item';
-        const brand = draft.data?.['electronics']?.brand || '';
-        listingData.title = `${brand ? brand + ' ' : ''}${itemType} for Sale`;
-      } else if (draft.category === 'furniture') {
-        const itemType = draft.data?.['furniture']?.itemType || 'Furniture';
-        listingData.title = `${itemType} for Sale`;
-      } else if (draft.category === 'commodity') {
-        const itemName = draft.data?.['commodity']?.itemName || 'Item';
-        listingData.title = `${itemName} for Sale`;
-      } else if (draft.category === 'job') {
-        const jobPosition = draft.data?.['job']?.jobPosition || 'Job';
-        listingData.title = `${jobPosition} Position Available`;
-      }
-      
-      console.log(`📝 [POSTING SERVICE] Saving listing to Firestore:`, listingData);
-      await listingRef.set(listingData);
-      
-      // Delete draft
-      await this.draftManager.deleteDraft(draft.id);
-      
-      console.log(`📝 [POSTING SERVICE] Listing published successfully: ${listingId}`);
-      return { success: true, listingId };
-      
-    } catch (error) {
-      console.error('❌ [POSTING SERVICE] Publish Listing Error:', error);
-      return { success: false, error: error.message };
-    }
-  }
-  
-  // Helper method to clear user session
-  async clearUserSession() {
+  async publishListing(draft) {
     try {
-      await this.sessionManager.clearSession();
-      return true;
-    } catch (error) {
-      console.error('❌ [POSTING SERVICE] Error clearing session:', error);
-      return false;
-    }
-  }
-  
-  // Helper method to get current draft status
-  async getCurrentDraftStatus() {
-    try {
-      const session = await this.sessionManager.getOrCreateSession();
-      if (session.mode === 'posting' && session.draftId) {
-        const draft = await this.draftManager.getDraft(session.draftId);
-        if (draft) {
-          return {
-            hasDraft: true,
-            category: draft.category,
-            draftId: draft.id,
-            status: draft.status,
-            filledFields: draft.filledFields?.length || 0
-          };
+      console.log(`📝 [POSTING SERVICE] Publishing listing from draft: ${draft.id}`);
+      
+      // ✅ Use admin from firestore.js or import it
+      const { db } = require('../../database/firestore');
+      
+      const listingId = `listing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const listingRef = db.collection('listings').doc(listingId);
+      
+      // ✅ Use db.FieldValue.serverTimestamp()
+      const listingData = {
+        id: listingId,
+        status: 'active',
+        category: draft.category,
+        subCategory: draft.data?.[draft.category]?.serviceType || 
+                    draft.data?.[draft.category]?.unitType || 
+                    draft.data?.[draft.category]?.itemType ||
+                    draft.data?.[draft.category]?.vehicleType ||
+                    draft.data?.[draft.category]?.jobPosition ||
+                    draft.category,
+        data: draft.data,
+        owner: {
+          userId: this.userId,
+          phone: this.userId
+        },
+        createdAt: db.FieldValue.serverTimestamp(), // ✅ Fixed
+        expiresAt: db.FieldValue.serverTimestamp(), // This will set current time
+        metrics: {
+          views: 0,
+          contacts: 0
         }
+      };
+      
+      // Add 30 days for expiration
+      const expiresAtDate = new Date();
+      expiresAtDate.setDate(expiresAtDate.getDate() + 30);
+      listingData.expiresAt = expiresAtDate.getTime();
+        
+        // Add title based on category
+        if (draft.category === 'urban_help') {
+          const serviceType = draft.data?.['urban_help']?.serviceType || 'Service';
+          const location = draft.data?.location?.area || '';
+          listingData.title = `${serviceType.charAt(0).toUpperCase() + serviceType.slice(1)}${location ? ` in ${location}` : ''}`;
+        } else if (draft.category === 'housing') {
+          const unitType = draft.data?.['housing']?.unitType || 'Property';
+          const location = draft.data?.location?.area || '';
+          listingData.title = `${unitType.toUpperCase()}${location ? ` in ${location}` : ''} for Rent`;
+        } else if (draft.category === 'vehicle') {
+          const vehicleType = draft.data?.['vehicle']?.vehicleType || 'Vehicle';
+          const brand = draft.data?.['vehicle']?.brand || '';
+          listingData.title = `${brand ? brand + ' ' : ''}${vehicleType} for Sale`;
+        } else if (draft.category === 'electronics') {
+          const itemType = draft.data?.['electronics']?.itemType || 'Electronic Item';
+          const brand = draft.data?.['electronics']?.brand || '';
+          listingData.title = `${brand ? brand + ' ' : ''}${itemType} for Sale`;
+        } else if (draft.category === 'furniture') {
+          const itemType = draft.data?.['furniture']?.itemType || 'Furniture';
+          listingData.title = `${itemType} for Sale`;
+        } else if (draft.category === 'commodity') {
+          const itemName = draft.data?.['commodity']?.itemName || 'Item';
+          listingData.title = `${itemName} for Sale`;
+        } else if (draft.category === 'job') {
+          const jobPosition = draft.data?.['job']?.jobPosition || 'Job';
+          listingData.title = `${jobPosition} Position Available`;
+        }
+        
+        console.log(`📝 [POSTING SERVICE] Saving listing to Firestore:`, listingData);
+        await listingRef.set(listingData);
+        
+        // Delete draft
+        await this.draftManager.deleteDraft(draft.id);
+        
+        console.log(`📝 [POSTING SERVICE] Listing published successfully: ${listingId}`);
+        return { success: true, listingId };
+        
+      } catch (error) {
+        console.error('❌ [POSTING SERVICE] Publish Listing Error:', error);
+        return { success: false, error: error.message };
       }
-      return { hasDraft: false };
-    } catch (error) {
-      console.error('❌ [POSTING SERVICE] Error getting draft status:', error);
-      return { hasDraft: false };
     }
-  }
+    
+    // Helper method to clear user session
+    async clearUserSession() {
+      try {
+        await this.sessionManager.clearSession();
+        return true;
+      } catch (error) {
+        console.error('❌ [POSTING SERVICE] Error clearing session:', error);
+        return false;
+      }
+    }
+    
+    // Helper method to get current draft status
+    async getCurrentDraftStatus() {
+      try {
+        const session = await this.sessionManager.getOrCreateSession();
+        if (session.mode === 'posting' && session.draftId) {
+          const draft = await this.draftManager.getDraft(session.draftId);
+          if (draft) {
+            return {
+              hasDraft: true,
+              category: draft.category,
+              draftId: draft.id,
+              status: draft.status,
+              filledFields: draft.filledFields?.length || 0
+            };
+          }
+        }
+        return { hasDraft: false };
+      } catch (error) {
+        console.error('❌ [POSTING SERVICE] Error getting draft status:', error);
+        return { hasDraft: false };
+      }
+    }
 }
 
 module.exports = PostingService;
