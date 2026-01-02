@@ -111,18 +111,11 @@ try {
     console.log("✅ Posting flow module loaded");
 } catch (error) {
     console.warn("⚠️ Posting flow module not found:", error.message);
+    // Create placeholder if not needed
     postingFlowModule = {
         sendListingFlow: async (to) => {
             console.log("📝 [FLOW] Placeholder - WhatsApp Flow not implemented");
             return { data: { success: false } };
-        },
-        handleFlowCompletion: async (sender, flowData, client) => {
-            console.log("📝 [FLOW] Placeholder - flow completion not implemented");
-            return { success: false, error: "Not implemented" };
-        },
-        handleTextPosting: async (sender, message, client) => {
-            console.log("📝 [FLOW] Placeholder - text posting not implemented");
-            return false;
         }
     };
 }

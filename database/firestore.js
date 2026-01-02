@@ -945,6 +945,7 @@ async function searchCommodities(item, quantity) {
 // Export all functions
 module.exports = {
   db,
+  admin,
   // ✅ ADDED: Urban Services Functions
   searchUrbanServices,
   // Urban Help Functions

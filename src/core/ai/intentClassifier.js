@@ -1,4 +1,4 @@
-// Enhanced AI intent classifier for multiple domains
+// Enhanced AI intent classifier for multiple domains - PATCHED VERSION
 const natural = require('natural');
 const tokenizer = new natural.WordTokenizer();
 
@@ -399,137 +399,196 @@ class IntentClassifier {
   }
 
   async classify(text) {
-    const lowerText = text.toLowerCase();
-    console.log(`🤖 [AI] Classifying: "${lowerText}"`);
-    
-    // Detect intent context (offer/find)
-    const intentContext = this.detectIntentContext(lowerText);
-    
-    // Quick keyword matching for common Indian terms
-    const quickMatches = this.quickMatch(lowerText);
-    if (quickMatches.confidence > 0.8) {
-      console.log(`🤖 [AI] Quick match: ${quickMatches.intent}`);
-      if (intentContext) {
-        quickMatches.context = intentContext;
+    try {
+      const lowerText = text.toLowerCase();
+      console.log(`🤖 [AI] Classifying: "${lowerText}"`);
+      
+      // Detect intent context (offer/find) - FIXED: Added this crucial method
+      const intentContext = this.detectIntentContext(lowerText);
+      
+      // Quick keyword matching for common Indian terms
+      const quickMatches = this.quickMatch(lowerText);
+      if (quickMatches.confidence > 0.8) {
+        console.log(`🤖 [AI] Quick match: ${quickMatches.intent}`);
+        if (intentContext) {
+          quickMatches.context = intentContext;
+        }
+        return quickMatches;
       }
-      return quickMatches;
+      
+      // Use TF-IDF for more complex classification
+      const tfidfResult = await this.tfidfClassify(lowerText);
+      
+      // Extract entities based on the intent
+      const entities = this.extractEntities(lowerText, tfidfResult.intent);
+      
+      const result = {
+        intent: tfidfResult.intent,
+        confidence: tfidfResult.confidence,
+        entities: entities,
+        originalText: text,
+        language: this.detectLanguage(text),
+        isConfident: tfidfResult.confidence > this.threshold
+      };
+      
+      // Add context if detected
+      if (intentContext) {
+        result.context = intentContext;
+      }
+      
+      // Adjust intent based on context - FIXED: Use the correct method
+      if (intentContext && result.confidence > this.threshold) {
+        result.intent = this.adjustIntentByContext(result.intent, intentContext);
+      }
+      
+      // EMERGENCY FIX: If "i'm a [service] in [location]" pattern, force service_offer
+      if (lowerText.match(/i('?m| am)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+in\s+([^,.!?]+)/i)) {
+        console.log("🚨 EMERGENCY DETECTION: 'I am a [service] in [location]' pattern detected");
+        result.intent = 'service_offer';
+        result.confidence = 0.95;
+        result.isConfident = true;
+        
+        // Extract service type from pattern
+        const match = lowerText.match(/i('?m| am)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+in\s+([^,.!?]+)/i);
+        if (match && match[3]) {
+          result.entities.service_type = match[3].trim();
+        }
+        
+        // Extract location
+        if (match && match[4]) {
+          result.entities.location = match[4].trim();
+        }
+      }
+      
+      console.log(`🤖 [AI] Classification result:`, {
+        intent: result.intent,
+        confidence: result.confidence,
+        context: result.context,
+        entities: result.entities
+      });
+      
+      return result;
+      
+    } catch (error) {
+      console.error("❌ [AI] Error in classify:", error);
+      // Return fallback result
+      return {
+        intent: 'general_help',
+        confidence: 0.1,
+        entities: {},
+        originalText: text,
+        isConfident: false,
+        context: null
+      };
     }
-    
-    // Use TF-IDF for more complex classification
-    const tfidfResult = await this.tfidfClassify(lowerText);
-    
-    // Extract entities based on the intent
-    const entities = this.extractEntities(lowerText, tfidfResult.intent);
-    
-    const result = {
-      intent: tfidfResult.intent,
-      confidence: tfidfResult.confidence,
-      entities: entities,
-      originalText: text,
-      language: this.detectLanguage(text),
-      isConfident: tfidfResult.confidence > this.threshold
-    };
-    
-    // Add context if detected
-    if (intentContext) {
-      result.context = intentContext;
-    }
-    
-    // Adjust intent based on context
-    if (intentContext && result.confidence > this.threshold) {
-      result.intent = this.adjustIntentByContext(result.intent, intentContext);
-    }
-    
-    return result;
   }
 
-  // Detect if user is offering or looking for something
+  // Detect if user is offering or looking for something - ENHANCED VERSION
   detectIntentContext(text) {
     const lower = text.toLowerCase();
     
-    // OFFERING patterns (I am/I'm/I have)
+    // OFFERING patterns (I am/I'm/I have) - EXPANDED
     const offeringPatterns = [
-      /i('?m| am) (a |an )?/i,
-      /i have (a |an )?/i,
-      /i provide/i,
-      /i offer/i,
-      /available/i,
-      /looking to provide/i,
-      /i can provide/i,
-      /i do/i,
-      /i work as/i,
-      /i am available/i,
-      /contact me for/i,
-      /call me for/i,
-      /message me for/i,
-      /whatsapp me for/i,
-      /i sell/i,
-      /i am selling/i,
-      /for sale/i,
-      /available for/i,
-      /service provided/i,
-      /services available/i,
-      /hire me/i,
-      /i am expert/i,
+      /i('?m| am)\s+(a\s+|an\s+|)/i,
+      /i\s+have\s+(a\s+|an\s+|)/i,
+      /i\s+provide/i,
+      /i\s+offer/i,
+      /available\s+(for|as)/i,
+      /looking\s+to\s+provide/i,
+      /i\s+can\s+provide/i,
+      /i\s+do\s+/i,
+      /i\s+work\s+as/i,
+      /i\s+am\s+available/i,
+      /contact\s+me\s+for/i,
+      /call\s+me\s+for/i,
+      /message\s+me\s+for/i,
+      /whatsapp\s+me\s+for/i,
+      /i\s+sell/i,
+      /i\s+am\s+selling/i,
+      /for\s+sale/i,
+      /available\s+for/i,
+      /service\s+provided/i,
+      /services\s+available/i,
+      /hire\s+me/i,
+      /i\s+am\s+expert/i,
       /professional/i,
-      /experienced/i
+      /experienced/i,
+      /charges\s+(\d+)/i,
+      /rate\s+is/i,
+      /price\s+is/i,
+      /fee\s+is/i
     ];
     
-    // LOOKING patterns (I need/I want/looking for)
+    // LOOKING patterns (I need/I want/looking for) - EXPANDED
     const lookingPatterns = [
-      /i need/i,
-      /i want/i,
-      /looking for/i,
-      /searching for/i,
-      /find (a |an )?/i,
-      /need (a |an )?/i,
-      /want (a |an )?/i,
+      /i\s+need/i,
+      /i\s+want/i,
+      /looking\s+for/i,
+      /searching\s+for/i,
+      /find\s+(a\s+|an\s+|)/i,
+      /need\s+(a\s+|an\s+|)/i,
+      /want\s+(a\s+|an\s+|)/i,
       /require/i,
-      /require (a |an )?/i,
-      /i require/i,
-      /i am looking/i,
-      /i'm looking/i,
+      /require\s+(a\s+|an\s+|)/i,
+      /i\s+require/i,
+      /i\s+am\s+looking/i,
+      /i'm\s+looking/i,
       /searching/i,
-      /find me/i,
-      /show me/i,
-      /give me/i,
-      /get me/i,
-      /help me find/i,
-      /where can i find/i,
-      /how to get/i,
-      /where to get/i,
-      /i am in need/i,
-      /i need help finding/i,
-      /i want to buy/i,
-      /i want to purchase/i,
-      /i want to hire/i,
-      /i want to book/i,
-      /need to hire/i,
-      /want to hire/i,
-      /looking to hire/i,
-      /need to buy/i,
-      /want to buy/i,
-      /looking to buy/i
+      /find\s+me/i,
+      /show\s+me/i,
+      /give\s+me/i,
+      /get\s+me/i,
+      /help\s+me\s+find/i,
+      /where\s+can\s+i\s+find/i,
+      /how\s+to\s+get/i,
+      /where\s+to\s+get/i,
+      /i\s+am\s+in\s+need/i,
+      /i\s+need\s+help\s+finding/i,
+      /i\s+want\s+to\s+buy/i,
+      /i\s+want\s+to\s+purchase/i,
+      /i\s+want\s+to\s+hire/i,
+      /i\s+want\s+to\s+book/i,
+      /need\s+to\s+hire/i,
+      /want\s+to\s+hire/i,
+      /looking\s+to\s+hire/i,
+      /need\s+to\s+buy/i,
+      /want\s+to\s+buy/i,
+      /looking\s+to\s+buy/i,
+      /chahiye/i,
+      /chaahiye/i,
+      /chahie/i
     ];
     
-    if (offeringPatterns.some(pattern => pattern.test(lower))) {
-      return 'offer'; // User is offering services/goods
+    // Check offering patterns first
+    for (const pattern of offeringPatterns) {
+      if (pattern.test(lower)) {
+        console.log(`✅ Offering pattern matched: ${pattern}`);
+        return 'offer';
+      }
     }
     
-    if (lookingPatterns.some(pattern => pattern.test(lower))) {
-      return 'find'; // User is looking for services/goods
+    // Check looking patterns
+    for (const pattern of lookingPatterns) {
+      if (pattern.test(lower)) {
+        console.log(`✅ Looking pattern matched: ${pattern}`);
+        return 'find';
+      }
     }
     
     // Default based on other clues
     if (lower.includes('hire') || lower.includes('book') || lower.includes('require') || 
         lower.includes('buy') || lower.includes('purchase') || lower.includes('rent') ||
-        lower.includes('want') || lower.includes('need') || lower.includes('looking')) {
+        lower.includes('want') || lower.includes('need') || lower.includes('looking') ||
+        lower.includes('chahiye') || lower.includes('chaahiye') || lower.includes('chahie')) {
       return 'find';
     }
     
     if (lower.includes('available') || lower.includes('contact me') || lower.includes('call me') ||
         lower.includes('sell') || lower.includes('sale') || lower.includes('provide') ||
-        lower.includes('offer') || lower.includes('service') || lower.includes('work')) {
+        lower.includes('offer') || lower.includes('service') || lower.includes('work') ||
+        lower.includes('charges') || lower.includes('rate') || lower.includes('price') ||
+        lower.includes('fee') || lower.includes('i\'m') || lower.includes('i am') ||
+        lower.includes('hun') || lower.includes('hoon') || lower.includes('hu')) {
       return 'offer';
     }
     
@@ -540,10 +599,9 @@ class IntentClassifier {
   adjustIntentByContext(intent, context) {
     const intentMapping = {
       'property_search': context === 'offer' ? 'property_sale' : 'property_search',
-      'property_rent': context === 'offer' ? 'property_rent_offer' : 'property_rent',
+      'property_rent': context === 'offer' ? 'property_rent' : 'property_rent', // Keep same for urban context
       'service_request': context === 'offer' ? 'service_offer' : 'service_request',
       'commodity_search': context === 'offer' ? 'commodity_sell' : 'commodity_search',
-      'buy_sell': context === 'offer' ? 'vehicle_sell' : 'vehicle_buy',
       'vehicle_buy': context === 'offer' ? 'vehicle_sell' : 'vehicle_buy',
       'electronics_buy': context === 'offer' ? 'electronics_sell' : 'electronics_buy',
       'furniture_buy': context === 'offer' ? 'furniture_sell' : 'furniture_buy',
@@ -650,245 +708,298 @@ class IntentClassifier {
   }
 
   async tfidfClassify(text) {
-    const scores = {};
-    
-    // Initialize scores
-    Object.keys(this.trainingData).forEach(intent => {
-      scores[intent] = 0;
-    });
+    try {
+      const scores = {};
+      
+      // Initialize scores
+      Object.keys(this.trainingData).forEach(intent => {
+        scores[intent] = 0;
+      });
 
-    // Calculate TF-IDF scores
-    const tokens = tokenizer.tokenize(text);
-    tokens.forEach(token => {
-      this.tfidf.tfidfs(token, (i, measure) => {
-        const intent = this.tfidf.documents[i].__categories;
-        if (intent && scores[intent] !== undefined) {
-          scores[intent] += measure;
+      // Calculate TF-IDF scores
+      const tokens = tokenizer.tokenize(text);
+      
+      // If no tokens, return default
+      if (tokens.length === 0) {
+        return {
+          intent: 'general_help',
+          confidence: 0.1,
+          isConfident: false
+        };
+      }
+      
+      tokens.forEach(token => {
+        this.tfidf.tfidfs(token, (i, measure) => {
+          const intent = this.tfidf.documents[i].__categories;
+          if (intent && scores[intent] !== undefined) {
+            scores[intent] += measure;
+          }
+        });
+      });
+
+      // Find best match
+      let bestIntent = 'general_help';
+      let bestScore = 0;
+      let secondBestIntent = 'general_help';
+      let secondBestScore = 0;
+      
+      Object.entries(scores).forEach(([intent, score]) => {
+        if (score > bestScore) {
+          secondBestScore = bestScore;
+          secondBestIntent = bestIntent;
+          bestScore = score;
+          bestIntent = intent;
+        } else if (score > secondBestScore) {
+          secondBestScore = score;
+          secondBestIntent = intent;
         }
       });
-    });
 
-    // Find best match
-    let bestIntent = 'general_help';
-    let bestScore = 0;
-    let secondBestIntent = 'general_help';
-    let secondBestScore = 0;
-    
-    Object.entries(scores).forEach(([intent, score]) => {
-      if (score > bestScore) {
-        secondBestScore = bestScore;
-        secondBestIntent = bestIntent;
-        bestScore = score;
-        bestIntent = intent;
-      } else if (score > secondBestScore) {
-        secondBestScore = score;
-        secondBestIntent = intent;
+      // Calculate normalized confidence
+      const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
+      const confidence = totalScore > 0 ? bestScore / totalScore : 0;
+      
+      // Special handling for service offer detection
+      if (text.includes("i'm") || text.includes("i am")) {
+        const serviceTypes = [
+          'electrician', 'plumber', 'carpenter', 'painter', 'mason', 
+          'welder', 'fitter', 'mechanic', 'technician', 'repair',
+          'installer', 'fabricator', 'maid', 'cook', 'cleaner',
+          'helper', 'assistant', 'babysitter', 'caretaker', 'driver',
+          'delivery', 'packer', 'mover', 'construction', 'labour',
+          'worker', 'contractor', 'siteworker', 'operator', 'supervisor',
+          'gardener', 'security', 'guard', 'watchman', 'tutor', 'teacher'
+        ];
+        
+        for (const service of serviceTypes) {
+          if (text.includes(service)) {
+            bestIntent = 'service_offer';
+            confidence = 0.95;
+            break;
+          }
+        }
       }
-    });
-
-    // Calculate normalized confidence
-    const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
-    const confidence = totalScore > 0 ? bestScore / totalScore : 0;
-    
-    // If confidence is low but second best is close, return both
-    const result = {
-      intent: bestIntent,
-      confidence: confidence,
-      isConfident: confidence > this.threshold
-    };
-    
-    // If second best is close, include it for context
-    if (secondBestScore > 0 && (bestScore - secondBestScore) < 0.5) {
-      result.alternativeIntents = [
-        { intent: bestIntent, score: bestScore },
-        { intent: secondBestIntent, score: secondBestScore }
-      ];
+      
+      const result = {
+        intent: bestIntent,
+        confidence: confidence,
+        isConfident: confidence > this.threshold
+      };
+      
+      // If second best is close, include it for context
+      if (secondBestScore > 0 && (bestScore - secondBestScore) < 0.5) {
+        result.alternativeIntents = [
+          { intent: bestIntent, score: bestScore },
+          { intent: secondBestIntent, score: secondBestScore }
+        ];
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error("❌ [AI] Error in tfidfClassify:", error);
+      return {
+        intent: 'general_help',
+        confidence: 0.1,
+        isConfident: false
+      };
     }
-    
-    return result;
   }
 
   extractEntities(text, intent) {
-    const patterns = this.getEntityPatterns();
-    const entities = {};
-    
-    // Common entities for all intents
-    const commonPatterns = {
-      location: /\b(?:in|at|near|around|mein|me|main|ke paas|pass|ke nazdeek)\s+([a-z\s]+?)(?:\s+(?:sector|area|colony|nagar|vihar|enclave|road|marg|street))?\b/i,
-      quantity: /\b(\d+(?:\.\d+)?)\s*(?:ton|kg|bhk|bedroom|room|piece|unit|liter|ltr|meter|mtr|sqft|sq ft)\b/i,
-      price: /\b(?:rs\.?|₹|rupees|price|cost|daam|kimat)\s*(\d+[,\d]*\s*(?:lakh|lac|crore|cr|thousand|k|hajar)?)\b/i,
-      contact: /\b(\d{10})\b|\b(?:phone|mobile|contact)\s+(?:number|no)?\s*[:\-]?\s*(\d{10})\b/i
-    };
-    
-    // Extract common entities
-    Object.entries(commonPatterns).forEach(([type, pattern]) => {
-      const matches = text.match(new RegExp(pattern, 'gi'));
-      if (matches) {
-        entities[type] = matches.map(match => 
-          match.replace(/(?:rs\.?|₹|rupees|price|cost|daam|kimat)\s*/gi, '').trim()
-        );
-        if (entities[type].length === 1) {
-          entities[type] = entities[type][0];
+    try {
+      const patterns = this.getEntityPatterns();
+      const entities = {};
+      
+      // Common entities for all intents
+      const commonPatterns = {
+        location: /\b(?:in|at|near|around|mein|me|main|ke paas|pass|ke nazdeek)\s+([a-z\s]+?)(?:\s+(?:sector|area|colony|nagar|vihar|enclave|road|marg|street))?\b/i,
+        quantity: /\b(\d+(?:\.\d+)?)\s*(?:ton|kg|bhk|bedroom|room|piece|unit|liter|ltr|meter|mtr|sqft|sq ft)\b/i,
+        price: /\b(?:rs\.?|₹|rupees|price|cost|daam|kimat)\s*(\d+[,\d]*\s*(?:lakh|lac|crore|cr|thousand|k|hajar)?)\b/i,
+        contact: /\b(\d{10})\b|\b(?:phone|mobile|contact)\s+(?:number|no)?\s*[:\-]?\s*(\d{10})\b/i
+      };
+      
+      // Extract common entities
+      Object.entries(commonPatterns).forEach(([type, pattern]) => {
+        const matches = text.match(new RegExp(pattern, 'gi'));
+        if (matches) {
+          entities[type] = matches.map(match => 
+            match.replace(/(?:rs\.?|₹|rupees|price|cost|daam|kimat)\s*/gi, '').trim()
+          );
+          if (entities[type].length === 1) {
+            entities[type] = entities[type][0];
+          }
         }
-      }
-    });
+      });
 
-    // Extract intent-specific entities
-    switch(intent) {
-      case 'property_search':
-      case 'property_rent':
-      case 'property_sale':
-        Object.entries(patterns.property).forEach(([type, pattern]) => {
-          const match = text.match(pattern);
-          if (match) {
-            entities[type] = match[1] || match[0];
+      // Extract intent-specific entities
+      switch(intent) {
+        case 'property_search':
+        case 'property_rent':
+        case 'property_sale':
+          Object.entries(patterns.property).forEach(([type, pattern]) => {
+            const match = text.match(pattern);
+            if (match) {
+              entities[type] = match[1] || match[0];
+            }
+          });
+          
+          // Special handling for Indian locations
+          const locationMatch = text.match(/\b(noida|delhi|gurgaon|greater noida|noida extension|sector \d+|mumbai|bangalore|chennai|hyderabad|pune|kolkata|jaipur|ahmedabad|lucknow|indore|bhopal|patna)\b/i);
+          if (locationMatch && !entities.location) {
+            entities.location = locationMatch[0];
           }
-        });
-        
-        // Special handling for Indian locations
-        const locationMatch = text.match(/\b(noida|delhi|gurgaon|greater noida|noida extension|sector \d+|mumbai|bangalore|chennai|hyderabad|pune|kolkata|jaipur|ahmedabad|lucknow|indore|bhopal|patna)\b/i);
-        if (locationMatch && !entities.location) {
-          entities.location = locationMatch[0];
-        }
-        break;
-        
-      case 'service_request':
-      case 'service_offer':
-        Object.entries(patterns.service).forEach(([type, pattern]) => {
-          const match = text.match(pattern);
-          if (match) {
-            entities[type] = match[1] || match[0];
+          break;
+          
+        case 'service_request':
+        case 'service_offer':
+          Object.entries(patterns.service).forEach(([type, pattern]) => {
+            const match = text.match(pattern);
+            if (match) {
+              entities[type] = match[1] || match[0];
+            }
+          });
+          
+          // Special extraction for "I am a [service]"
+          const servicePattern = /i('?m| am)\s+(a\s+|an\s+|)\s*([^,.!?]+?)(?:\s+in|\s+at|$)/i;
+          const serviceMatch = text.match(servicePattern);
+          if (serviceMatch && serviceMatch[3] && !entities.service_type) {
+            entities.service_type = serviceMatch[3].trim();
           }
-        });
-        break;
-        
-      case 'commodity_search':
-      case 'commodity_sell':
-        Object.entries(patterns.commodity).forEach(([type, pattern]) => {
-          const match = text.match(pattern);
-          if (match) {
-            entities[type] = match[1] || match[0];
+          break;
+          
+        case 'commodity_search':
+        case 'commodity_sell':
+          Object.entries(patterns.commodity).forEach(([type, pattern]) => {
+            const match = text.match(pattern);
+            if (match) {
+              entities[type] = match[1] || match[0];
+            }
+          });
+          break;
+          
+        case 'vehicle_buy':
+        case 'vehicle_sell':
+          Object.entries(patterns.vehicle).forEach(([type, pattern]) => {
+            const match = text.match(pattern);
+            if (match) {
+              entities[type] = match[1] || match[0];
+            }
+          });
+          
+          // Extract buy/sell keywords
+          if (text.includes('sell') || text.includes('bech') || text.includes('bikri') || 
+              text.includes('sale') || text.includes('bikau')) {
+            entities.action = 'sell';
+          } else if (text.includes('buy') || text.includes('kharid') || 
+                    text.includes('purchase') || text.includes('khareed')) {
+            entities.action = 'buy';
           }
-        });
-        break;
-        
-      case 'vehicle_buy':
-      case 'vehicle_sell':
-        Object.entries(patterns.vehicle).forEach(([type, pattern]) => {
-          const match = text.match(pattern);
-          if (match) {
-            entities[type] = match[1] || match[0];
+          break;
+          
+        case 'electronics_buy':
+        case 'electronics_sell':
+          Object.entries(patterns.electronics).forEach(([type, pattern]) => {
+            const match = text.match(pattern);
+            if (match) {
+              entities[type] = match[1] || match[0];
+            }
+          });
+          break;
+          
+        case 'furniture_buy':
+        case 'furniture_sell':
+          Object.entries(patterns.furniture).forEach(([type, pattern]) => {
+            const match = text.match(pattern);
+            if (match) {
+              entities[type] = match[1] || match[0];
+            }
+          });
+          break;
+          
+        case 'job_search':
+        case 'job_offer':
+          Object.entries(patterns.job).forEach(([type, pattern]) => {
+            const match = text.match(pattern);
+            if (match) {
+              entities[type] = match[1] || match[0];
+            }
+          });
+          break;
+          
+        case 'health':
+          // Extract health-related entities
+          const healthTypes = text.match(/\b(doctor|hospital|clinic|ambulance|medicine|pharmacy|chemist|dawai|daktar|aspatal)\b/i);
+          if (healthTypes) {
+            entities.health_type = healthTypes[0];
           }
-        });
-        
-        // Extract buy/sell keywords
-        if (text.includes('sell') || text.includes('bech') || text.includes('bikri') || 
-            text.includes('sale') || text.includes('bikau')) {
-          entities.action = 'sell';
-        } else if (text.includes('buy') || text.includes('kharid') || 
-                   text.includes('purchase') || text.includes('khareed')) {
-          entities.action = 'buy';
-        }
-        break;
-        
-      case 'electronics_buy':
-      case 'electronics_sell':
-        Object.entries(patterns.electronics).forEach(([type, pattern]) => {
-          const match = text.match(pattern);
-          if (match) {
-            entities[type] = match[1] || match[0];
+          break;
+          
+        case 'education':
+          // Extract education-related entities
+          const eduTypes = text.match(/\b(tuition|coaching|classes|course|training|teacher|tutor|adhyapak|shiksha|padhai)\b/i);
+          if (eduTypes) {
+            entities.education_type = eduTypes[0];
           }
-        });
-        break;
-        
-      case 'furniture_buy':
-      case 'furniture_sell':
-        Object.entries(patterns.furniture).forEach(([type, pattern]) => {
-          const match = text.match(pattern);
-          if (match) {
-            entities[type] = match[1] || match[0];
+          
+          const subjects = text.match(/\b(english|math|science|physics|chemistry|biology|computer|programming|music|dance|yoga|art|drawing)\b/i);
+          if (subjects) {
+            entities.subject = subjects[0];
           }
-        });
-        break;
-        
-      case 'job_search':
-      case 'job_offer':
-        Object.entries(patterns.job).forEach(([type, pattern]) => {
-          const match = text.match(pattern);
-          if (match) {
-            entities[type] = match[1] || match[0];
+          break;
+          
+        case 'events':
+          // Extract event-related entities
+          const eventTypes = text.match(/\b(wedding|marriage|birthday|party|function|event|ceremony|reception|engagement)\b/i);
+          if (eventTypes) {
+            entities.event_type = eventTypes[0];
           }
-        });
-        break;
-        
-      case 'health':
-        // Extract health-related entities
-        const healthTypes = text.match(/\b(doctor|hospital|clinic|ambulance|medicine|pharmacy|chemist|dawai|daktar|aspatal)\b/i);
-        if (healthTypes) {
-          entities.health_type = healthTypes[0];
-        }
-        break;
-        
-      case 'education':
-        // Extract education-related entities
-        const eduTypes = text.match(/\b(tuition|coaching|classes|course|training|teacher|tutor|adhyapak|shiksha|padhai)\b/i);
-        if (eduTypes) {
-          entities.education_type = eduTypes[0];
-        }
-        
-        const subjects = text.match(/\b(english|math|science|physics|chemistry|biology|computer|programming|music|dance|yoga|art|drawing)\b/i);
-        if (subjects) {
-          entities.subject = subjects[0];
-        }
-        break;
-        
-      case 'events':
-        // Extract event-related entities
-        const eventTypes = text.match(/\b(wedding|marriage|birthday|party|function|event|ceremony|reception|engagement)\b/i);
-        if (eventTypes) {
-          entities.event_type = eventTypes[0];
-        }
-        
-        const services = text.match(/\b(caterer|photographer|decorator|dj|makeup|artist|planner|venue|banquet)\b/i);
-        if (services) {
-          entities.event_service = services[0];
-        }
-        break;
-    }
-    
-    // Extract person-related entities for relevant intents
-    if (intent.includes('service') || intent.includes('job')) {
-      Object.entries(patterns.person).forEach(([type, pattern]) => {
-        const match = text.match(pattern);
-        if (match) {
-          entities[type] = match[1] || match[0];
-        }
-      });
-    }
-    
-    // Extract time-related entities for booking/request intents
-    if (intent.includes('request') || intent.includes('booking') || 
-        intent.includes('service') || intent.includes('appointment')) {
-      Object.entries(patterns.time).forEach(([type, pattern]) => {
-        const match = text.match(pattern);
-        if (match) {
-          entities[type] = match[1] || match[0];
-        }
-      });
-    }
-    
-    // Clean up entities
-    Object.keys(entities).forEach(key => {
-      if (entities[key]) {
-        if (Array.isArray(entities[key])) {
-          entities[key] = entities[key].map(item => item.toString().trim());
-        } else {
-          entities[key] = entities[key].toString().trim();
-        }
+          
+          const services = text.match(/\b(caterer|photographer|decorator|dj|makeup|artist|planner|venue|banquet)\b/i);
+          if (services) {
+            entities.event_service = services[0];
+          }
+          break;
       }
-    });
-    
-    return entities;
+      
+      // Extract person-related entities for relevant intents
+      if (intent.includes('service') || intent.includes('job')) {
+        Object.entries(patterns.person).forEach(([type, pattern]) => {
+          const match = text.match(pattern);
+          if (match) {
+            entities[type] = match[1] || match[0];
+          }
+        });
+      }
+      
+      // Extract time-related entities for booking/request intents
+      if (intent.includes('request') || intent.includes('booking') || 
+          intent.includes('service') || intent.includes('appointment')) {
+        Object.entries(patterns.time).forEach(([type, pattern]) => {
+          const match = text.match(pattern);
+          if (match) {
+            entities[type] = match[1] || match[0];
+          }
+        });
+      }
+      
+      // Clean up entities
+      Object.keys(entities).forEach(key => {
+        if (entities[key]) {
+          if (Array.isArray(entities[key])) {
+            entities[key] = entities[key].map(item => item.toString().trim());
+          } else {
+            entities[key] = entities[key].toString().trim();
+          }
+        }
+      });
+      
+      return entities;
+      
+    } catch (error) {
+      console.error("❌ [AI] Error in extractEntities:", error);
+      return {};
+    }
   }
 
   detectLanguage(text) {
@@ -1038,4 +1149,5 @@ class IntentClassifier {
   }
 }
 
+// ✅ FIX: Make sure this export is correct
 module.exports = new IntentClassifier();
