@@ -3130,6 +3130,8 @@ What would you like to do with this saved listing?`;
     }
     
     if (msg.startsWith("VIEW_DETAILS_")) {
+        const index = parseInt(msg.replace('VIEW_DETAILS_', ''));
+  const targetListing = listingData?.listings?.[index];
       console.log("📄 View details button clicked");
       await sendMessageWithClient(
         sender, 

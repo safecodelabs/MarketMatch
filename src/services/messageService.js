@@ -294,44 +294,44 @@ async function sendSimpleText(to, text) {
 // 7) SEND LISTING CARD (Uses sendButtons) - UPDATED VERSION
 // -------------------------------------------------------------
 async function sendListingCard(to, listing, currentIndex, totalCount) {
-    console.log("🔄 [MESSAGE SERVICE] sendListingCard called");
-    console.log("📊 Listing metadata:", { 
-        currentIndex, 
-        totalCount,
-        listingId: listing.id,
-        hasTitle: !!listing.title,
-        hasLocation: !!listing.location 
-    });
+  console.log("🔄 [MESSAGE SERVICE] sendListingCard called");
+  console.log("📊 Listing metadata:", { 
+    currentIndex, 
+    totalCount,
+    listingId: listing.id,
+    hasTitle: !!listing.title,
+    hasLocation: !!listing.location 
+  });
+  
+  try {
+    // 1. Clean and validate the listing ID
+    const originalId = String(listing.id || 'unknown');
+    const listingId = originalId.replace(/[^a-zA-Z0-9_-]/g, '_');
     
-    try {
-        // 1. Clean and validate the listing ID
-        const originalId = String(listing.id || 'unknown');
-        const listingId = originalId.replace(/[^a-zA-Z0-9_-]/g, '_');
-        
-        console.log(`🔧 Listing ID: "${originalId}" → "${listingId}"`);
-        
-        // 2. Prepare display values
-        const listingTitle = cleanString(listing.title || listing.property_type || 'Property', 40);
-        const listingLocation = cleanString(listing.location || 'Location not specified', 40);
-        const listingPrice = listing.price 
-            ? `₹${Number(listing.price).toLocaleString('en-IN')}` 
-            : 'Price on request';
-        const listingBedrooms = listing.bedrooms || listing.bhk || 'N/A';
-        const listingType = listing.property_type || listing.type || 'Property';
-        const listingContact = listing.contact || 'Contact not provided';
-        const listingDescription = listing.description || 'No description available';
+    console.log(`🔧 Listing ID: "${originalId}" → "${listingId}"`);
+    
+    // 2. Prepare display values
+    const listingTitle = cleanString(listing.title || listing.property_type || 'Property', 40);
+    const listingLocation = cleanString(listing.location || 'Location not specified', 40);
+    const listingPrice = listing.price 
+      ? `₹${Number(listing.price).toLocaleString('en-IN')}` 
+      : 'Price on request';
+    const listingBedrooms = listing.bedrooms || listing.bhk || 'N/A';
+    const listingType = listing.property_type || listing.type || 'Property';
+    const listingContact = listing.contact || 'Contact not provided';
+    const listingDescription = listing.description || 'No description available';
 
-        console.log("🎨 Formatted listing:", {
-            title: listingTitle,
-            location: listingLocation,
-            price: listingPrice,
-            bedrooms: listingBedrooms,
-            type: listingType,
-            contact: listingContact
-        });
+    console.log("🎨 Formatted listing:", {
+      title: listingTitle,
+      location: listingLocation,
+      price: listingPrice,
+      bedrooms: listingBedrooms,
+      type: listingType,
+      contact: listingContact
+    });
 
-        // 3. Construct the message body
-        const bodyText = 
+    // 3. Construct the message body
+    const bodyText = 
 `🏡 *Listing ${currentIndex + 1} of ${totalCount}*
 
 *${listingTitle}*
@@ -341,51 +341,51 @@ async function sendListingCard(to, listing, currentIndex, totalCount) {
 
 Tap a button below to interact.`;
 
-        console.log(`📝 Body text length: ${bodyText.length}/1024`);
+    console.log(`📝 Body text length: ${bodyText.length}/1024`);
 
-        // 4. Construct buttons - MATCHING CONTROLLER'S EXPECTED IDs
-        const buttons = [
-            { 
-                id: `VIEW_DETAILS_${listingId.slice(0, 20)}`, 
-                title: "📄 View Details" 
-            },
-            { 
-                id: `SAVE_LISTING_${listingId.slice(0, 20)}`, 
-                title: "❤️ Save" 
-            },
-            { 
-                id: "NEXT_LISTING", 
-                title: "⏭️ Next" 
-            },
-        ];
+    // 4. Construct buttons - MATCHING CONTROLLER'S EXPECTED IDs
+const buttons = [
+  { 
+    id: `VIEW_DETAILS_${currentIndex}`, 
+    title: "📄 View Details" 
+  },
+  { 
+    id: `SAVE_LISTING_${currentIndex}`, 
+    title: "❤️ Save" 
+  },
+  { 
+    id: "NEXT_LISTING", 
+    title: "⏭️ Next" 
+  },
+];
 
-        console.log("🔘 Prepared buttons:", buttons.map(b => ({ id: b.id, title: b.title })));
+    console.log("🔘 Prepared buttons:", buttons.map(b => ({ id: b.id, title: b.title })));
 
-        // 5. Prepare header (CLEANED - NO MARKDOWN)
-        let headerText = `🏡 ${listingTitle}`.slice(0, 60);
-        // Remove emojis and ensure clean header
-        headerText = headerText.replace(/[🏡📍💰🛏️]/g, '').trim();
-        if (!headerText || headerText.length === 0) {
-            headerText = 'Property Listing';
-        }
-        
-        console.log(`📋 Header: "${headerText}"`);
-        console.log("📤 Calling sendReplyButtons...");
-        
-        // 6. Send the interactive message
-        const result = await sendReplyButtons(to, bodyText, buttons, headerText);
-        
-        console.log("✅ [MESSAGE SERVICE] sendListingCard completed successfully!");
-        return result;
-        
-    } catch (error) {
-        console.error("❌ [MESSAGE SERVICE] sendListingCard ERROR:", error.message);
-        console.error("❌ Error details:", error);
-        
-        // 7. FALLBACK - Text version with Save option
-        console.log("🔄 Falling back to text message...");
-        
-        const fallbackText = 
+    // 5. Prepare header (CLEANED - NO MARKDOWN)
+    let headerText = `🏡 ${listingTitle}`.slice(0, 60);
+    // Remove emojis and ensure clean header
+    headerText = headerText.replace(/[🏡📍💰🛏️]/g, '').trim();
+    if (!headerText || headerText.length === 0) {
+      headerText = 'Property Listing';
+    }
+    
+    console.log(`📋 Header: "${headerText}"`);
+    console.log("📤 Calling sendReplyButtons...");
+    
+    // 6. Send the interactive message
+    const result = await sendReplyButtons(to, bodyText, buttons, headerText);
+    
+    console.log("✅ [MESSAGE SERVICE] sendListingCard completed successfully!");
+    return result;
+    
+  } catch (error) {
+    console.error("❌ [MESSAGE SERVICE] sendListingCard ERROR:", error.message);
+    console.error("❌ Error details:", error);
+    
+    // 7. FALLBACK - Text version with Save option
+    console.log("🔄 Falling back to text message...");
+    
+    const fallbackText = 
 `🏡 *Listing ${currentIndex + 1} of ${totalCount}*
 ${listing.title || 'Property Listing'}
 
@@ -398,35 +398,35 @@ ${listing.title || 'Property Listing'}
 • "view" - View details
 • "save" - Save this listing`;
 
-        return await sendText(to, fallbackText);
-    }
+    return await sendText(to, fallbackText);
+  }
 }
 
 // -------------------------------------------------------------
 // 8) SEND SAVED LISTING CARD (For Saved Listings view)
 // -------------------------------------------------------------
 async function sendSavedListingCard(to, listing, index, total) {
-    console.log("❤️ [MESSAGE SERVICE] sendSavedListingCard called");
+  console.log("❤️ [MESSAGE SERVICE] sendSavedListingCard called");
+  
+  try {
+    // Prepare display values
+    const listingTitle = cleanString(listing.title || listing.property_type || 'Saved Property', 40);
+    const listingLocation = cleanString(listing.location || 'Location not specified', 40);
+    const listingPrice = listing.price 
+      ? `₹${Number(listing.price).toLocaleString('en-IN')}` 
+      : 'Price on request';
+    const listingBedrooms = listing.bedrooms || listing.bhk || 'N/A';
+    const listingType = listing.property_type || listing.type || 'Property';
     
-    try {
-        // Prepare display values
-        const listingTitle = cleanString(listing.title || listing.property_type || 'Saved Property', 40);
-        const listingLocation = cleanString(listing.location || 'Location not specified', 40);
-        const listingPrice = listing.price 
-            ? `₹${Number(listing.price).toLocaleString('en-IN')}` 
-            : 'Price on request';
-        const listingBedrooms = listing.bedrooms || listing.bhk || 'N/A';
-        const listingType = listing.property_type || listing.type || 'Property';
-        
-        // Saved at timestamp if available
-        let savedInfo = '';
-        if (listing.savedAt) {
-            const savedDate = new Date(listing.savedAt);
-            const timeAgo = getTimeAgo(savedDate);
-            savedInfo = `\n📅 Saved ${timeAgo}`;
-        }
+    // Saved at timestamp if available
+    let savedInfo = '';
+    if (listing.savedAt) {
+      const savedDate = new Date(listing.savedAt);
+      const timeAgo = getTimeAgo(savedDate);
+      savedInfo = `\n📅 Saved ${timeAgo}`;
+    }
 
-        const bodyText = 
+    const bodyText = 
 `❤️ *Saved Listing ${index + 1} of ${total}*
 
 *${listingTitle}*
@@ -434,30 +434,30 @@ async function sendSavedListingCard(to, listing, index, total) {
 💰 ${listingPrice}
 🛏️ ${listingBedrooms} BHK • ${listingType}${savedInfo}`;
 
-        const buttons = [
-            { 
-                id: `view_saved_${listing.id}`, 
-                title: "📄 View Details" 
-            },
-            { 
-                id: `remove_saved_${listing.id}`, 
-                title: "🗑️ Remove" 
-            },
-            { 
-                id: "next_saved", 
-                title: "⏭️ Next" 
-            },
-        ];
+    const buttons = [
+      { 
+        id: `view_saved_${listing.id}`, 
+        title: "📄 View Details" 
+      },
+      { 
+        id: `remove_saved_${listing.id}`, 
+        title: "🗑️ Remove" 
+      },
+      { 
+        id: "next_saved", 
+        title: "⏭️ Next" 
+      },
+    ];
 
-        const headerText = '❤️ Saved Listing';
+    const headerText = '❤️ Saved Listing';
 
-        return await sendReplyButtons(to, bodyText, buttons, headerText);
-        
-    } catch (error) {
-        console.error("❌ sendSavedListingCard error:", error);
-        
-        // Fallback text
-        const fallbackText = 
+    return await sendReplyButtons(to, bodyText, buttons, headerText);
+    
+  } catch (error) {
+    console.error("❌ sendSavedListingCard error:", error);
+    
+    // Fallback text
+    const fallbackText = 
 `❤️ Saved Listing ${index + 1} of ${total}
 ${listing.title || 'Property'}
 
@@ -468,29 +468,29 @@ Reply with:
 • "view" - View details
 • "remove" - Remove from saved`;
 
-        return await sendText(to, fallbackText);
-    }
+    return await sendText(to, fallbackText);
+  }
 }
 
 // -------------------------------------------------------------
 // 9) HELPER FUNCTIONS
 // -------------------------------------------------------------
 function getTimeAgo(date) {
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffDays > 0) {
-        return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
-    } else if (diffHours > 0) {
-        return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-    } else if (diffMins > 0) {
-        return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
-    } else {
-        return 'just now';
-    }
+  if (diffDays > 0) {
+    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+  } else if (diffHours > 0) {
+    return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+  } else if (diffMins > 0) {
+    return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+  } else {
+    return 'just now';
+  }
 }
 
 // -------------------------------------------------------------
@@ -615,7 +615,40 @@ async function sendInteractiveButtonsWithClient(client, to, message, buttons) {
 }
 
 // -------------------------------------------------------------
-// 13) EXPORTS
+// 13) SEND CONFIRMATION WITH BUTTONS (for posting service)
+// -------------------------------------------------------------
+async function sendConfirmationWithButtons(to, message, confirmText = "✅ Yes, Post It", cancelText = "❌ No, Cancel") {
+  console.log("✅ [MESSAGE SERVICE] sendConfirmationWithButtons called");
+  
+  const buttons = [
+    { id: 'confirm_yes', title: confirmText },
+    { id: 'confirm_no', title: cancelText }
+  ];
+  
+  return await sendInteractiveButtons(to, message, buttons);
+}
+
+// -------------------------------------------------------------
+// 14) SEND LISTING SUMMARY (for posting flow)
+// -------------------------------------------------------------
+async function sendListingSummary(to, summary, buttons = null) {
+  console.log("📋 [MESSAGE SERVICE] sendListingSummary called");
+  
+  if (!buttons) {
+    buttons = [
+      { id: 'confirm_yes', title: '✅ Yes, Post It' },
+      { id: 'confirm_no', title: '❌ No, Cancel' },
+      { id: 'confirm_edit', title: '✏️ Edit' }
+    ];
+  }
+  
+  const message = `${summary}\n\n✅ Is this correct?`;
+  
+  return await sendInteractiveButtons(to, message, buttons);
+}
+
+// -------------------------------------------------------------
+// 15) EXPORTS
 // -------------------------------------------------------------
 module.exports = {
   sendMessage, 
@@ -630,5 +663,9 @@ module.exports = {
   // Compatibility functions
   sendInteractiveButtons,      // For voice service
   sendMessageWithClient,       // For controller compatibility
-  sendInteractiveButtonsWithClient  // For controller compatibility
+  sendInteractiveButtonsWithClient,  // For controller compatibility
+  
+  // New functions for posting flow
+  sendConfirmationWithButtons,
+  sendListingSummary
 };
