@@ -563,17 +563,16 @@ if (existingDraft) {
         shouldHandle: true
       };
     } else {
-// All required fields are already filled! Show summary with buttons
+// All required fields filled, show confirmation
 const summary = await this.generateSummary(updatedDraft);
 await this.sessionManager.updateSession({ expectedField: 'confirmation' });
 
 return {
-  type: 'confirmation_with_buttons',
+  type: 'summary_with_buttons',  // Change from 'confirmation' to 'summary_with_buttons'
   response: `${summary}\n\n✅ Is this correct?`,
   buttons: [
     { id: 'confirm_yes', title: '✅ Yes, Post It' },
-    { id: 'confirm_edit', title: '✏️ Edit Details' },
-    { id: 'confirm_no', title: '❌ Cancel' }
+    { id: 'confirm_no', title: '❌ No, Cancel' }
   ],
   shouldHandle: true
 };
@@ -829,36 +828,48 @@ async extractInfoFromIntent(intentResult, message, category) {
   }
 
 async handleConfirmation(message, draft) {
-  const lowerMsg = message.toLowerCase().trim();
-
-  if (message.button) {
-    // Handle button click
-    if (message.button.payload === 'confirm_yes') {
+  const summary = await this.generateSummary(draft);
+  
+  // Check if this is a button click
+  if (message.interactive && message.interactive.type === 'button_reply') {
+    const buttonId = message.interactive.button_reply.id;
+    
+    if (buttonId === 'confirm_yes') {
       return await this.publishAndRespond(draft);
-    } else if (message.button.payload === 'confirm_no') {
+    } else if (buttonId === 'confirm_no') {
       return await this.cancelAndRespond(draft);
-    } else if (message.button.payload === 'confirm_edit') {
+    } else if (buttonId === 'confirm_edit') {
       return await this.editAndRespond(draft);
     }
   }
   
-  // Fallback for text input (optional)
+  // If user typed "yes" in text, treat as button click
+  const lowerMsg = message.text ? message.text.toLowerCase().trim() : '';
+  
   if (this.isYesMessage(lowerMsg)) {
-    return await this.publishAndRespond(draft);
-  } else if (this.isNoMessage(lowerMsg)) {
+    // Send the summary WITH buttons first
+    return {
+      type: 'summary_with_buttons',
+      response: `${summary}\n\n✅ Is this correct?`,
+      buttons: [
+        { id: 'confirm_yes', title: '✅ Yes, Post It' },
+        { id: 'confirm_no', title: '❌ No, Cancel' }
+      ],
+      shouldHandle: true
+    };
+  }
+  
+  if (this.isNoMessage(lowerMsg)) {
     return await this.cancelAndRespond(draft);
   }
   
-  
-  // 🟢 SEND BUTTONS INSTEAD:
-  const summary = await this.generateSummary(draft);
+  // Default: Show summary with buttons (this is what happens when flow completes)
   return {
-    type: 'confirmation_with_buttons',
+    type: 'summary_with_buttons',
     response: `${summary}\n\n✅ Is this correct?`,
     buttons: [
       { id: 'confirm_yes', title: '✅ Yes, Post It' },
-      { id: 'confirm_edit', title: '✏️ Edit Details' },
-      { id: 'confirm_no', title: '❌ Cancel' }
+      { id: 'confirm_no', title: '❌ No, Cancel' }
     ],
     shouldHandle: true
   };
@@ -1216,35 +1227,27 @@ async getNextQuestion(draftId) {
       return 'Sorry, I could not find your draft. Please start over.';
     }
     
-    console.log(`📝 [POSTING SERVICE] Getting next question for draft:`, draft.data);
-    
     const nextField = this.getNextRequiredField(draft);
     
     if (nextField) {
       await this.sessionManager.updateSession({ expectedField: nextField });
       const question = this.getFieldQuestion(nextField, draft.category);
-      
-      // ✅ Add context to the question
-      let contextualQuestion = question;
-      
-      if (draft.category === 'urban_help') {
-        const serviceType = draft.data?.urban_help?.serviceType || '';
-        const location = draft.data?.location?.area || '';
-        
-        if (serviceType && location) {
-          contextualQuestion = `For your ${serviceType} service in ${location}, ${question}`;
-        } else if (serviceType) {
-          contextualQuestion = `For your ${serviceType} service, ${question}`;
-        }
-      }
-      
-      return contextualQuestion;
+      return question;
     } else {
-      // All required fields are filled
+      // All required fields filled - show summary WITH BUTTONS
       const summary = await this.generateSummary(draft);
       await this.sessionManager.updateSession({ expectedField: 'confirmation' });
       
-      return `${summary}\n\n✅ Is this correct?\nReply "YES" to post or "NO" to cancel.`;
+      // Return summary with buttons instead of plain text
+      return {
+        type: 'summary_with_buttons',
+        response: `${summary}\n\n✅ Is this correct?`,
+        buttons: [
+          { id: 'confirm_yes', title: '✅ Yes, Post It' },
+          { id: 'confirm_no', title: '❌ No, Cancel' }
+        ],
+        shouldHandle: true
+      };
     }
     
   } catch (error) {

@@ -1906,19 +1906,43 @@ if (text && !replyId) { // Only check text messages, not button clicks
     }
   }
   
-  // If not in posting flow, check if it's a new posting request
-  const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-  if (postingResult.handled) {
-    // Update session based on posting result
-    if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
+// If not in posting flow, check if it's a new posting request
+const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+if (postingResult.handled) {
+  console.log(`📝 [CONTROLLER] Posting service handled: ${postingResult.type}`);
+  
+  // Handle different response types
+  switch(postingResult.type) {
+    case 'question':
+    case 'confirmation':
+      await sendMessageWithClient(sender, postingResult.response, effectiveClient);
       session.step = "posting_flow";
-    } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
+      break;
+      
+    case 'confirmation_with_buttons':
+      console.log(`📝 [CONTROLLER] Sending confirmation with buttons for new posting`);
+      await sendInteractiveButtonsWithClient(
+        effectiveClient,
+        sender,
+        postingResult.response,
+        postingResult.buttons
+      );
+      session.step = "posting_flow";
+      session.expectedField = 'confirmation';
+      break;
+      
+    case 'success':
+    case 'cancelled':
+    case 'error':
+      await sendMessageWithClient(sender, postingResult.response, effectiveClient);
       session.step = "menu";
       session.state = 'initial';
-    }
-    await saveSession(sender, session);
-    return session;
+      break;
   }
+  
+  await saveSession(sender, session);
+  return session;
+}
 }
 
 // ===========================
