@@ -265,6 +265,83 @@ class PostingService {
     this.sessionManager = new SessionManager(userId);
     this.draftManager = new DraftManager();
   }
+  async handleImmediateOffering(message, intentResult = null) {
+  console.log("🚨 [IMMEDIATE OFFERING] Handling immediate offering detection");
+  
+  try {
+    // Quick check if this is definitely an offering
+    const lowerMsg = message.toLowerCase();
+    const isDefinitelyOffering = /i('?m| am)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+(in|at|near|available)/i.test(lowerMsg) ||
+                                /i\s+(provide|offer|do|work\s+as)/i.test(lowerMsg) ||
+                                lowerMsg.includes('i\'m a') ||
+                                lowerMsg.includes('i am a') ||
+                                lowerMsg.includes('i provide') ||
+                                lowerMsg.includes('i offer');
+
+    if (!isDefinitelyOffering) {
+      return { type: 'not_posting', shouldHandle: false };
+    }
+
+    console.log("🚨 [IMMEDIATE OFFERING] Definitely an offering, starting new posting");
+
+    // Use intent classifier if available
+    if (!intentResult) {
+      try {
+        intentResult = await IntentClassifier.classify(message);
+        console.log("🚨 [IMMEDIATE OFFERING] Intent result:", intentResult);
+      } catch (error) {
+        intentResult = {
+          intent: 'service_offer',
+          confidence: 0.8,
+          entities: {},
+          context: 'offer'
+        };
+      }
+    }
+
+    // Force category to urban_help for service offerings
+    intentResult.intent = 'service_offer';
+    intentResult.context = 'offer';
+    
+    if (!intentResult.entities) {
+      intentResult.entities = {};
+    }
+    
+    // Extract service type from message
+    const serviceMatch = message.match(/i('?m| am)\s+(a\s+|an\s+|)\s*([^,.!?]+?)\s+(in|at|near|$)/i);
+    if (serviceMatch && serviceMatch[3]) {
+      let serviceType = serviceMatch[3].trim();
+      // Clean up
+      serviceType = serviceType
+        .replace(/^\s*(a|an|the)\s+/i, '')
+        .replace(/\s+in\s+.*$/i, '')
+        .trim();
+      
+      if (serviceType && serviceType.length > 0) {
+        intentResult.entities.service_type = serviceType;
+        console.log(`🚨 [IMMEDIATE OFFERING] Extracted service type: ${serviceType}`);
+      }
+    }
+    
+    // Extract location from message
+    const locationMatch = message.match(/\b(in|at|near|around|mein|me|main)\s+([^,.!?]+)/i);
+    if (locationMatch && locationMatch[2]) {
+      intentResult.entities.location = locationMatch[2].trim();
+      console.log(`🚨 [IMMEDIATE OFFERING] Extracted location: ${intentResult.entities.location}`);
+    }
+
+    // Start new posting with the offering context
+    return await this.startNewPosting(message, intentResult);
+
+  } catch (error) {
+    console.error("🚨 [IMMEDIATE OFFERING] Error:", error);
+    return {
+      type: 'error',
+      response: 'Sorry, there was an error processing your offering. Please try again.',
+      shouldHandle: true
+    };
+  }
+}
 
   async processMessage(message) {
     try {
@@ -278,6 +355,12 @@ class PostingService {
         console.log(`📝 [POSTING SERVICE] Continuing existing posting session`);
         return await this.continuePosting(message, session);
       }
+          // ✅ ADDED: Check for immediate offering FIRST
+    const immediateOfferingResult = await this.handleImmediateOffering(message);
+    if (immediateOfferingResult.shouldHandle !== false) {
+      console.log("📝 [POSTING SERVICE] Immediate offering handled");
+      return immediateOfferingResult;
+    }
       
       // Check if this is a new posting request using intent classifier
       let intentResult;

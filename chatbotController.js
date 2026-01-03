@@ -1655,41 +1655,74 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
   console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
   
-  // ===========================
-  // ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
-  // ===========================
-  if (text && !replyId) {
-    // Get session first
-    let session = (await getSession(sender)) || { 
-      step: "start",
-      state: 'initial',
-      housingFlow: { 
-        step: "start", 
-        data: {},
-        currentIndex: 0, 
-        listingData: null
-      },
-      isInitialized: false
-    };
+// ===========================
+// ✅ EMERGENCY FIX: Detect offering vs looking context (IMMEDIATE FIX)
+// ===========================
+if (text && !replyId) {
+  // Get session first
+  let session = (await getSession(sender)) || { 
+    step: "start",
+    state: 'initial',
+    housingFlow: { 
+      step: "start", 
+      data: {},
+      currentIndex: 0, 
+      listingData: null
+    },
+    isInitialized: false
+  };
+  
+  const lowerText = text.toLowerCase();
+  
+  // ✅ CRITICAL FIX: Check for offering FIRST
+  const context = detectIntentContext(text);
+  const isOffering = isUserOfferingServices(text);
+  
+  console.log(`🎯 [PRIMARY CHECK] Context: ${context}, IsOffering: ${isOffering}`);
+  
+  if (isOffering || context === 'offer') {
+    console.log("🎯 [PRIMARY] User is OFFERING services, routing to posting service");
     
-    const lowerText = text.toLowerCase();
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+    let ackMessage = '';
     
-  // FIRST: Check if it's an urban help request using IMPROVED detection
+    if (userLang === 'hi') {
+      ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+    } else if (userLang === 'ta') {
+      ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+    } else {
+      ackMessage = "🔧 I see you're offering services. Let me help you post this...";
+    }
+    
+    await sendMessageWithClient(sender, ackMessage, effectiveClient);
+    
+    // Process with posting service
+    const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+    console.log("📝 [CONTROLLER] Posting service result:", postingResult);
+    
+    if (postingResult.handled) {
+      await handlePostingResult(sender, postingResult, session, effectiveClient);
+      await saveSession(sender, session);
+      return session; // ✅ RETURN IMMEDIATELY
+    }
+    
+    await saveSession(sender, session);
+  }
+  
+  // ✅ ONLY THEN: Check if it's an urban help request (looking for services)
   if (isUrbanHelpRequest(text)) {
-    console.log("🔧 [URBAN HELP] Text request detected");
+    console.log("🔧 [URBAN HELP] Text request detected - user is LOOKING FOR services");
     
-    // CRITICAL: DETERMINE CONTEXT FIRST
-    const context = detectIntentContext(text);
-    const isOffering = isUserOfferingServices(text);
+    // CRITICAL: DETERMINE CONTEXT AGAIN TO BE SURE
+    const recheckContext = detectIntentContext(text);
+    const recheckIsOffering = isUserOfferingServices(text);
     
-    console.log(`🔍 [CONTEXT] Detected: "${text}"`);
-    console.log(`🔍 [CONTEXT] Context: ${context}, IsOffering: ${isOffering}`);
+    console.log(`🔍 [CONTEXT RE-CHECK] Context: ${recheckContext}, IsOffering: ${recheckIsOffering}`);
     
-    if (context === 'offer' || isOffering) {
-      // USER IS OFFERING SERVICES → USE POSTING SERVICE
-      console.log("🔧 [URBAN HELP] User is OFFERING services");
+    if (recheckIsOffering || recheckContext === 'offer') {
+      // Actually it IS an offering - double-check routing
+      console.log("🔧 [URBAN HELP CORRECTION] Actually an offering, re-routing to posting");
       
-      // Send more specific acknowledgment
       const userLang = multiLanguage.getUserLanguage(sender) || 'en';
       let ackMessage = '';
       
@@ -1703,39 +1736,30 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       
       await sendMessageWithClient(sender, ackMessage, effectiveClient);
       
-      // Process with posting service
       const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-      console.log("📝 [CONTROLLER] Posting service result:", postingResult);
-      
       if (postingResult.handled) {
-        // 🎯 CRITICAL FIX: Handle posting service response properly
         await handlePostingResult(sender, postingResult, session, effectiveClient);
         await saveSession(sender, session);
-        return session; // ✅ RETURN IMMEDIATELY
-      } else {
-        // If posting service didn't handle it, fall through to regular urban help
-        console.log("🔧 [URBAN HELP] Posting service didn't handle, trying urban help flow");
+        return session;
       }
-    }
-    
-    // If user is LOOKING or context couldn't be determined
-    console.log("🔧 [URBAN HELP] User is LOOKING FOR services or context unclear");
-    await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
-    return session; // ✅ RETURN IMMEDIATELY
-  }
-    
-    // SECOND: Check general posting service for non-urban help requests
-    const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-    if (postingResult.handled) {
-      // 🎯 CRITICAL FIX: Handle posting service response properly
-      await handlePostingResult(sender, postingResult, session, effectiveClient);
-      await saveSession(sender, session);
+    } else {
+      // User is genuinely looking for services
+      await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
       return session; // ✅ RETURN IMMEDIATELY
     }
-    
-    // Save the session after all checks
-    await saveSession(sender, session);
   }
+  
+  // ✅ THIRD: Check general posting service for non-urban help requests
+  const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+  if (postingResult.handled) {
+    await handlePostingResult(sender, postingResult, session, effectiveClient);
+    await saveSession(sender, session);
+    return session; // ✅ RETURN IMMEDIATELY
+  }
+  
+  // Save the session after all checks
+  await saveSession(sender, session);
+}
 
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
