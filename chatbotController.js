@@ -90,6 +90,7 @@ function getEffectiveClient(client) {
   
   return effectiveClient;
 }
+
 // ========================================
 // INTENT CONTEXT DETECTION (NEW) - CRITICAL FIX
 // ========================================
@@ -219,7 +220,71 @@ function isUserOfferingServices(text) {
 }
 
 // ========================================
-// POSTING SERVICE HANDLER
+// UPDATED: URBAN HELP REQUEST DETECTION - FIXED
+// ========================================
+
+/**
+ * Check if transcription is an urban help request - IMPROVED VERSION
+ */
+function isUrbanHelpRequest(transcription) {
+  if (!transcription || typeof transcription !== 'string') return false;
+  
+  const lowerText = transcription.toLowerCase();
+  
+  // Check context first
+  const context = detectIntentContext(lowerText);
+  const isOffering = isUserOfferingServices(lowerText);
+  
+  console.log(`🔍 [URBAN HELP CHECK] Text: "${transcription}"`);
+  console.log(`🔍 [URBAN HELP CHECK] Context: ${context}, IsOffering: ${isOffering}`);
+  
+  // If it's an offering, it's NOT an urban help REQUEST (it's a posting)
+  if (isOffering || context === 'offer') {
+    console.log(`🔍 [URBAN HELP CHECK] This is an OFFERING, not a request`);
+    return false;
+  }
+  
+  // Check for REQUEST keywords (user is looking for services)
+  const requestKeywords = [
+    'need', 'want', 'looking for', 'searching for', 'find',
+    'require', 'chahiye', 'mujhe', 'karwana', 'karane',
+    'help', 'sahayata', 'required', 'wanted', 'find me',
+    'show me', 'where can i find', 'how to get', 'where to get',
+    'need to hire', 'want to hire', 'looking to hire', 'need to buy',
+    'want to buy', 'looking to buy'
+  ];
+  
+  // Also check for service keywords
+  const serviceKeywords = [
+    'electrician', 'plumber', 'maid', 'cook', 'cleaner', 'carpenter',
+    'painter', 'driver', 'technician', 'mason', 'contractor', 'labour',
+    'worker', 'service', 'services', 'repair', 'installer', 'fitter',
+    'welder', 'mechanic', 'technician', 'ac repair', 'appliance repair',
+    'househelp', 'naukrani', 'ayah', 'babysitter', 'caretaker', 'gardener',
+    'security', 'guard', 'watchman', 'delivery', 'packer', 'mover'
+  ];
+  
+  // Check if it contains request keywords AND service keywords
+  const hasRequestKeyword = requestKeywords.some(keyword => lowerText.includes(keyword));
+  const hasServiceKeyword = serviceKeywords.some(keyword => lowerText.includes(keyword));
+  
+  // Also check for location indicators
+  const locationIndicators = ['in', 'at', 'near', 'around', 'mein', 'पर', 'में'];
+  const hasLocationIndicator = locationIndicators.some(indicator => lowerText.includes(indicator));
+  
+  // It's an urban help request if:
+  // 1. User is asking for something (not offering)
+  // 2. AND it contains service-related terms
+  // 3. OR it contains location indicators (implying they want service at a location)
+  const isRequest = (hasRequestKeyword && (hasServiceKeyword || hasLocationIndicator)) || 
+                   (context === 'find' && (hasServiceKeyword || hasLocationIndicator));
+  
+  console.log(`🔍 [URBAN HELP CHECK] Is request: ${isRequest}`);
+  return isRequest;
+}
+
+// ========================================
+// POSTING SERVICE HANDLER - UPDATED
 // ========================================
 /**
  * Handle posting service messages - UPDATED FOR VOICE INITIATION
@@ -231,10 +296,38 @@ async function handlePostingService(sender, message, session, effectiveClient) {
     console.log("📝 [POSTING SERVICE] Session step:", session?.step);
     console.log("📝 [POSTING SERVICE] Session state:", session?.state);
     
+    // Check if user wants to clear draft
+    if (message.toLowerCase().includes('clear draft') || message.toLowerCase().includes('start over')) {
+      console.log("🔄 User wants to clear draft");
+      
+      const postingService = new PostingService(sender);
+      const existingDraft = await postingService.draftManager.getUserActiveDraft(sender);
+      
+      if (existingDraft) {
+        await postingService.draftManager.deleteDraft(existingDraft.id);
+        await sendMessageWithClient(sender, "✅ Draft cleared! You can now start a new listing.", effectiveClient);
+      } else {
+        await sendMessageWithClient(sender, "✅ No active draft found. You can start a new listing.", effectiveClient);
+      }
+      
+      return { handled: true, type: 'success' };
+    }
+    
     if (session.mode === 'posting' && session.draftId) {
       console.log("📝 [POSTING SERVICE] User already in posting mode, continuing session");
       const postingService = new PostingService(sender);
-      return await postingService.continuePosting(message, session);
+      const result = await postingService.continuePosting(message, session);
+      
+      // 🎯 CRITICAL FIX: Ensure result has handled property
+      if (result && result.shouldHandle !== false) {
+        return { 
+          handled: true, 
+          type: result.type,
+          response: result.response,
+          buttons: result.buttons
+        };
+      }
+      return { handled: false };
     }
 
     const postingService = new PostingService(sender);
@@ -254,16 +347,12 @@ async function handlePostingService(sender, message, session, effectiveClient) {
       console.log("📝 [POSTING SERVICE] Start new listing result:", result);
       
       if (result && result.shouldHandle !== false) {
-        switch(result.type) {
-          case 'question':
-          case 'confirmation':
-            await sendMessageWithClient(sender, result.response, effectiveClient);
-            return { handled: true, type: result.type };
-            
-          case 'error':
-            await sendMessageWithClient(sender, `⚠️ ${result.response}`, effectiveClient);
-            return { handled: true, type: 'error' };
-        }
+        return { 
+          handled: true, 
+          type: result.type,
+          response: result.response,
+          buttons: result.buttons
+        };
       }
     }
     
@@ -272,33 +361,13 @@ async function handlePostingService(sender, message, session, effectiveClient) {
     
     console.log("📝 [POSTING SERVICE] Result from posting service:", result);
     
-    if (result.shouldHandle !== false) {  // FIX: Use shouldHandle, not handled
-      switch(result.type) {
-        case 'question':
-        case 'confirmation':
-        case 'success':
-        case 'cancelled':
-          await sendMessageWithClient(sender, result.response, effectiveClient);
-          return { handled: true, type: result.type };  // FIX: Return handled: true
-          
-        case 'confirmation_with_buttons':
-          console.log("📝 [POSTING SERVICE] Sending confirmation with buttons");
-          await sendInteractiveButtonsWithClient(
-            effectiveClient,
-            sender,
-            result.response,
-            result.buttons
-          );
-          return { handled: true, type: result.type };  // FIX: Return handled: true
-          
-        case 'error':
-          await sendMessageWithClient(sender, `⚠️ ${result.response}`, effectiveClient);
-          return { handled: true, type: 'error' };
-          
-        case 'not_posting':
-          console.log("📝 [POSTING SERVICE] Service says: not_posting");
-          return { handled: false };
-      }
+    if (result.shouldHandle !== false) {
+      return { 
+        handled: true, 
+        type: result.type,
+        response: result.response,
+        buttons: result.buttons
+      };
     }
     
     console.log("📝 [POSTING SERVICE] Returning handled: false");
@@ -381,7 +450,7 @@ const URBAN_HELP_CATEGORIES = {
 };
 
 // ========================================
-// VOICE MESSAGE HANDLING FUNCTIONS - UPDATED FOR URBAN HELP
+// VOICE MESSAGE HANDLING FUNCTIONS - UPDATED
 // ========================================
 
 /**
@@ -390,6 +459,7 @@ const URBAN_HELP_CATEGORIES = {
 async function handleVoiceMessage(sender, metadata, client) {
   try {
     console.log("🎤 [VOICE] Processing voice message from:", sender);
+    console.log("🎤 [VOICE] Metadata:", JSON.stringify(metadata, null, 2));
     
     // Check if it's a voice message
     if (!voiceService.isVoiceMessage(metadata)) {
@@ -420,14 +490,22 @@ async function handleVoiceMessage(sender, metadata, client) {
     // Send processing message
     await sendMessageWithClient(sender, "🎤 Processing your voice message... Please wait a moment.");
     
-    // Get media URL from metadata
-    const mediaUrl = metadata.body || metadata.mediaUrl;
+    // Get media URL from metadata - IMPROVED EXTRACTION
+    const mediaUrl = metadata.body || 
+                    metadata.mediaUrl || 
+                    metadata.audio?.url || 
+                    metadata.voice?.url ||
+                    metadata.audioMetadata?.url;
+    
     if (!mediaUrl) {
+      console.error("🎤 [VOICE] No audio URL found in metadata:", metadata);
       await sendMessageWithClient(sender, "❌ Could not access the voice message. Please try sending it again.");
       session.step = "menu";
       await saveSession(sender, session);
       return session;
     }
+    
+    console.log("🎤 [VOICE] Audio URL found:", mediaUrl.substring(0, 100) + "...");
     
     // Process the voice message with urban help intent extraction
     const processingResult = await voiceService.processVoiceMessage(
@@ -443,7 +521,7 @@ async function handleVoiceMessage(sender, metadata, client) {
       return session;
     }
     
-    // Check if this is an urban help request
+    // Check if this is an urban help request using IMPROVED detection
     if (processingResult.intent === 'urban_help_request' || 
         processingResult.entities?.category ||
         isUrbanHelpRequest(processingResult.transcription)) {
@@ -480,51 +558,6 @@ async function handleVoiceMessage(sender, metadata, client) {
     await sendMessageWithClient(sender, "❌ Sorry, I couldn't process your voice message. Please try typing your request.");
     return null;
   }
-}
-
-/**
- * Check if transcription is an urban help request
- */
-function isUrbanHelpRequest(transcription) {
-  if (!transcription || typeof transcription !== 'string') return false;
-  
-  const lowerText = transcription.toLowerCase();
-  
-  // FIRST: Check if this is actually an OFFERING (not a request)
-  const isOffering = isUserOfferingServices(lowerText);
-  const context = detectIntentContext(lowerText);
-  
-  console.log(`🔍 [URBAN HELP CHECK] Text: "${transcription}"`);
-  console.log(`🔍 [URBAN HELP CHECK] IsOffering: ${isOffering}, Context: ${context}`);
-  
-  // If it's an offering, it's NOT an urban help REQUEST (it's a posting)
-  if (isOffering || context === 'offer') {
-    console.log(`🔍 [URBAN HELP CHECK] This is an OFFERING, not a request`);
-    return false;
-  }
-  
-  // Check for general service keywords (not specific categories)
-  const serviceKeywords = [
-    'service', 'chahiye', 'required', 'needed', 'want', 'looking for',
-    'kaam', 'required', 'mujhe', 'karwana', 'karane', 'help', 'sahayata',
-    'required', 'wanted', 'searching', 'find', 'available', 'contractor'
-  ];
-  
-  // Also check for location indicators
-  const locationIndicators = ['in', 'at', 'near', 'around', 'mein', 'पर', 'में'];
-  
-  // If it contains service keywords AND location indicators, it's likely a service request
-  const hasServiceKeyword = serviceKeywords.some(keyword => lowerText.includes(keyword));
-  const hasLocationIndicator = locationIndicators.some(indicator => lowerText.includes(indicator));
-  
-  // Also check if it sounds like a service request pattern
-  // Patterns like: "[service] in [location]" or "[location] mein [service]"
-  const servicePattern = /\b(in|at|near|around|mein|पर|में)\b/i.test(lowerText);
-  
-  const isRequest = hasServiceKeyword || servicePattern || hasLocationIndicator;
-  
-  console.log(`🔍 [URBAN HELP CHECK] Is request: ${isRequest}`);
-  return isRequest;
 }
 
 /**
@@ -1425,7 +1458,7 @@ function extractUrbanHelpFromText(text) {
     location: null,
     timing: null,
     rawText: text,
-    context: detectIntentContext(text) // ADD THIS LINE
+    context: detectIntentContext(text)
   };
   
   console.log(`🔍 [EXTRACT] Analyzing text: "${text}"`);
@@ -1435,7 +1468,7 @@ function extractUrbanHelpFromText(text) {
   const commonWords = ['i', 'need', 'want', 'looking', 'for', 'a', 'an', 'the', 
                        'in', 'at', 'near', 'around', 'mein', 'please', 'mujhe',
                        'chahiye', 'required', 'service', 'services', 'karwana', 'find',
-                       'am', 'provide', 'offer', 'available']; // Added offering words
+                       'am', 'provide', 'offer', 'available'];
   
   // 1. Extract location first (easier to identify)
   const locationMatch = lowerText.match(/\b(in|at|near|around|mein|पर|में)\s+([^,.!?]+)/i);
@@ -1589,6 +1622,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] === START handleIncomingMessage ===");
   console.log("🔍 [CONTROLLER DEBUG] Input - sender:", sender);
   console.log("🔍 [CONTROLLER DEBUG] Input - text:", text);
+  console.log("🔍 [CONTROLLER DEBUG] Input - metadata:", JSON.stringify(metadata, null, 2));
   console.log("🔍 [CONTROLLER DEBUG] Input - metadata type:", metadata?.type);
   
   // Get effective client (use passed client or global)
@@ -1640,7 +1674,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     
     const lowerText = text.toLowerCase();
     
-  // FIRST: Check if it's an urban help request
+  // FIRST: Check if it's an urban help request using IMPROVED detection
   if (isUrbanHelpRequest(text)) {
     console.log("🔧 [URBAN HELP] Text request detected");
     
@@ -1671,14 +1705,11 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       
       // Process with posting service
       const postingResult = await handlePostingService(sender, text, session, effectiveClient);
+      console.log("📝 [CONTROLLER] Posting service result:", postingResult);
+      
       if (postingResult.handled) {
-        // Update session based on posting result
-        if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-          session.step = "posting_flow";
-        } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-          session.step = "menu";
-          session.state = 'initial';
-        }
+        // 🎯 CRITICAL FIX: Handle posting service response properly
+        await handlePostingResult(sender, postingResult, session, effectiveClient);
         await saveSession(sender, session);
         return session; // ✅ RETURN IMMEDIATELY
       } else {
@@ -1696,13 +1727,8 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     // SECOND: Check general posting service for non-urban help requests
     const postingResult = await handlePostingService(sender, text, session, effectiveClient);
     if (postingResult.handled) {
-      // Update session based on posting result
-      if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-        session.step = "posting_flow";
-      } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-        session.step = "menu";
-        session.state = 'initial';
-      }
+      // 🎯 CRITICAL FIX: Handle posting service response properly
+      await handlePostingResult(sender, postingResult, session, effectiveClient);
       await saveSession(sender, session);
       return session; // ✅ RETURN IMMEDIATELY
     }
@@ -1872,6 +1898,7 @@ if (text && !replyId) { // Only check text messages, not button clicks
           break;
           
         case 'confirmation_with_buttons':
+        case 'summary_with_buttons':
           // Send interactive buttons for confirmation
           console.log(`📝 [CONTROLLER] Sending confirmation with buttons`);
           await sendInteractiveButtonsWithClient(
@@ -1919,12 +1946,22 @@ if (text && !replyId) { // Only check text messages, not button clicks
   
 // If not in posting flow, check if it's a new posting request
 const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-console.log("📝 [CONTROLLER] Posting service returned:", postingResult);  // ADD DEBUG LOG
+console.log("📝 [CONTROLLER] Posting service returned:", postingResult);
 
-if (postingResult.handled) {  // FIX: Check handled, not postingResult.handled
+if (postingResult.handled) {
   console.log(`📝 [CONTROLLER] Posting service handled: ${postingResult.type}`);
+  await handlePostingResult(sender, postingResult, session, effectiveClient);
+  await saveSession(sender, session);
+  return session;
+}
+}
+
+// ===========================
+// ✅ NEW: Handle posting result function
+// ===========================
+async function handlePostingResult(sender, postingResult, session, effectiveClient) {
+  console.log(`📝 [HANDLE POSTING] Handling posting result: ${postingResult.type}`);
   
-  // Handle different response types
   switch(postingResult.type) {
     case 'question':
     case 'confirmation':
@@ -1933,8 +1970,17 @@ if (postingResult.handled) {  // FIX: Check handled, not postingResult.handled
       break;
       
     case 'confirmation_with_buttons':
-      console.log(`📝 [CONTROLLER] Sending confirmation with buttons for new posting`);
-      // The buttons should already be sent by handlePostingService
+    case 'summary_with_buttons':
+      console.log(`📝 [HANDLE POSTING] Sending confirmation with buttons`);
+      await sendInteractiveButtonsWithClient(
+        effectiveClient,
+        sender,
+        postingResult.response,
+        postingResult.buttons || [
+          { id: 'confirm_yes', title: '✅ Yes, Post It' },
+          { id: 'confirm_no', title: '❌ No, Cancel' }
+        ]
+      );
       session.step = "posting_flow";
       session.expectedField = 'confirmation';
       break;
@@ -1946,11 +1992,10 @@ if (postingResult.handled) {  // FIX: Check handled, not postingResult.handled
       session.step = "menu";
       session.state = 'initial';
       break;
+      
+    default:
+      console.log(`⚠️ [HANDLE POSTING] Unknown posting result type: ${postingResult.type}`);
   }
-  
-  await saveSession(sender, session);
-  return session;
-}
 }
 
 // ===========================
@@ -1970,45 +2015,13 @@ if (text && !replyId && session.step === "posting_flow") {
     const result = await postingService.continuePosting(text, userSession);
     
     if (result && result.shouldHandle !== false) {
-      switch(result.type) {
-        case 'question':
-        case 'confirmation':
-          await sendMessageWithClient(sender, result.response, effectiveClient);
-          // Update session
-          if (result.type === 'confirmation') {
-            session.step = "posting_flow";
-            session.expectedField = 'confirmation';
-          }
-          break;
-          
-        case 'success':
-          await sendMessageWithClient(sender, result.response, effectiveClient);
-          session.step = "menu";
-          session.state = 'initial';
-          delete session.mode;
-          delete session.draftId;
-          break;
-          
-        case 'cancelled':
-          await sendMessageWithClient(sender, result.response, effectiveClient);
-          session.step = "menu";
-          session.state = 'initial';
-          delete session.mode;
-          delete session.draftId;
-          break;
-          
-        case 'error':
-          await sendMessageWithClient(sender, `⚠️ ${result.response}`, effectiveClient);
-          session.step = "menu";
-          session.state = 'initial';
-          break;
-      }
-      
+      await handlePostingResult(sender, result, session, effectiveClient);
       await saveSession(sender, session);
       return session;
     }
   }
 }
+
 // ===========================
 // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS - UPDATED WITH OFFERING DETECTION
 // ===========================
@@ -2062,14 +2075,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
             console.log(`📝 [VOICE POSTING] Posting service result:`, postingResult);
             
             if (postingResult.handled) {
-                // Update session based on posting result
-                if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-                    session.step = "posting_flow";
-                    session.state = 'posting';
-                } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-                    session.step = "menu";
-                    session.state = 'initial';
-                }
+                await handlePostingResult(sender, postingResult, session, effectiveClient);
                 await saveSession(sender, session);
                 return session; // ✅ RETURN IMMEDIATELY
             } else {
@@ -2151,6 +2157,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
     await saveSession(sender, session);
     return session;
 }
+
 // ===========================
 // ✅ ADDED: CHECK FOR POSTING CONFIRMATION BUTTON CLICKS
 // ===========================
@@ -2335,13 +2342,7 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
         // Process with posting service
         const postingResult = await handlePostingService(sender, confirmedText, session, effectiveClient);
         if (postingResult.handled) {
-          // Update session based on posting result
-          if (postingResult.type === 'question' || postingResult.type === 'confirmation') {
-            session.step = "posting_flow";
-          } else if (postingResult.type === 'success' || postingResult.type === 'cancelled' || postingResult.type === 'error') {
-            session.step = "menu";
-            session.state = 'initial';
-          }
+          await handlePostingResult(sender, postingResult, session, effectiveClient);
         }
       } else if (isUrbanHelpRequest(confirmedText)) {
         // Check if it's an urban help request (looking for services)
