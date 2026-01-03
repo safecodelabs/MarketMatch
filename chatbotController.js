@@ -307,7 +307,7 @@ async function handlePostingService(sender, message, session, effectiveClient) {
         await postingService.draftManager.deleteDraft(existingDraft.id);
         await sendMessageWithClient(sender, "✅ Draft cleared! You can now start a new listing.", effectiveClient);
       } else {
-        await sendMessageWithClient(sender, "✅ No active draft found. You can start a new listing.", effectiveClient);
+        await sendMessageWithClient(sender, "✅ No active draft found. You can now start a new listing.", effectiveClient);
       }
       
       return { handled: true, type: 'success' };
@@ -364,9 +364,9 @@ async function handlePostingService(sender, message, session, effectiveClient) {
     if (result.shouldHandle !== false) {
       return { 
         handled: true, 
-        type: result.type,
-        response: result.response,
-        buttons: result.buttons
+          type: result.type,
+          response: result.response,
+          buttons: result.buttons
       };
     }
     
@@ -521,10 +521,45 @@ async function handleVoiceMessage(sender, metadata, client) {
       return session;
     }
     
-    // Check if this is an urban help request using IMPROVED detection
-    if (processingResult.intent === 'urban_help_request' || 
-        processingResult.entities?.category ||
-        isUrbanHelpRequest(processingResult.transcription)) {
+    // CRITICAL FIX: Check context of transcription to see if it's an offering or request
+    const transcription = processingResult.transcription || '';
+    const isOffering = isUserOfferingServices(transcription);
+    const context = detectIntentContext(transcription);
+    
+    console.log(`🔍 [VOICE CONTEXT] Transcription: "${transcription}"`);
+    console.log(`🔍 [VOICE CONTEXT] IsOffering: ${isOffering}, Context: ${context}`);
+    
+    if (isOffering || context === 'offer') {
+      // User is OFFERING services - route to posting service
+      console.log("🎤 [VOICE] User is OFFERING services via voice");
+      
+      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+      let ackMessage = '';
+      
+      if (userLang === 'hi') {
+        ackMessage = "🔧 मैं देख रहा हूं कि आप सेवाएं प्रदान कर रहे हैं। मैं आपकी पोस्टिंग में मदद करता हूं...";
+      } else if (userLang === 'ta') {
+        ackMessage = "🔧 நீங்கள் சேவைகளை வழங்குகிறீர்கள் என்று பார்க்கிறேன். உங்கள் இடுகைக்கு உதவுகிறேன்...";
+      } else {
+        ackMessage = "🔧 I see you're offering services. Let me help you post this...";
+      }
+      
+      await sendMessageWithClient(sender, ackMessage, effectiveClient);
+      
+      // Process with posting service
+      const postingResult = await handlePostingService(sender, transcription, session, effectiveClient);
+      
+      if (postingResult.handled) {
+        session.step = "posting_flow";
+        session.state = 'posting';
+        await saveSession(sender, session);
+        return session;
+      }
+      
+    } else if (isUrbanHelpRequest(transcription) || processingResult.intent === 'urban_help_request' || 
+               processingResult.entities?.category) {
+      // User is LOOKING FOR services - handle urban help request
+      console.log("🎤 [VOICE] User is LOOKING FOR services via voice");
       
       await handleUrbanHelpVoiceIntent(sender, session, processingResult, effectiveClient);
       
@@ -1616,6 +1651,75 @@ async function handlePostListingFlow(sender, session = null, client = null) {
 }
 
 // ========================================
+// ✅ ADDED: POSTING CONFIRMATION HANDLER
+// ========================================
+/**
+ * Handle posting confirmation button clicks
+ */
+async function handlePostingConfirmation(sender, replyId, session, effectiveClient) {
+  console.log(`📝 [POSTING CONFIRMATION] Handling: ${replyId}`);
+  
+  const postingService = new PostingService(sender);
+  
+  if (replyId === 'confirm_yes') {
+    // Get current draft
+    const draftId = session.draftId;
+    if (!draftId) {
+      await sendMessageWithClient(sender, "❌ No draft found. Please start over.", effectiveClient);
+      session.step = "menu";
+      session.state = 'initial';
+      await saveSession(sender, session);
+      return;
+    }
+    
+    // Submit the draft
+    const result = await postingService.submitDraft(draftId);
+    
+    if (result.success) {
+      await sendMessageWithClient(
+        sender,
+        `🎉 Your listing has been published successfully!\n\n` +
+        `*Title:* ${result.listing?.title || 'Service Listing'}\n` +
+        `*Type:* ${result.listing?.category || 'Service'}\n` +
+        `You can view it from the "Manage Listings" option.`,
+        effectiveClient
+      );
+      
+      // Clear session
+      session.step = "menu";
+      session.state = 'initial';
+      delete session.mode;
+      delete session.draftId;
+      delete session.expectedField;
+      await saveSession(sender, session);
+      
+    } else {
+      await sendMessageWithClient(
+        sender,
+        `❌ Failed to publish listing: ${result.error || 'Unknown error'}`,
+        effectiveClient
+      );
+    }
+    
+  } else if (replyId === 'confirm_no') {
+    // Cancel the posting
+    const draftId = session.draftId;
+    if (draftId) {
+      await postingService.draftManager.deleteDraft(draftId);
+    }
+    
+    await sendMessageWithClient(sender, "❌ Listing cancelled.", effectiveClient);
+    
+    session.step = "menu";
+    session.state = 'initial';
+    delete session.mode;
+    delete session.draftId;
+    delete session.expectedField;
+    await saveSession(sender, session);
+  }
+}
+
+// ========================================
 // UPDATED MAIN CONTROLLER - WITH POSTING SYSTEM, URBAN HELP SUPPORT AND VOICE CONFIRMATION FLOW
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}, client = null) {
@@ -2047,6 +2151,21 @@ if (text && !replyId && session.step === "posting_flow") {
 }
 
 // ===========================
+// ✅ CRITICAL FIX: CHECK FOR POSTING CONFIRMATION BUTTON CLICKS FIRST
+// ===========================
+if (replyId && replyId.startsWith('confirm_') && 
+    (session.mode === 'posting' || session.step === 'posting_flow')) {
+  console.log(`📝 [POSTING BUTTON] Detected posting confirmation button: ${replyId}`);
+  
+  // Check if user has an active posting session
+  if (session.mode === 'posting' && session.draftId) {
+    await handlePostingConfirmation(sender, replyId, session, effectiveClient);
+    await saveSession(sender, session);
+    return session;
+  }
+}
+
+// ===========================
 // ✅ ADDED: CHECK FOR VOICE CONFIRMATION BUTTON CLICKS - UPDATED WITH OFFERING DETECTION
 // ===========================
 if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again') || 
@@ -2180,72 +2299,6 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
     
     await saveSession(sender, session);
     return session;
-}
-
-// ===========================
-// ✅ ADDED: CHECK FOR POSTING CONFIRMATION BUTTON CLICKS
-// ===========================
-if (replyId && replyId.startsWith('confirm_') && 
-    (session.mode === 'posting' || session.step === 'posting_flow')) {
-  console.log(`📝 [POSTING BUTTON] Detected posting confirmation button: ${replyId}`);
-  
-  // Check if user has an active posting session
-  if (session.mode === 'posting' && session.draftId) {
-    const postingService = new PostingService(sender);
-    const draft = await postingService.draftManager.getDraft(session.draftId);
-    
-    if (draft) {
-      // Create a message object with button data for the posting service
-      const buttonMessage = {
-        button: {
-          payload: replyId
-        }
-      };
-      
-      // Handle the confirmation with the posting service
-      const result = await postingService.handleConfirmation(buttonMessage, draft);
-      
-      if (result && result.shouldHandle !== false) {
-        switch(result.type) {
-          case 'success':
-            await sendMessageWithClient(sender, result.response, effectiveClient);
-            session.step = "menu";
-            session.state = 'initial';
-            delete session.mode;
-            delete session.draftId;
-            delete session.expectedField;
-            break;
-            
-          case 'cancelled':
-            await sendMessageWithClient(sender, result.response, effectiveClient);
-            session.step = "menu";
-            session.state = 'initial';
-            delete session.mode;
-            delete session.draftId;
-            delete session.expectedField;
-            break;
-            
-          case 'error':
-            await sendMessageWithClient(sender, result.response, effectiveClient);
-            session.step = "menu";
-            session.state = 'initial';
-            delete session.mode;
-            delete session.draftId;
-            delete session.expectedField;
-            break;
-            
-          case 'question':
-            // User wants to edit, continue with editing
-            await sendMessageWithClient(sender, result.response, effectiveClient);
-            session.step = "posting_flow";
-            break;
-        }
-        
-        await saveSession(sender, session);
-        return session;
-      }
-    }
-  }
 }
 
 // ===========================

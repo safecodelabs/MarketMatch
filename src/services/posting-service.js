@@ -123,7 +123,7 @@ function loadIntentClassifier() {
     return require('../../src/core/ai/intentClassifier');
   } catch (e1) {
     try {
-      return require('../core/ai/intentClassifier');
+      return require('../../src/core/ai/intentClassifier');
     } catch (e2) {
       console.log("⚠️ IntentClassifier not found, using fallback");
       return {
