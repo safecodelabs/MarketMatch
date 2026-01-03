@@ -272,14 +272,24 @@ async function handlePostingService(sender, message, session, effectiveClient) {
     
     console.log("📝 [POSTING SERVICE] Result from posting service:", result);
     
-    if (result.shouldHandle !== false) {
+    if (result.shouldHandle !== false) {  // FIX: Use shouldHandle, not handled
       switch(result.type) {
         case 'question':
         case 'confirmation':
         case 'success':
         case 'cancelled':
           await sendMessageWithClient(sender, result.response, effectiveClient);
-          return { handled: true, type: result.type };
+          return { handled: true, type: result.type };  // FIX: Return handled: true
+          
+        case 'confirmation_with_buttons':
+          console.log("📝 [POSTING SERVICE] Sending confirmation with buttons");
+          await sendInteractiveButtonsWithClient(
+            effectiveClient,
+            sender,
+            result.response,
+            result.buttons
+          );
+          return { handled: true, type: result.type };  // FIX: Return handled: true
           
         case 'error':
           await sendMessageWithClient(sender, `⚠️ ${result.response}`, effectiveClient);
@@ -293,6 +303,7 @@ async function handlePostingService(sender, message, session, effectiveClient) {
     
     console.log("📝 [POSTING SERVICE] Returning handled: false");
     return { handled: false };
+    
   } catch (error) {
     console.error("❌ [POSTING SERVICE] Error:", error);
     return { handled: false };
@@ -1908,7 +1919,9 @@ if (text && !replyId) { // Only check text messages, not button clicks
   
 // If not in posting flow, check if it's a new posting request
 const postingResult = await handlePostingService(sender, text, session, effectiveClient);
-if (postingResult.handled) {
+console.log("📝 [CONTROLLER] Posting service returned:", postingResult);  // ADD DEBUG LOG
+
+if (postingResult.handled) {  // FIX: Check handled, not postingResult.handled
   console.log(`📝 [CONTROLLER] Posting service handled: ${postingResult.type}`);
   
   // Handle different response types
@@ -1921,12 +1934,7 @@ if (postingResult.handled) {
       
     case 'confirmation_with_buttons':
       console.log(`📝 [CONTROLLER] Sending confirmation with buttons for new posting`);
-      await sendInteractiveButtonsWithClient(
-        effectiveClient,
-        sender,
-        postingResult.response,
-        postingResult.buttons
-      );
+      // The buttons should already be sent by handlePostingService
       session.step = "posting_flow";
       session.expectedField = 'confirmation';
       break;
