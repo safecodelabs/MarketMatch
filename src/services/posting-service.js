@@ -549,8 +549,9 @@ class PostingService {
           type: 'confirmation_with_buttons',
           response: `${summary}\n\n✅ Is this correct?`,
           buttons: [
-            { id: 'confirm_yes', title: '✅ Yes, Post It' },
-            { id: 'confirm_no', title: '❌ No, Cancel' }
+            { id: 'confirm_yes', title: '✅ Yes' },
+            { id: 'confirm_no', title: '🔄 No' },
+            { id: 'type_instead', title: '📝 Type' }
           ],
           shouldHandle: true
         };
@@ -673,8 +674,9 @@ class PostingService {
           type: 'confirmation_with_buttons',
           response: `${summary}\n\n✅ Is this correct?`,
           buttons: [
-            { id: 'confirm_yes', title: '✅ Yes, Post It' },
-            { id: 'confirm_no', title: '❌ No, Cancel' }
+            { id: 'confirm_yes', title: '✅ Yes' },
+            { id: 'confirm_no', title: '🔄 No' },
+            { id: 'type_instead', title: '📝 Type' }
           ],
           shouldHandle: true
         };
@@ -896,8 +898,9 @@ class PostingService {
               type: 'confirmation_with_buttons',
               response: `${summary}\n\n✅ Is this correct?`,
               buttons: [
-                { id: 'confirm_yes', title: '✅ Yes, Post It' },
-                { id: 'confirm_no', title: '❌ No, Cancel' }
+                { id: 'confirm_yes', title: '✅ Yes' },
+                { id: 'confirm_no', title: '🔄 No' },
+                { id: 'type_instead', title: '📝 Type' }
               ],
               shouldHandle: true
             };
@@ -935,47 +938,155 @@ class PostingService {
 
   async handleConfirmation(message, draft) {
     const summary = await this.generateSummary(draft);
-    
+
     // Check if this is a button click
     if (message.interactive && message.interactive.type === 'button_reply') {
       const buttonId = message.interactive.button_reply.id;
-      
+
       if (buttonId === 'confirm_yes') {
         return await this.publishAndRespond(draft);
       } else if (buttonId === 'confirm_no') {
         return await this.cancelAndRespond(draft);
       } else if (buttonId === 'confirm_edit') {
         return await this.editAndRespond(draft);
+      } else if (buttonId === 'type_instead') {
+        // User clicked 'Type' — prompt them to type 'yes'/'no' or a field update
+        await this.sessionManager.updateSession({ expectedField: 'confirmation' });
+        return {
+          type: 'prompt_type_instead',
+          response: 'Okay — please type "Yes" to confirm, "No" to cancel, or type a field update like "rent 12000" to edit.',
+          shouldHandle: true
+        };
       }
     }
-    
-    // If user typed "yes" in text, treat as button click
+
+    // If user typed something (text), try to interpret intent
     const lowerMsg = message.text ? message.text.toLowerCase().trim() : '';
-    
+
+    // If user typed "yes" in text, treat as button click
     if (this.isYesMessage(lowerMsg)) {
-      // Send the summary WITH buttons first
+      // Allow typed confirmation if user previously clicked 'Type' button
+      try {
+        const session = await this.sessionManager.getOrCreateSession();
+        if (session && session.allowTypedConfirmation) {
+          // Proceed to publish immediately
+          return await this.publishAndRespond(draft);
+        }
+      } catch (err) {
+        console.error('❌ [POSTING SERVICE] Error checking session for typed confirmation:', err);
+      }
+
+      // Otherwise, ask user to click the confirmation button to avoid accidental publishes
       return {
         type: 'confirmation_with_buttons',
-        response: `${summary}\n\n✅ Is this correct?`,
+        response: `${summary}\n\n✅ Is this correct?` ,
         buttons: [
-          { id: 'confirm_yes', title: '✅ Yes, Post It' },
-          { id: 'confirm_no', title: '❌ No, Cancel' }
+          { id: 'confirm_yes', title: '✅ Yes' },
+          { id: 'confirm_no', title: '🔄 No' },
+          { id: 'type_instead', title: '📝 Type' }
         ],
         shouldHandle: true
       };
     }
-    
+
+    // If user typed "no" in text, cancel
     if (this.isNoMessage(lowerMsg)) {
       return await this.cancelAndRespond(draft);
     }
-    
+
+    // If user typed a field update like "rent 12000" or just a number, handle it as an edit
+    try {
+      // Simple field detection map for common numeric fields
+      const fieldAliases = {
+        rent: 'rent',
+        price: 'price',
+        deposit: 'deposit',
+        salary: 'salary',
+        rate: 'rate',
+        amount: 'price',
+        fee: 'price'
+      };
+
+      // If message looks like "field value"
+      const parts = lowerMsg.split(/:\s*|\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        const possibleField = parts[0].replace(/[^a-zA-Z\.]/g, '');
+        const possibleValue = parts.slice(1).join(' ');
+        const mappedField = fieldAliases[possibleField] || possibleField;
+
+        // handle location.area special case
+        const candidateFieldPath = mappedField === 'location' || possibleField === 'area' ? 'location.area' : mappedField;
+
+        // Only update if the field exists in config
+        const configFields = FIELD_CONFIGS[draft.category]?.fields || {};
+        if (configFields[candidateFieldPath] || configFields[mappedField]) {
+          const finalField = configFields[candidateFieldPath] ? candidateFieldPath : mappedField;
+          const parsedValue = this.parsePrice(possibleValue) || possibleValue;
+
+          await this.draftManager.updateDraftField(draft.id, finalField, parsedValue.toString());
+          await this.sessionManager.updateSession({ expectedField: 'confirmation' });
+
+          const updatedDraft = await this.draftManager.getDraft(draft.id);
+          const newSummary = await this.generateSummary(updatedDraft);
+
+          return {
+            type: 'confirmation_with_buttons',
+            response: `${newSummary}\n\n✅ Is this correct?`,
+            buttons: [
+              { id: 'confirm_yes', title: '✅ Yes' },
+              { id: 'confirm_no', title: '🔄 No' },
+              { id: 'type_instead', title: '📝 Type' }
+            ],
+            shouldHandle: true
+          };
+        }
+      }
+
+      // If message is just a number, find the most likely numeric field to update
+      const numberMatch = lowerMsg.match(/(\d+[\d,\.]*)(?:\s*(lakh|lac|k|thousand|crore|cr))?/i);
+      if (numberMatch) {
+        const numericValue = this.parsePrice(lowerMsg) || parseFloat(numberMatch[1].replace(/,/g, ''));
+
+        // Find numeric fields in config
+        const configFields = FIELD_CONFIGS[draft.category]?.fields || {};
+        const numericFields = Object.entries(configFields)
+          .filter(([k, v]) => v.type === 'number')
+          .map(([k]) => k);
+
+        // Prefer 'rent' or 'price' if available
+        let targetField = numericFields.find(f => f === 'rent') || numericFields.find(f => f === 'price') || numericFields[0];
+
+        if (targetField) {
+          await this.draftManager.updateDraftField(draft.id, targetField, numericValue.toString());
+          await this.sessionManager.updateSession({ expectedField: 'confirmation' });
+
+          const updatedDraft = await this.draftManager.getDraft(draft.id);
+          const newSummary = await this.generateSummary(updatedDraft);
+
+          return {
+            type: 'confirmation_with_buttons',
+            response: `${newSummary}\n\n✅ Is this correct?`,
+            buttons: [
+              { id: 'confirm_yes', title: '✅ Yes' },
+              { id: 'confirm_no', title: '🔄 No' },
+              { id: 'type_instead', title: '📝 Type' }
+            ],
+            shouldHandle: true
+          };
+        }
+      }
+    } catch (err) {
+      console.error('❌ [POSTING SERVICE] Error handling typed confirmation input:', err);
+    }
+
     // Default: Show summary with buttons (this is what happens when flow completes)
     return {
       type: 'confirmation_with_buttons',
       response: `${summary}\n\n✅ Is this correct?`,
       buttons: [
-        { id: 'confirm_yes', title: '✅ Yes, Post It' },
-        { id: 'confirm_no', title: '❌ No, Cancel' }
+        { id: 'confirm_yes', title: '✅ Yes' },
+        { id: 'confirm_no', title: '🔄 No' },
+        { id: 'type_instead', title: '📝 Type' }
       ],
       shouldHandle: true
     };

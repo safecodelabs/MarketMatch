@@ -156,9 +156,12 @@ function detectIntentContext(text) {
     /i sell/i,
     /i am selling/i,
     /for sale/i,
+    /for rent/i,
     /available for/i,
     /service provided/i,
     /services available/i,
+    /rent out/i,
+    /available for rent/i,
     /hire me/i,
     /i am expert/i,
     /professional/i,
@@ -208,16 +211,24 @@ function isUserOfferingServices(text) {
     return false;
   }
   
-  // Check for offering patterns
+  // Check for offering patterns (include 'for rent' / 'rent out' for property posts)
   const offeringPatterns = [
     /i('?m| am) (a |an )?/i,
     /i have (a |an )?/i,
     /i provide/i,
     /i offer/i,
-    /available/i
+    /available/i,
+    /for rent/i,
+    /rent out/i
   ];
   
   const hasPattern = offeringPatterns.some(pattern => pattern.test(lowerText));
+  
+  // Additional quick check: '2bhk for rent', '1 bhk for rent' etc. -> offering
+  const bhkForRentPattern = /(\b\d+\s?bhk\b).*(for rent|for lease|rent out)|\b\d+\s?bhk\s?for rent\b/i;
+  if (bhkForRentPattern.test(lowerText)) {
+    return true;
+  }
   
   if (hasPattern) {
     // Double-check it's not actually a "looking for" disguised as "I'm"
@@ -496,6 +507,13 @@ async function handlePostingConfirmation(sender, replyId, session, client) {
     delete session.mode;
     delete session.draftId;
     delete session.expectedField;
+    await saveSession(sender, session);
+  } else if (replyId === 'type_instead') {
+    // User chose to type instead of clicking buttons
+    await sendMessageWithClient(sender, 'Okay — please type "Yes" to confirm, "No" to cancel, or type a field update like "rent 12000" to edit.', client);
+    session.expectedField = 'confirmation';
+    session.allowTypedConfirmation = true;
+    session.step = 'posting_flow';
     await saveSession(sender, session);
   }
   
@@ -1848,7 +1866,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ===========================
   // ✅ EMERGENCY FIX: Check for POSTING confirmation button clicks FIRST
   // ===========================
-  if (replyId && replyId.startsWith('confirm_') && 
+  if (replyId && (replyId.startsWith('confirm_') || replyId === 'type_instead') && 
       (session.mode === 'posting' || session.step === 'posting_flow')) {
     
     console.log(`📝 [POSTING CONFIRMATION FIRST] Detected posting confirmation button: ${replyId}`);
@@ -4319,6 +4337,10 @@ module.exports = {
   handleDeleteListing,
   handleSavedListingSelection,
   handleRemoveSavedListing,
+  // Exported helpers for testing
+  detectIntentContext,
+  isUserOfferingServices,
+  isUrbanHelpRequest,
   // ✅ ADDED: Placeholder functions for missing implementations
   handleFieldEdit,
   updateFieldValue,

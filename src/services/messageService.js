@@ -578,14 +578,20 @@ async function sendInteractiveButtons(to, message, buttons) {
     try {
       console.log("🔄 Falling back to text message...");
       
-      const buttonText = Array.isArray(buttons) 
-        ? buttons.map((btn, i) => {
-            const text = btn.text || btn.title || btn.buttonText || btn.id || `Option ${i + 1}`;
-            return `${i + 1}. ${text}`;
-          }).join('\n')
-        : '1. ✅ Yes\n2. 🔄 No\n3. 📝 Type';
-      
-      const fallbackText = `${message}\n\nPlease reply with:\n${buttonText}`;
+      // If these look like confirmation buttons, provide a clear friendly fallback
+      const hasConfirmButtons = Array.isArray(buttons) && buttons.some(b => {
+        const id = (b.id || b.buttonId || '').toString();
+        return id.includes('confirm_yes') || id.includes('confirm_no') || id.includes('type_instead');
+      });
+
+      const fallbackText = hasConfirmButtons
+        ? `${message}\n\nPlease reply with:\n✅ Yes - if I heard correctly.\n🔄 No - to try again.\n📝 Type - to type instead.`
+        : Array.isArray(buttons) 
+          ? `${message}\n\nPlease reply with:\n` + buttons.map((btn, i) => {
+              const text = btn.text || btn.title || btn.buttonText || btn.id || `Option ${i + 1}`;
+              return `${i + 1}. ${text}`;
+            }).join('\n')
+          : `${message}\n\nPlease reply with:\n1. ✅ Yes\n2. 🔄 No\n3. 📝 Type`;
       
       console.log("📤 Sending fallback text message...");
       return await sendText(to, fallbackText);
@@ -636,9 +642,9 @@ async function sendListingSummary(to, summary, buttons = null) {
   
   if (!buttons) {
     buttons = [
-      { id: 'confirm_yes', title: '✅ Yes, Post It' },
-      { id: 'confirm_no', title: '❌ No, Cancel' },
-      { id: 'confirm_edit', title: '✏️ Edit' }
+      { id: 'confirm_yes', title: '✅ Yes' },
+      { id: 'confirm_no', title: '🔄 No' },
+      { id: 'type_instead', title: '📝 Type' }
     ];
   }
   
