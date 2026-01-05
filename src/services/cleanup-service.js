@@ -1,4 +1,5 @@
 const { db } = require('../../database/firestore');
+const admin = require('firebase-admin');
 
 class CleanupService {
   constructor() {
@@ -22,6 +23,7 @@ class CleanupService {
       
       const batch = db.batch();
       let count = 0;
+      const deletedDraftIds = [];
       const cutoff = new Date();
       cutoff.setHours(cutoff.getHours() - 24);
       
@@ -46,6 +48,7 @@ class CleanupService {
           if (updatedDate && updatedDate < cutoff) {
             batch.delete(doc.ref);
             count++;
+            deletedDraftIds.push(doc.id);
             console.log(`🗑️ Deleting draft ${doc.id} from ${updatedDate}`);
           }
         }
@@ -54,11 +57,50 @@ class CleanupService {
       if (count > 0) {
         await batch.commit();
         console.log(`✅ Successfully cleaned up ${count} old drafts`);
+
+        // Reconcile sessions referencing deleted drafts
+        let totalSessionsReset = 0;
+        try {
+          if (deletedDraftIds.length > 0) {
+            console.log(`🔁 Reconciling sessions referencing ${deletedDraftIds.length} deleted drafts...`);
+
+            // Firestore 'in' supports up to 10 values - split into chunks
+            for (let i = 0; i < deletedDraftIds.length; i += 10) {
+              const chunk = deletedDraftIds.slice(i, i + 10);
+              const sessionsSnap = await db.collection('sessions')
+                .where('draftId', 'in', chunk)
+                .get();
+
+              if (!sessionsSnap.empty) {
+                const sessionBatch = db.batch();
+                let resetCount = 0;
+                sessionsSnap.forEach(sDoc => {
+                  sessionBatch.update(sDoc.ref, {
+                    draftId: null,
+                    mode: 'idle',
+                    expectedField: null,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                  });
+                  resetCount++;
+                  console.log(`🔄 Resetting session ${sDoc.id} which referenced deleted draft`);
+                });
+                await sessionBatch.commit();
+                totalSessionsReset += resetCount;
+                console.log(`✅ Reset ${resetCount} sessions for draft chunk`);
+              }
+            }
+
+            console.log(`✅ Completed session reconciliation for deleted drafts. Total sessions reset: ${totalSessionsReset}`);
+          }
+        } catch (reconError) {
+          console.error('❌ Error reconciling sessions for deleted drafts:', reconError);
+        }
+
       } else {
         console.log('✅ No drafts older than 24 hours');
       }
       
-      return { cleaned: count };
+      return { cleaned: count, deletedDrafts: deletedDraftIds.length, sessionsReset: totalSessionsReset };
       
     } catch (error) {
       console.error('❌ Draft cleanup error:', error.message);
@@ -140,6 +182,7 @@ class CleanupService {
     
     console.log('🧹 Cleanup summary:', {
       drafts: draftResult.cleaned,
+      deletedDrafts: draftResult.deletedDrafts || 0,
       sessions: sessionResult.cleaned
     });
     

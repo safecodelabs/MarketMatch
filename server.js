@@ -461,7 +461,7 @@ app.post("/admin/cleanup", express.json(), async (req, res) => {
             success: true,
             result,
             timestamp: new Date().toISOString(),
-            message: `Cleaned up ${result.cleaned} old drafts`
+            message: `Cleaned up ${result.cleaned} old drafts (deletedDrafts: ${result.deletedDrafts || 0}, sessionsReset: ${result.sessionsReset || 0})`
         });
         
     } catch (error) {

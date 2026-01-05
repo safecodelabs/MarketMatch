@@ -1328,9 +1328,19 @@ class PostingService {
 
   async getNextQuestion(draftId) {
     try {
-      const draft = await this.draftManager.getDraft(draftId);
+      let draft = await this.draftManager.getDraft(draftId);
       if (!draft) {
-        return 'Sorry, I could not find your draft. Please start over.';
+        console.warn(`📝 [POSTING SERVICE] getNextQuestion: draft ${draftId} not found. Searching for user's active draft.`);
+        const existing = await this.draftManager.getUserActiveDraft(this.userId);
+        if (existing) {
+          draft = await this.draftManager.getDraft(existing.id);
+          if (draft) console.log(`📝 [POSTING SERVICE] Using found draft ${existing.id}`);
+        }
+      }
+      
+      if (!draft) {
+        // Friendly instruction to start new listing
+        return 'Sorry, I could not find your draft. Reply with "Start new listing" or press 🆕 Start New Listing to begin.';
       }
       
       const nextField = this.getNextRequiredField(draft);

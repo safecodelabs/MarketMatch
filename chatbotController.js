@@ -427,12 +427,30 @@ async function handlePostingConfirmation(sender, replyId, session, client) {
   
   if (replyId === 'confirm_yes') {
     // Get current draft
-    const draftId = session.draftId;
+    let draftId = session.draftId;
     if (!draftId) {
-      await sendMessageWithClient(sender, "❌ No draft found. Please start over.", client);
-      session.step = "menu";
-      await saveSession(sender, session);
-      return session;
+      console.warn(`📝 [POSTING CONFIRMATION] No draftId in session for ${sender}, looking up active draft`);
+      const existingDraft = await postingService.draftManager.getUserActiveDraft(sender);
+      if (existingDraft) {
+        draftId = existingDraft.id;
+        session.draftId = draftId;
+        console.log(`📝 [POSTING CONFIRMATION] Found active draft ${draftId}, proceeding to submit`);
+      } else {
+        // Offer to start a new listing or cancel instead of a blunt 'start over'
+        await sendInteractiveButtonsWithClient(
+          client,
+          sender,
+          "I couldn't find a draft to publish. Would you like to start a new listing or cancel?",
+          [
+            { id: 'start_new_listing', title: '🆕 Start New Listing' },
+            { id: 'cancel_draft_conflict', title: '❌ Cancel' }
+          ]
+        );
+        session.step = "menu";
+        session.state = 'initial';
+        await saveSession(sender, session);
+        return session;
+      }
     }
     
     // Submit the draft
