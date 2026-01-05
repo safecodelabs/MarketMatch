@@ -788,6 +788,16 @@ logFFmpegInfo() {
     }
 
     /**
+     * Check if transcription is a housing/property search request
+     */
+    isHousingRequest(transcription) {
+        const lowerText = transcription.toLowerCase();
+        // Look for patterns like '2bhk', '2 bhk', '1bhk', 'rent', 'for rent', 'bedroom', 'flat', 'apartment'
+        const housingPattern = /(\b\d+\s?bhk\b)|\b(bhk|bedroom|flat|apartment|rent|for rent|for sale|buy|sell)\b/;
+        return housingPattern.test(lowerText);
+    }
+
+    /**
      * Handle intent confirmation with AI enhancement
      */
     async handleIntentConfirmation(phoneNumber, session, transcription, intent, confidence, client) {
@@ -822,8 +832,28 @@ logFFmpegInfo() {
                 return;
             }
 
-            // Special handling for urban help requests
+            // Special handling for urban help requests (with housing override)
             if (intent === 'urban_help_request') {
+                // If the transcription looks like a housing/property search, override and run property search instead
+                if (this.isHousingRequest(transcription)) {
+                    this.log('INFO', `Detected housing-like transcription, overriding urban_help_request -> property search for ${phoneNumber}`);
+
+                    // Build processingResult for property search
+                    processingResult.intent = 'search_listing';
+                    processingResult.entities = processingResult.entities || {};
+
+                    const lower = transcription.toLowerCase();
+                    const bhkMatch = lower.match(/(\d+)\s?bhk/);
+                    if (bhkMatch) processingResult.entities.bhk = parseInt(bhkMatch[1], 10);
+
+                    const locMatch = lower.match(/in\s+([a-zA-Z\s]+)/);
+                    if (locMatch) processingResult.entities.location = locMatch[1].trim().split(/[,.]/)[0];
+
+                    await this.sendMessage(client, phoneNumber, "✅ Great! Let me find that for you...");
+                    await this.executeAIIntent(phoneNumber, processingResult, client, userLang);
+                    return;
+                }
+
                 await this.handleUrbanHelpIntent(phoneNumber, session, processingResult, client, userLang);
                 return;
             }
@@ -1375,6 +1405,32 @@ logFFmpegInfo() {
                 }
                 
                 await this.sendMessage(client, phoneNumber, noResultsText);
+
+                // Persist user property requests when no results found
+                if (domain === 'property' && firestoreDb && firestoreDb.addUserRequest) {
+                    try {
+                        const requestType = (intent === 'rent_property') ? 'rent' : (intent === 'buy_property') ? 'sale' : (entities.type ? String(entities.type).toLowerCase() : 'sale');
+                        await firestoreDb.addUserRequest(phoneNumber, {
+                            domain: 'property',
+                            type: requestType,
+                            location: entities.location || null,
+                            bedrooms: entities.bhk || entities.bedrooms || null,
+                            budget: entities.budget || null,
+                            timestamp: Date.now()
+                        });
+                        this.log('INFO', `Saved property request for ${phoneNumber}: ${requestType} ${entities.location || ''}`);
+                    } catch (err) {
+                        this.log('ERROR', `Failed to save property request: ${err.message}`);
+                    }
+
+                    // Confirm to user we'll notify them when a match is found
+                    try {
+                        const notifyTextProp = userLang === 'hi' ? 'मैं आपको उपलब्ध होने पर सूचित कर दूंगा।' : userLang === 'ta' ? 'கிடைக்கும் போது உங்களுக்கு தெரிவிப்பேன்.' : "I'll notify you when a matching listing becomes available.";
+                        await this.sendMessage(client, phoneNumber, notifyTextProp);
+                    } catch (err) {
+                        this.log('WARN', `Failed to send notify confirmation: ${err.message}`);
+                    }
+                }
             }
             
         } catch (error) {
