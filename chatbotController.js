@@ -1807,6 +1807,76 @@ async function handlePostingResult(sender, postingResult, session, effectiveClie
 }
 
 // ========================================
+// ✅ NEW: CONFIRMATION HELPER FUNCTIONS
+// ========================================
+/**
+ * Check if text is a confirmation response
+ */
+function isConfirmationResponse(text) {
+  const confirmWords = [
+    'yes', 'yeah', 'yep', 'sure', 'correct', 'right', 'ok', 'okay', 
+    'proceed', 'go ahead', 'that\'s right', 'exactly', 'perfect',
+    'confirm', 'confirmed', 'y', 'ya', 'haan', 'हां', 'ஆம்'
+  ];
+  
+  // Also check for common variations with spaces/special chars
+  const normalized = text.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  return confirmWords.some(word => 
+    text.includes(word) || normalized.includes(word)
+  );
+}
+
+/**
+ * Check if text is a denial response
+ */
+function isDenialResponse(text) {
+  const denyWords = [
+    'no', 'nope', 'wrong', 'incorrect', 'not correct', 'try again',
+    'nah', 'नहीं', 'இல்லை'
+  ];
+  
+  const normalized = text.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  return denyWords.some(word => 
+    text.includes(word) || normalized.includes(word)
+  );
+}
+
+/**
+ * Handle the original request that was confirmed
+ */
+async function handleOriginalRequest(sender, originalText, session, effectiveClient) {
+  console.log(`✅ [ORIGINAL REQUEST] Processing: "${originalText}"`);
+  
+  // CRITICAL: Clear the awaiting confirmation state BEFORE processing
+  session.state = 'initial';
+  session.step = 'menu';
+  delete session.rawTranscription;
+  await saveSession(sender, session);
+  
+  // Now process the original text directly, bypassing confirmation
+  // Check if it's an urban help request
+  if (isUrbanHelpRequest(originalText)) {
+    console.log("🔧 [ORIGINAL REQUEST] Is urban help request");
+    await handleUrbanHelpTextRequest(sender, originalText, session, effectiveClient);
+  } else if (isUserOfferingServices(originalText)) {
+    console.log("📝 [ORIGINAL REQUEST] Is offering services");
+    // Process with posting service
+    const postingResult = await handlePostingService(sender, originalText, session, effectiveClient);
+    if (postingResult.handled) {
+      await handlePostingResult(sender, postingResult, session, effectiveClient);
+    }
+  } else {
+    // Process as property search
+    console.log("🏠 [ORIGINAL REQUEST] Is property search");
+    await sendMessageWithClient(sender, `🔍 Searching for properties matching: *"${originalText}"*`, effectiveClient);
+    
+    // Extract search criteria and search...
+    const { intent, entities } = await voiceService.extractIntent(originalText, sender);
+    await handleVoiceSearch(sender, intent, entities, session, effectiveClient);
+  }
+}
+
+// ========================================
 // UPDATED MAIN CONTROLLER - WITH POSTING SYSTEM, URBAN HELP SUPPORT AND VOICE CONFIRMATION FLOW
 // ========================================
 async function handleIncomingMessage(sender, text = "", metadata = {}, client = null) {
@@ -1863,6 +1933,70 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] processed msg:", msg);
   console.log("🔍 [CONTROLLER DEBUG] processed lower:", lower);
   
+  // ===========================
+  // ✅ CRITICAL FIX: Check for confirmation response BEFORE anything else
+  // ===========================
+  if (text && !replyId) {
+    const lowerText = text.toLowerCase().trim();
+    
+    // Check if this is a confirmation response (YES, NO, etc.)
+    if (session.state === 'awaiting_confirmation' || session.step === 'awaiting_confirmation') {
+      console.log(`✅ [CONFIRMATION FLOW] Processing confirmation: "${text}"`);
+      
+      if (isConfirmationResponse(lowerText)) {
+        console.log(`✅ [CONFIRMATION FLOW] User confirmed: "${text}"`);
+        
+        // Get the stored transcription from session
+        const confirmedText = session.rawTranscription;
+        if (!confirmedText) {
+          await sendMessageWithClient(sender, "❌ No previous request found. Please start over.", effectiveClient);
+          session.state = 'initial';
+          session.step = 'menu';
+          await saveSession(sender, session);
+          await sendMainMenuViaService(sender);
+          return session;
+        }
+        
+        // Process the ORIGINAL request, not the "Yes"
+        await sendMessageWithClient(sender, `✅ Perfect! Processing: *"${confirmedText}"*`, effectiveClient);
+        
+        // Now handle the ORIGINAL request (which was "Looking for 2BHK in Delhi")
+        // This should skip confirmation and go straight to processing
+        await handleOriginalRequest(sender, confirmedText, session, effectiveClient);
+        return session;
+      } else if (isDenialResponse(lowerText)) {
+        console.log(`❌ [CONFIRMATION FLOW] User denied: "${text}"`);
+        await sendMessageWithClient(sender, "🔄 Okay, let's try again. Please send your request again.", effectiveClient);
+        session.state = 'initial';
+        session.step = 'menu';
+        delete session.rawTranscription;
+        await saveSession(sender, session);
+        return session;
+      }
+    }
+  }
+
+  // ===========================
+  // ✅ CRITICAL FIX: Check for button confirmation clicks
+  // ===========================
+  if (replyId && replyId === 'confirm_yes' && session.state === 'awaiting_confirmation') {
+    console.log(`✅ [BUTTON CONFIRMATION] Button click: ${replyId}`);
+    
+    const confirmedText = session.rawTranscription;
+    if (!confirmedText) {
+      await sendMessageWithClient(sender, "❌ No previous request found. Please start over.", effectiveClient);
+      session.state = 'initial';
+      session.step = 'menu';
+      await saveSession(sender, session);
+      await sendMainMenuViaService(sender);
+      return session;
+    }
+    
+    await sendMessageWithClient(sender, `✅ Perfect! Processing: *"${confirmedText}"*`, effectiveClient);
+    await handleOriginalRequest(sender, confirmedText, session, effectiveClient);
+    return session;
+  }
+
   // ===========================
   // ✅ EMERGENCY FIX: Check for POSTING confirmation button clicks FIRST
   // ===========================
