@@ -645,14 +645,19 @@ async function handleVoiceMessage(sender, metadata, client) {
     }
     
     // Check if this is an urban help request using IMPROVED detection
-    if (processingResult.intent === 'urban_help_request' || 
+    // But DO NOT route to urban-help if the transcription looks like a housing/property search
+    const looksLikeHousing = voiceService && typeof voiceService.isHousingRequest === 'function'
+        ? voiceService.isHousingRequest(processingResult.transcription)
+        : false;
+
+    if ((processingResult.intent === 'urban_help_request' || 
         processingResult.entities?.category ||
-        isUrbanHelpRequest(processingResult.transcription)) {
+        isUrbanHelpRequest(processingResult.transcription)) && !looksLikeHousing) {
       
       await handleUrbanHelpVoiceIntent(sender, session, processingResult, effectiveClient);
       
     } else {
-      // Handle existing property-related intents
+      // Handle existing property-related intents (or housing overrides)
       await voiceService.handleIntentConfirmation(
         sender,
         session,
@@ -969,20 +974,17 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
       // No results found
       const noResultsMessage = 
         `❌ Sorry, I couldn't find any *${categoryName}* in *${location}*.\n\n` +
-        `Try:\n` +
-        `• Searching for a different service\n` +
-        `• Checking a nearby location\n` +
-        `• Using broader search terms\n\n` +
-        `You can also try saying: "electrician near me" or "plumber in Delhi"`;
+        `I'll notify you when a matching provider becomes available.`;
           
       await sendMessageWithClient(sender, noResultsMessage, client);
       
-      // Add to user requests as pending
+      // Add to user requests as pending (for future notifications)
       await addUserRequest(sender, {
         category: category,
         location: location,
         status: 'pending',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        originalText: originalText
       });
     }
     

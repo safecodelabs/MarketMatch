@@ -31,6 +31,10 @@ config/*.json
 
 firebaseCreds/serviceAccount.json
 credentials/
+# Ignore local test and utility scripts
+scripts/
+
+# Legacy test files
 testSheets.js
 testAI.js
 testReq.js

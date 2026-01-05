@@ -142,38 +142,10 @@ async function searchUrbanServices(category, location) {
       return filteredResults.slice(0, 5); // Return top 5 matches
     }
     
-    // No matches at all - return services from the same location OR similar category
-    console.log(`🔍 [URBAN SERVICES] No matches, returning nearby services`);
-    
-    if (searchLocation) {
-      // Return services from same location but different category
-      const locationMatches = allServices.filter(service => 
-        (service.location || '').toLowerCase().includes(searchLocation) ||
-        searchLocation.includes((service.location || '').toLowerCase())
-      );
-      
-      if (locationMatches.length > 0) {
-        console.log(`✅ [URBAN SERVICES] Found ${locationMatches.length} services in ${location}`);
-        return locationMatches.slice(0, 3);
-      }
-    }
-    
-    if (searchCategory) {
-      // Return services with similar category but different location
-      const categoryMatches = allServices.filter(service => 
-        (service.category || '').toLowerCase().includes(searchCategory) ||
-        searchCategory.includes((service.category || '').toLowerCase())
-      );
-      
-      if (categoryMatches.length > 0) {
-        console.log(`✅ [URBAN SERVICES] Found ${categoryMatches.length} ${category} services`);
-        return categoryMatches.slice(0, 3);
-      }
-    }
-    
-    // Last resort: return top 3 services
-    console.log(`📭 [URBAN SERVICES] No matches found at all, returning top services`);
-    return allServices.slice(0, 3);
+    // No relevant matches found — do NOT return unrelated nearby or top services.
+    // We prefer being strict: return empty so caller can persist the user's request for future notification.
+    console.log(`📭 [URBAN SERVICES] No relevant matches found for ${category} in ${location}; returning empty results`);
+    return [];
     
   } catch (error) {
     console.error("❌ [URBAN SERVICES] Error searching urban services:", error);
