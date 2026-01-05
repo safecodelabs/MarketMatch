@@ -219,42 +219,81 @@ function getFallbackServices(category, location) {
 async function searchUrbanHelp(category, location, filters = {}) {
   try {
     console.log(`🔍 [URBAN HELP] Searching for ${category} in ${location}`);
-    
-    let query = urbanHelpProvidersRef;
-    
-    if (category) {
-      query = query.where("category", "==", category);
-    }
-    
-    if (filters.isActive !== undefined) {
-      query = query.where("isActive", "==", filters.isActive);
-    }
-    
-    const snapshot = await query.limit(10).get();
-    
-    if (snapshot.empty) {
-      console.log(`📭 [URBAN HELP] No providers found for ${category} in ${location}`);
-      return [];
-    }
-    
+
     const results = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      results.push({
-        id: doc.id,
-        name: data.name || 'Service Provider',
-        category: data.category || 'service',
-        location: data.location || 'Not specified',
-        phone: data.phone || data.contact || 'Contact not available',
-        rating: data.rating || 0,
-        isActive: data.isActive !== false, // Default to true
-        createdAt: data.createdAt || null
+
+    // 1) Search registered urban_help providers first
+    let providerQuery = urbanHelpProvidersRef;
+    if (category) providerQuery = providerQuery.where('category', '==', category);
+    if (filters.isActive !== undefined) providerQuery = providerQuery.where('isActive', '==', filters.isActive);
+
+    const providerSnap = await providerQuery.limit(10).get();
+    if (!providerSnap.empty) {
+      providerSnap.forEach(doc => {
+        const data = doc.data();
+        results.push({
+          id: doc.id,
+          source: 'provider',
+          name: data.name || 'Service Provider',
+          category: data.category || 'service',
+          location: data.location || 'Not specified',
+          phone: data.phone || data.contact || 'Contact not available',
+          rating: data.rating || 0,
+          isActive: data.isActive !== false,
+          createdAt: data.createdAt || null
+        });
       });
-    });
-    
-    console.log(`✅ [URBAN HELP] Found ${results.length} providers`);
-    return results;
-    
+    } else {
+      console.log(`📭 [URBAN HELP] No providers found for ${category} in ${location} (providers collection)`);
+    }
+
+    // 2) Also search listings with category 'urban_help' so user-posted service listings appear
+    try {
+      let listingsQuery = listingsRef.where('category', '==', 'urban_help').where('status', '==', 'active');
+
+      if (location) {
+        // Try to match by location.area or location fields inside listing data
+        listingsQuery = listingsQuery.where('data.location.area', '==', location);
+      }
+
+      // Limit and get results
+      const listingSnap = await listingsQuery.limit(10).get();
+      if (!listingSnap.empty) {
+        listingSnap.forEach(doc => {
+          const data = doc.data();
+          // Map listing to provider-like result
+          results.push({
+            id: doc.id,
+            source: 'listing',
+            name: data.title || (data.data?.['urban_help']?.serviceType || 'Service Listing'),
+            category: data.category || 'urban_help',
+            location: data.data?.location?.area || data.data?.location || 'Not specified',
+            phone: data.owner?.phone || data.owner?.userId || 'Contact not available',
+            rating: 0,
+            isActive: data.status === 'active',
+            createdAt: data.createdAt || null
+          });
+        });
+      } else {
+        console.log(`📭 [URBAN HELP] No listings found for urban_help in ${location}`);
+      }
+    } catch (err) {
+      console.error('❌ [URBAN HELP] Error searching listings for urban help:', err);
+    }
+
+    // 3) Filter/score results (simple approach: unique by id)
+    const unique = {};
+    const final = [];
+    for (const r of results) {
+      if (!unique[r.id]) {
+        unique[r.id] = true;
+        final.push(r);
+      }
+    }
+
+    console.log(`✅ [URBAN HELP] Found ${final.length} results (providers + listings)`);
+    return final.slice(0, 10);
+
   } catch (error) {
     console.error('❌ [URBAN HELP] Error searching urban help:', error);
     return [];
@@ -547,9 +586,26 @@ async function getAllListings() {
 // -----------------------------------------------
 async function getUserListings(userId) {
   try {
-    // Listings are saved with the 'user' field corresponding to the sender's WA_ID
-    const snapshot = await listingsRef.where("user", "==", userId).get(); 
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    // New listings use nested owner.userId, older ones may use top-level 'user' field.
+    // Query both and merge results to be backward compatible.
+    const results = [];
+
+    // Query by owner.userId
+    const byOwner = await listingsRef.where('owner.userId', '==', userId).get();
+    if (!byOwner.empty) {
+      byOwner.forEach(d => results.push({ id: d.id, ...d.data() }));
+    }
+
+    // Query by legacy 'user' field
+    const byUser = await listingsRef.where('user', '==', userId).get();
+    if (!byUser.empty) {
+      byUser.forEach(d => {
+        // Avoid duplicates
+        if (!results.find(r => r.id === d.id)) results.push({ id: d.id, ...d.data() });
+      });
+    }
+
+    return results;
   } catch (err) {
     console.error("🔥 Error fetching user listings:", err);
     return [];
