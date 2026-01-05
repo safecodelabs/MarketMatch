@@ -1726,6 +1726,48 @@ async function handlePostListingFlow(sender, session = null, client = null) {
   }
 }
 
+// ===========================
+// ✅ NEW: Handle posting result function
+// ===========================
+async function handlePostingResult(sender, postingResult, session, effectiveClient) {
+  console.log(`📝 [HANDLE POSTING] Handling posting result: ${postingResult.type}`);
+  
+  switch(postingResult.type) {
+    case 'question':
+    case 'confirmation':
+      await sendMessageWithClient(sender, postingResult.response, effectiveClient);
+      session.step = "posting_flow";
+      break;
+      
+    case 'confirmation_with_buttons':
+    case 'summary_with_buttons':
+      console.log(`📝 [HANDLE POSTING] Sending confirmation with buttons`);
+      await sendInteractiveButtonsWithClient(
+        effectiveClient,
+        sender,
+        postingResult.response,
+        postingResult.buttons || [
+          { id: 'confirm_yes', title: '✅ Yes, Post It' },
+          { id: 'confirm_no', title: '❌ No, Cancel' }
+        ]
+      );
+      session.step = "posting_flow";
+      session.expectedField = 'confirmation';
+      break;
+      
+    case 'success':
+    case 'cancelled':
+    case 'error':
+      await sendMessageWithClient(sender, postingResult.response, effectiveClient);
+      session.step = "menu";
+      session.state = 'initial';
+      break;
+      
+    default:
+      console.log(`⚠️ [HANDLE POSTING] Unknown posting result type: ${postingResult.type}`);
+  }
+}
+
 // ========================================
 // UPDATED MAIN CONTROLLER - WITH POSTING SYSTEM, URBAN HELP SUPPORT AND VOICE CONFIRMATION FLOW
 // ========================================
@@ -1746,6 +1788,23 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Effective client available:", !!effectiveClient);
   
   if (!sender) return;
+
+  // ===========================
+  // ✅ CRITICAL FIX: Get session FIRST, before any checks
+  // ===========================
+  let session = (await getSession(sender)) || { 
+    step: "start",
+    state: 'initial',
+    housingFlow: { 
+      step: "start", 
+      data: {},
+      currentIndex: 0, 
+      listingData: null
+    },
+    isInitialized: false
+  };
+  
+  console.log("🔍 [CONTROLLER DEBUG] Session loaded:", session.step, session.state);
 
   // ===========================
   // ✅ CRITICAL FIX: Declare replyId EARLY
@@ -1770,22 +1829,9 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ✅ EMERGENCY FIX: Check for POSTING confirmation button clicks FIRST
   // ===========================
   if (replyId && replyId.startsWith('confirm_') && 
-      (session?.mode === 'posting' || session?.step === 'posting_flow')) {
+      (session.mode === 'posting' || session.step === 'posting_flow')) {
     
     console.log(`📝 [POSTING CONFIRMATION FIRST] Detected posting confirmation button: ${replyId}`);
-    
-    // Get session if not passed
-    let session = session || (await getSession(sender)) || { 
-      step: "start",
-      state: 'initial',
-      housingFlow: { 
-        step: "start", 
-        data: {},
-        currentIndex: 0, 
-        listingData: null
-      },
-      isInitialized: false
-    };
     
     // Handle posting confirmation
     await handlePostingConfirmation(sender, replyId, session, effectiveClient);
@@ -1798,7 +1844,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
 // ===========================
 if (text && !replyId) {
   // Get session first
-  let session = (await getSession(sender)) || { 
+  session = (await getSession(sender)) || { 
     step: "start",
     state: 'initial',
     housingFlow: { 
@@ -1906,7 +1952,7 @@ if (text && !replyId) {
     console.log("🎤 [VOICE] Audio message detected");
     
     // Get session
-    let session = (await getSession(sender)) || { 
+    session = (await getSession(sender)) || { 
       step: "start",
       isInitialized: false,
       awaitingLang: false,
@@ -2014,7 +2060,7 @@ if (text && !replyId) {
   }
 
   // Get session
-  let session = (await getSession(sender)) || { 
+  session = (await getSession(sender)) || { 
     step: "start",
     state: 'initial',
     housingFlow: { 
