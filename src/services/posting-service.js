@@ -830,6 +830,23 @@ class PostingService {
             info.unitType = `${bhkMatch[1]}BHK`;
           }
         }
+
+        // Extract city/location from phrases like "in Bombay", "at Noida", "near Gurgaon"
+        if (!info.location) {
+          const locMatch = message.match(/\b(?:in|at|near)\s+([A-Za-z\s]{2,40})(?:$|,|\.|\b)/i);
+          if (locMatch && locMatch[1]) {
+            info.location = locMatch[1].trim();
+          }
+        }
+
+        // If message mentions rent/price with a number, capture it
+        if (!info.rent && /rent|monthly|price|rs|₹|rupee|per month/i.test(message)) {
+          const priceMatch = message.match(/(\d+[\d,\.]*)(?:\s*(lakh|lac|k|thousand|crore|cr))?/i);
+          if (priceMatch) {
+            const parsed = this.parsePrice(priceMatch[0]);
+            if (parsed) info.rent = parsed;
+          }
+        }
         
       } else if (category === 'vehicle') {
         if (entities.type) info.vehicleType = entities.type;

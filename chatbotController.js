@@ -2114,6 +2114,28 @@ if (text && !replyId) {
   console.log("🔍 [CONTROLLER DEBUG] Session step:", session.step);
   console.log("🔍 [CONTROLLER DEBUG] Session state:", session.state);
 
+  // ---------------------------------------------
+  // Quick handling: if we are awaiting an urban-help location, accept any text as location
+  // This ensures a user can reply "Noida" or "Bombay" without being routed to unknown command
+  // ---------------------------------------------
+  if (text && session.urbanHelpContext && session.urbanHelpContext.step === 'awaiting_location') {
+    console.log(`🔧 [URBAN HELP] Received location while awaiting_location: ${text}`);
+    session.urbanHelpContext.location = text;
+    session.urbanHelpContext.text = session.urbanHelpContext.text || text;
+    session.urbanHelpContext.step = "awaiting_confirmation";
+
+    await sendUrbanHelpConfirmation(sender,
+      session.urbanHelpContext.text,
+      session.urbanHelpContext,
+      multiLanguage.getUserLanguage(sender) || 'en',
+      effectiveClient
+    );
+
+    session.step = "awaiting_urban_help_confirmation";
+    await saveSession(sender, session);
+    return session;
+  }
+
 // ===========================
 // ✅ UPDATED: CHECK FOR POSTING SERVICE - INCLUDES CONFIRMATION HANDLING
 // ===========================
