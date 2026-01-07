@@ -71,10 +71,11 @@ async function handle(cmd, session = {}, userId, language = "en", payload = {}) 
 
     case "post_command":
       console.log("📝 Handling post_command");
+      const prompt = require('../../utils/multiLanguage').getMessageForUser(userId, 'prompt_provide_listing_details');
       return {
         reply: {
           type: "text",
-          text: { body: "Please provide listing details: title, location, type, price, and contact." }
+          text: { body: prompt }
         },
         nextSession: session
       };

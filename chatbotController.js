@@ -346,9 +346,9 @@ async function handlePostingService(sender, message, session, effectiveClient) {
       
       if (existingDraft) {
         await postingService.draftManager.deleteDraft(existingDraft.id);
-        await sendMessageWithClient(sender, "✅ Draft cleared! You can now start a new listing.", effectiveClient);
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'draft_cleared'), effectiveClient);
       } else {
-        await sendMessageWithClient(sender, "✅ No active draft found. You can start a new listing.", effectiveClient);
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'no_active_draft'), effectiveClient);
       }
       
       return { handled: true, type: 'success' };
@@ -500,7 +500,7 @@ async function handlePostingConfirmation(sender, replyId, session, client) {
       await postingService.draftManager.deleteDraft(draftId);
     }
     
-    await sendMessageWithClient(sender, "❌ Listing cancelled.", client);
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'success_listing_deleted'), client);
     
     session.step = "menu";
     session.state = 'initial';
@@ -510,7 +510,7 @@ async function handlePostingConfirmation(sender, replyId, session, client) {
     await saveSession(sender, session);
   } else if (replyId === 'type_instead') {
     // User chose to type instead of clicking buttons
-    await sendMessageWithClient(sender, 'Okay — please type "Yes" to confirm, "No" to cancel, or type a field update like "rent 12000" to edit.', client);
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'confirm_typed_instructions'), client);
     session.expectedField = 'confirmation';
     session.allowTypedConfirmation = true;
     session.step = 'posting_flow';
@@ -622,14 +622,14 @@ async function handleVoiceMessage(sender, metadata, client) {
     // Get effective client
     const effectiveClient = getEffectiveClient(client);
     if (!effectiveClient) {
-      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
       session.step = "menu";
       await saveSession(sender, session);
       return session;
     }
     
     // Send processing message
-    await sendMessageWithClient(sender, "🎤 Processing your voice message... Please wait a moment.");
+await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'processing_voice'));
     
     // Get media URL from metadata - IMPROVED EXTRACTION
     const mediaUrl = metadata.body || 
@@ -640,7 +640,7 @@ async function handleVoiceMessage(sender, metadata, client) {
     
     if (!mediaUrl) {
       console.error("🎤 [VOICE] No audio URL found in metadata:", metadata);
-      await sendMessageWithClient(sender, "❌ Could not access the voice message. Please try sending it again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_voice_access'));
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -656,7 +656,7 @@ async function handleVoiceMessage(sender, metadata, client) {
     );
     
     if (!processingResult.success) {
-      await sendMessageWithClient(sender, `❌ Error processing voice: ${processingResult.error}\n\nPlease try again or type your request.`);
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_voice_processing'));
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -701,7 +701,7 @@ async function handleVoiceMessage(sender, metadata, client) {
     
   } catch (error) {
     console.error("🎤 [VOICE] Error handling voice message:", error);
-    await sendMessageWithClient(sender, "❌ Sorry, I couldn't process your voice message. Please try typing your request.");
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_voice_processing'));
     return null;
   }
 }
@@ -864,7 +864,7 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
   const urbanContext = session.urbanHelpContext;
   
   if (!urbanContext) {
-    await sendMessageWithClient(sender, "❌ Session expired. Please start over.");
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_session_expired'));
     session.step = "menu";
     await saveSession(sender, session);
     return session;
@@ -885,12 +885,12 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
     await executeUrbanHelpSearch(sender, urbanContext.entities, session, client, userLang);
     
   } else if (response === 'try_again_urban') {
-    await sendMessageWithClient(sender, "🔄 Please send your request again.");
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'try_again'));
     delete session.urbanHelpContext;
     session.step = "awaiting_voice";
     
   } else if (response === 'modify_details') {
-    await sendMessageWithClient(sender, "✏️ What would you like to change? Please send your updated request.");
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'ask_send_updated_request'));
     delete session.urbanHelpContext;
     session.step = "awaiting_urban_help_text";
     
@@ -1114,7 +1114,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
     
     const voiceContext = session.voiceContext;
     if (!voiceContext) {
-      await sendMessageWithClient(sender, "❌ Voice context lost. Please start over.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_voice_context_lost'));
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -1125,7 +1125,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
     // Get effective client
     const effectiveClient = getEffectiveClient(client);
     if (!effectiveClient) {
-      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
       session.step = "menu";
       await saveSession(sender, session);
       return session;
@@ -1139,13 +1139,13 @@ async function handleVoiceConfirmation(sender, response, session, client) {
         await sendMessageWithClient(sender, `✅ Got it! Processing: "${originalTranscription}"`);
         await executeVoiceIntent(sender, intent, entities, session, effectiveClient);
       } else {
-        await sendMessageWithClient(sender, "❌ Intent mismatch. Please try again.");
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'try_again'));
         session.step = "menu";
       }
       
     } else if (response === "try_again") {
       // User wants to try voice again
-      await sendMessageWithClient(sender, "🔄 Please send your voice message again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'try_again'));
       session.step = "awaiting_voice";
       delete session.voiceContext;
       
@@ -1157,7 +1157,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
       await sendMainMenuViaService(sender);
       
     } else {
-      await sendMessageWithClient(sender, "I didn't understand that response. Please use the buttons provided.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'not_understood'));
       // Show confirmation buttons again
       await voiceService.sendConfirmationButtons(
         { from: sender },
@@ -1173,7 +1173,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
     
   } catch (error) {
     console.error("🎤 [VOICE] Error handling confirmation:", error);
-    await sendMessageWithClient(sender, "❌ Error processing your response. Please try again.");
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'try_again'));
     session.step = "menu";
     await saveSession(sender, session);
     return session;
@@ -1315,7 +1315,7 @@ async function handleVoiceSearch(sender, intent, entities, session, client) {
     // Get effective client
     const effectiveClient = getEffectiveClient(client);
     if (!effectiveClient) {
-      await sendMessageWithClient(sender, "❌ WhatsApp client not available.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
       return;
     }
     
@@ -1717,7 +1717,7 @@ async function handlePostListingFlow(sender, session = null, client = null) {
   
   const effectiveClient = getEffectiveClient(client);
   if (!effectiveClient) {
-    await sendMessageWithClient(sender, "❌ WhatsApp client not available.");
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
     return;
   }
   
@@ -1911,6 +1911,20 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     },
     isInitialized: false
   };
+
+  // Load user's preferred language from profile (if saved) and apply to multiLanguage
+  try {
+    const userProfile = await getUserProfile(sender);
+    if (userProfile && userProfile.preferredLanguage) {
+      if (multiLanguage.isLanguageSupported(userProfile.preferredLanguage)) {
+        multiLanguage.setUserLanguage(sender, userProfile.preferredLanguage);
+        session.preferredLanguage = userProfile.preferredLanguage;
+        console.log(`🌐 Applied saved preferred language: ${userProfile.preferredLanguage} for ${sender}`);
+      }
+    }
+  } catch (err) {
+    console.warn('🌐 Could not load user profile language:', err);
+  }
   
   console.log("🔍 [CONTROLLER DEBUG] Session loaded:", session.step, session.state);
 
@@ -1927,6 +1941,30 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   
   console.log("🔍 [CONTROLLER DEBUG] replyId:", replyId);
   
+  // Handle language list replies early
+  if (replyId && replyId.startsWith('lang_')) {
+    const lang = replyId.split('lang_')[1];
+    const languageNames = { en: 'English', hi: 'हिंदी', ta: 'தமிழ்', gu: 'ગુજરાતી', kn: 'ಕನ್ನಡ' };
+    try {
+      const saved = await saveUserLanguage(sender, lang);
+      if (saved) {
+        multiLanguage.setUserLanguage(sender, lang);
+        session.housingFlow = session.housingFlow || {};
+        session.housingFlow.awaitingLangSelection = false;
+        session.step = 'menu';
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'language_set', { lang: languageNames[lang] || lang }));
+        await saveSession(sender, session);
+        await sendMainMenuViaService(sender, lang);
+        return session;
+      } else {
+        await sendMessageWithClient(sender, 'Unsupported language selected.');
+        return session;
+      }
+    } catch (err) {
+      console.error('🌐 Error setting language from list reply:', err);
+    }
+  }
+
   const msg = String(replyId || text || "").trim();
   const lower = msg.toLowerCase();
   
@@ -1949,7 +1987,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         // Get the stored transcription from session
         const confirmedText = session.rawTranscription;
         if (!confirmedText) {
-          await sendMessageWithClient(sender, "❌ No previous request found. Please start over.", effectiveClient);
+          await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'no_previous_request'), effectiveClient);
           session.state = 'initial';
           session.step = 'menu';
           await saveSession(sender, session);
@@ -1966,7 +2004,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         return session;
       } else if (isDenialResponse(lowerText)) {
         console.log(`❌ [CONFIRMATION FLOW] User denied: "${text}"`);
-        await sendMessageWithClient(sender, "🔄 Okay, let's try again. Please send your request again.", effectiveClient);
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'try_again'), effectiveClient);
         session.state = 'initial';
         session.step = 'menu';
         delete session.rawTranscription;
@@ -1984,7 +2022,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     
     const confirmedText = session.rawTranscription;
     if (!confirmedText) {
-      await sendMessageWithClient(sender, "❌ No previous request found. Please start over.", effectiveClient);
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'no_previous_request'), effectiveClient);
       session.state = 'initial';
       session.step = 'menu';
       await saveSession(sender, session);
@@ -2136,7 +2174,7 @@ if (text && !replyId) {
     
     if (!audioUrl) {
       console.error("🎤 [VOICE] No audio URL found");
-      await sendMessageWithClient(sender, "❌ Could not access the voice message. Please try sending it again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_voice_access'));
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
@@ -2146,7 +2184,7 @@ if (text && !replyId) {
     console.log("🎤 [VOICE] Processing audio URL:", audioUrl.substring(0, 100) + "...");
     
     // Send processing message
-    await sendMessageWithClient(sender, "🎤 Processing your voice message...");
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'processing_voice'));
     
     try {
       // 1. Process voice for transcription ONLY
@@ -2437,7 +2475,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
         const confirmedText = session.rawTranscription;
         
         if (!confirmedText) {
-            await sendMessageWithClient(sender, "❌ No transcription found. Please try again.");
+            await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'no_transcription'));
             session.state = 'initial';
             session.step = 'menu';
             await saveSession(sender, session);
@@ -2553,7 +2591,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
         
     } else if (replyId === 'try_again' || replyId === 'try_again_urban') {
         // User wants to try again
-        await sendMessageWithClient(sender, "🔄 No problem! Please send your voice message again.");
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'try_again'));
         session.state = 'initial';
         session.step = 'menu';
         delete session.rawTranscription;
@@ -2562,7 +2600,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
         
     } else if (replyId === 'type_instead') {
         // User wants to type
-        await sendMessageWithClient(sender, "📝 Please type what you're looking for:");
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'prompt_type_what_looking'));
         session.state = 'awaiting_text_input';
         session.step = 'awaiting_text_input';
         delete session.rawTranscription;
@@ -2570,7 +2608,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
         
     } else if (replyId === 'use_buttons') {
         // User wants to use menu buttons
-        await sendMessageWithClient(sender, "📋 Showing menu options...");
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'showing_menu_options'));
         session.state = 'initial';
         session.step = 'menu';
         delete session.rawTranscription;
@@ -2627,7 +2665,7 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
     // Get the original message from session context
     const originalMessage = session.rawTranscription || session.lastMessage || '';
     if (originalMessage) {
-      await sendMessageWithClient(sender, "🆕 Starting new listing...", effectiveClient);
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'starting_new_listing'), effectiveClient);
       
       // Process the original message again
       const result = await postingService.processMessage(originalMessage);
@@ -2646,7 +2684,7 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
     }
     
   } else if (replyId === 'cancel_draft_conflict') {
-    await sendMessageWithClient(sender, "❌ Draft conflict cancelled. Returning to menu.", effectiveClient);
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'draft_conflict_cancelled'), effectiveClient);
     session.step = "menu";
     session.state = 'initial';
     delete session.mode;
@@ -2674,7 +2712,7 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
       const confirmedText = session.rawTranscription;
       
       if (!confirmedText) {
-        await sendMessageWithClient(sender, "❌ No transcription found. Please try again.");
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'no_transcription'));
         session.state = 'initial';
         session.step = 'menu';
         await saveSession(sender, session);
@@ -2803,7 +2841,7 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
       await saveSession(sender, session);
     } catch (error) {
       console.error("❌ Error sending flow:", error);
-      await sendMessageWithClient(sender, "❌ Could not load the form. Please try the chat option instead.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_load_form'));
       session.step = "menu";
       await saveSession(sender, session);
     }
@@ -2890,10 +2928,8 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
   // 7) NEW USER INTRO
   // ===========================
   if (isGreeting && isNewUser) {
-    await sendMessageWithClient(
-      sender,
-      "👋 *Welcome to MarketMatch AI!* \n\nI'm your personal assistant for:\n🏠 Rentals & Real Estate\n🔧 Urban Help Services\n👤 PG / Flatmates\n\nLet's begin by choosing your preferred language."
-    );
+    await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'welcome'));
+    
 
     await sendLanguageListViaService(sender);
 
@@ -2925,20 +2961,31 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
 
     if (parsed) {
       try {
-        await saveUserLanguage(sender, parsed);
+        const saved = await saveUserLanguage(sender, parsed);
+        if (saved) {
+          multiLanguage.setUserLanguage(sender, parsed);
+          session.housingFlow.awaitingLangSelection = false;
+          session.step = "menu";
+          session.state = 'initial';
+          await saveSession(sender, session);
+
+          // Send confirmation localized
+          const languageNames = { en: 'English', hi: 'हिंदी', ta: 'தமிழ்', gu: 'ગુજરાતી', kn: 'ಕನ್ನಡ' };
+          await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'language_set', { lang: languageNames[parsed] || parsed }));
+
+          await sendMainMenuViaService(sender, parsed);
+          return session;
+        }
       } catch (err) {
         console.warn("saveUserLanguage error:", err);
       }
 
-      session.housingFlow.awaitingLangSelection = false;
-      session.step = "menu";
-      session.state = 'initial';
-      await saveSession(sender, session);
-
-      await sendMainMenuViaService(sender);
+      // Fallback if save failed
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'select_language_prompt'));
+      await sendLanguageListViaService(sender);
       return session;
     } else {
-      await sendMessageWithClient(sender, "Please select a language 👇");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'select_language_prompt'));
       await sendLanguageListViaService(sender);
       return session;
     }
@@ -2989,7 +3036,7 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
         await sendMessageWithClient(sender, `✅ I understand you want to ${processingResult.intent.replace('_', ' ')}.`);
         await executeVoiceIntent(sender, processingResult.intent, processingResult.entities, session, effectiveClient);
       } else {
-        await sendMessageWithClient(sender, "🤔 I'm not sure what you're looking for. Please use the menu options below.");
+        await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'not_sure_try_menu'));
         await sendMainMenuViaService(sender);
       }
     }
@@ -3173,7 +3220,7 @@ What would you like to do with this listing?`;
       );
     } else {
       console.error("❌ [CONTROLLER] Listing ID mismatch");
-      await sendMessageWithClient(sender, "❌ Unable to edit listing. Please try again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_unable_edit_listing'));
     }
     return session;
   }
@@ -3778,13 +3825,20 @@ async function sendLanguageListViaService(to) {
   );
 }
 
-async function sendMainMenuViaService(to) {
-  const sections = [{ title: "Menu", rows: MENU_ROWS }];
+async function sendMainMenuViaService(to, language = 'en') {
+  // Use the multiLanguage menu rows when possible
+  const rows = multiLanguage.getMainMenuRows(language);
+  const sections = [{ title: multiLanguage.getMessage(language, 'main_menu') || 'Menu', rows }];
+
+  const title = multiLanguage.getMessage(language, 'welcome')?.split('\n')?.[0] || '🏡 MarketMatch AI';
+  const body = multiLanguage.getMessage(language, 'main_menu') || 'Choose an option:';
+  const buttonText = multiLanguage.getMessage(language, 'btn_menu') || 'Select an option';
+
   return sendList(
     to,
-    "🏡 MarketMatch AI",
-    "Choose an option:",
-    "Select an option",
+    title,
+    body,
+    buttonText,
     sections
   );
 }
@@ -3820,7 +3874,7 @@ async function handleShowListings(sender, session) {
     const effectiveClient = getEffectiveClient();
     
     if (!effectiveClient) {
-      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
@@ -3939,7 +3993,7 @@ async function handleManageListings(sender) {
     const effectiveClient = getEffectiveClient();
     
     if (!effectiveClient) {
-      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
       return;
     }
     
@@ -4011,7 +4065,7 @@ async function handleSavedListings(sender) {
     const effectiveClient = getEffectiveClient();
     
     if (!effectiveClient) {
-      await sendMessageWithClient(sender, "❌ WhatsApp client not available. Please try again.");
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
       return;
     }
     
