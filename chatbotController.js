@@ -37,7 +37,8 @@ const {
   addUrbanHelpProvider,
   getProviderById,
   updateProviderAvailability,
-  addUserRequest
+  addUserRequest,
+  updateRequestStatus
 } = require("./database/firestore");
 
 // ✅ UPDATED: Added sendSavedListingCard
@@ -668,6 +669,60 @@ await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'pro
         ? voiceService.isHousingRequest(processingResult.transcription)
         : false;
 
+    // If we are in the middle of an urban-help flow awaiting missing information,
+    // accept this transcription as the missing piece (e.g., user says "Noida" after being asked)
+    if (session && session.urbanHelpContext && (session.urbanHelpContext.step === 'awaiting_missing_info' || session.urbanHelpContext.step === 'awaiting_location' || session.step === 'awaiting_urban_help_info')) {
+      const missing = session.urbanHelpContext.missingInfo || [];
+      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+
+      // If location is missing, treat short transcription as the location
+      if (missing.includes('location')) {
+        const loc = processingResult.transcription && processingResult.transcription.trim();
+        if (loc) {
+          session.urbanHelpContext.entities = session.urbanHelpContext.entities || {};
+          session.urbanHelpContext.entities.location = loc;
+          session.urbanHelpContext.step = 'awaiting_confirmation';
+          session.step = 'awaiting_urban_help_confirmation';
+
+          await sendUrbanHelpConfirmation(sender, session.urbanHelpContext.transcription || loc, session.urbanHelpContext.entities, userLang, client);
+          await saveSession(sender, session);
+          return session;
+        }
+      }
+
+      // If category is missing, try extracting it from the transcription
+      if (missing.includes('category')) {
+        const extracted = extractUrbanHelpFromText(processingResult.transcription || '');
+        if (extracted.category) {
+          session.urbanHelpContext.entities = session.urbanHelpContext.entities || {};
+          session.urbanHelpContext.entities.category = extracted.category;
+
+          // If location still missing, ask for location
+          if (!session.urbanHelpContext.entities.location) {
+            await askForMissingUrbanHelpInfo(sender, session.urbanHelpContext.entities, ['location'], userLang, client);
+            session.urbanHelpContext.step = 'awaiting_location';
+            session.step = 'awaiting_urban_help_location';
+            await saveSession(sender, session);
+            return session;
+          } else {
+            // We have both, show confirmation
+            await sendUrbanHelpConfirmation(sender, session.urbanHelpContext.transcription || processingResult.transcription, session.urbanHelpContext.entities, userLang, client);
+            session.urbanHelpContext.step = 'awaiting_confirmation';
+            session.step = 'awaiting_urban_help_confirmation';
+            await saveSession(sender, session);
+            return session;
+          }
+        } else {
+          // Could not extract category from the short transcription, ask again
+          await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'ask_category'));
+          session.urbanHelpContext.step = 'awaiting_category';
+          session.step = 'awaiting_urban_help_category';
+          await saveSession(sender, session);
+          return session;
+        }
+      }
+    }
+
     if ((processingResult.intent === 'urban_help_request' || 
         processingResult.entities?.category ||
         isUrbanHelpRequest(processingResult.transcription)) && !looksLikeHousing) {
@@ -729,6 +784,27 @@ async function handleUrbanHelpVoiceIntent(sender, session, processingResult, cli
       step: "awaiting_missing_info"
     };
     session.step = "awaiting_urban_help_info";
+
+    // Persist a pending user request if location is missing so we can match/update later
+    // NOTE: This allows the system to keep track of "I'm looking for X" when the user
+    // only provided the category (e.g., "I need a plumber") and will supply the
+    // location later — so when the location arrives we can update and run the search.
+    try {
+      if (missingInfo.includes('location') && typeof addUserRequest === 'function') {
+        const pending = await addUserRequest(sender, {
+          category: entities.category || null,
+          location: null,
+          originalText: transcription || null,
+          note: 'awaiting_location'
+        });
+        if (pending && pending.success) {
+          session.urbanHelpContext.requestId = pending.requestId;
+          console.log(`✅ [URBAN HELP] Pending user request saved: ${pending.requestId}`);
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ [URBAN HELP] Could not save pending user request:', err);
+    }
     
   } else if (confidence < 0.7) {
     // Low confidence - ask for clarification
@@ -979,14 +1055,24 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
       const resultsMessage = formatUrbanHelpResults(results, userLang, categoryName);
       await sendMessageWithClient(sender, resultsMessage, client);
       
-      // Add to user requests
-      await addUserRequest(sender, {
-        category: category,
-        location: location,
-        status: 'matched',
-        matchedProviders: results.map(r => r.id).slice(0, 3),
-        timestamp: Date.now()
-      });
+      // If we have an existing pending request, update it to 'matched'
+      if (session?.urbanHelpContext?.requestId && typeof updateRequestStatus === 'function') {
+        try {
+          await updateRequestStatus(session.urbanHelpContext.requestId, 'matched', results.map(r => r.id).slice(0, 3));
+          console.log(`✅ [URBAN HELP] Updated request ${session.urbanHelpContext.requestId} to 'matched'`);
+        } catch (err) {
+          console.warn('⚠️ [URBAN HELP] Could not update request status to matched:', err);
+        }
+      } else {
+        // Add to user requests
+        await addUserRequest(sender, {
+          category: category,
+          location: location,
+          status: 'matched',
+          matchedProviders: results.map(r => r.id).slice(0, 3),
+          timestamp: Date.now()
+        });
+      }
       
     } else {
       // No results found
@@ -996,14 +1082,24 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
           
       await sendMessageWithClient(sender, noResultsMessage, client);
       
-      // Add to user requests as pending (for future notifications)
-      await addUserRequest(sender, {
-        category: category,
-        location: location,
-        status: 'pending',
-        timestamp: Date.now(),
-        originalText: originalText
-      });
+      // If we have an existing pending request, just keep it pending (update originalText if needed)
+      if (session?.urbanHelpContext?.requestId && typeof updateRequestStatus === 'function') {
+        try {
+          await updateRequestStatus(session.urbanHelpContext.requestId, 'pending', []);
+          console.log(`✅ [URBAN HELP] Kept request ${session.urbanHelpContext.requestId} as 'pending'`);
+        } catch (err) {
+          console.warn('⚠️ [URBAN HELP] Could not update request to pending:', err);
+        }
+      } else {
+        // Add to user requests as pending (for future notifications)
+        await addUserRequest(sender, {
+          category: category,
+          location: location,
+          status: 'pending',
+          timestamp: Date.now(),
+          originalText: originalText
+        });
+      }
     }
     
     // Send follow-up
@@ -1581,6 +1677,24 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
       step: "awaiting_location"
     };
     session.step = "awaiting_urban_help_location";
+
+    // Persist a pending request so we can update it when location arrives
+    try {
+      if (typeof addUserRequest === 'function') {
+        const pending = await addUserRequest(sender, {
+          category: extractedInfo.category || null,
+          location: null,
+          originalText: extractedInfo.rawText || text,
+          note: 'awaiting_location'
+        });
+        if (pending && pending.success) {
+          session.urbanHelpContext.requestId = pending.requestId;
+          console.log(`✅ [URBAN HELP] Pending user request saved: ${pending.requestId}`);
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ [URBAN HELP] Could not save pending user request (text flow):', err);
+    }
     
   } else {
     // We have both, show confirmation
@@ -1857,7 +1971,52 @@ async function handleOriginalRequest(sender, originalText, session, effectiveCli
   // Check if it's an urban help request
   if (isUrbanHelpRequest(originalText)) {
     console.log("🔧 [ORIGINAL REQUEST] Is urban help request");
-    await handleUrbanHelpTextRequest(sender, originalText, session, effectiveClient);
+
+    // Try to extract both category and location
+    const extracted = extractUrbanHelpFromText(originalText);
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+
+    if (extracted.category && extracted.location) {
+      // We have full info — execute the search directly (skip re-confirmation)
+      await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'searching', {
+        category: getCategoryDisplayName(extracted.category),
+        location: extracted.location
+      }) || `🔍 Searching for ${extracted.category} in ${extracted.location}...`, effectiveClient);
+
+      await executeUrbanHelpSearch(sender, extracted, session, effectiveClient, userLang);
+    } else {
+      // Partial info — ask for what's missing and persist pending request
+      const missing = checkMissingUrbanHelpInfo(extracted);
+      await askForMissingUrbanHelpInfo(sender, extracted, missing, userLang, effectiveClient);
+
+      session.urbanHelpContext = {
+        transcription: originalText,
+        entities: extracted,
+        missingInfo: missing,
+        step: 'awaiting_missing_info'
+      };
+      session.step = 'awaiting_urban_help_info';
+
+      try {
+        if (typeof addUserRequest === 'function') {
+          const pending = await addUserRequest(sender, {
+            category: extracted.category || null,
+            location: extracted.location || null,
+            originalText: originalText,
+            note: 'awaiting_missing_info'
+          });
+          if (pending && pending.success) {
+            session.urbanHelpContext.requestId = pending.requestId;
+            console.log(`✅ [URBAN HELP] Pending user request saved: ${pending.requestId}`);
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ [URBAN HELP] Could not save pending user request (original request):', err);
+      }
+
+      await saveSession(sender, session);
+    }
+
   } else if (isUserOfferingServices(originalText)) {
     console.log("📝 [ORIGINAL REQUEST] Is offering services");
     // Process with posting service
@@ -2290,15 +2449,18 @@ if (text && !replyId) {
   // Quick handling: if we are awaiting an urban-help location, accept any text as location
   // This ensures a user can reply "Noida" or "Bombay" without being routed to unknown command
   // ---------------------------------------------
-  if (text && session.urbanHelpContext && session.urbanHelpContext.step === 'awaiting_location') {
-    console.log(`🔧 [URBAN HELP] Received location while awaiting_location: ${text}`);
-    session.urbanHelpContext.location = text;
+  if (text && session.urbanHelpContext && (session.urbanHelpContext.step === 'awaiting_location' || session.urbanHelpContext.step === 'awaiting_missing_info' || session.step === 'awaiting_urban_help_info')) {
+    console.log(`🔧 [URBAN HELP] Received location while awaiting_location/missing_info: ${text}`);
+
+    // Accept the text as location
+    session.urbanHelpContext.entities = session.urbanHelpContext.entities || {};
+    session.urbanHelpContext.entities.location = text;
     session.urbanHelpContext.text = session.urbanHelpContext.text || text;
     session.urbanHelpContext.step = "awaiting_confirmation";
 
     await sendUrbanHelpConfirmation(sender,
       session.urbanHelpContext.text,
-      session.urbanHelpContext,
+      session.urbanHelpContext.entities,
       multiLanguage.getUserLanguage(sender) || 'en',
       effectiveClient
     );
