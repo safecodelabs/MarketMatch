@@ -112,7 +112,30 @@ function detectIntentContext(text) {
   
   const lower = text.toLowerCase();
   
-  // First check for CLEAR "looking for" patterns (HIGH PRIORITY)
+  // FIRST: Check for JOB SEEKING patterns (HIGH PRIORITY)
+  const jobSeekingPatterns = [
+    /looking for.*job/i,
+    /need.*job/i,
+    /searching for.*job/i,
+    /job search/i,
+    /seeking.*job/i,
+    /want.*job/i,
+    /employment opportunity/i,
+    /mujhe job/i,
+    /job chahiye/i,
+    /naukri/i,
+    /kaam khoj/i,
+    /kaam dund/i,
+    /employment/i
+  ];
+  
+  // Check for job seeking first
+  if (jobSeekingPatterns.some(pattern => pattern.test(lower))) {
+    console.log(`🔍 [CONTEXT DETECTION] Job seeking pattern detected`);
+    return 'job_search';
+  }
+  
+  // Check for "looking for" patterns (but exclude job-related)
   const lookingForPatterns = [
     /looking for/i,
     /searching for/i,
@@ -138,8 +161,8 @@ function detectIntentContext(text) {
     /sahayata/i
   ];
   
-  // Check for "looking for" patterns first (CRITICAL FIX)
-  if (lookingForPatterns.some(pattern => pattern.test(lower))) {
+  // Check for "looking for" patterns (but exclude jobs already caught)
+  if (lookingForPatterns.some(pattern => pattern.test(lower)) && !/job|naukri|employment/i.test(lower)) {
     console.log(`🔍 [CONTEXT DETECTION] CLEAR "looking for" pattern detected`);
     return 'find';
   }
@@ -1945,8 +1968,8 @@ if (text && !replyId) {
   }
   
   // ✅ JOB DETECTION: Posting vs Searching for Jobs
-  const jobOfferRE = /\b(hiring|vacancy|vacancies|immediate joining|apply now|apply immediately|job opening|vacancy:|hiring:)\b/i;
-  const jobSearchRE = /\b(looking for (a )?job|need a job|need job|job search|seeking a job|seeking job|looking for work)\b/i;
+  const jobOfferRE = /\b(hiring|vacancy|vacancies|immediate joining|apply now|apply immediately|job opening|vacancy:|hiring:|want to hire|need to hire|looking to hire)\b/i;
+  const jobSearchRE = /(\blooking for.*(job|work|employment|opportunity|position)|need.*(job|work|employment|position)|searching for.*(job|work|employment|position)|job.?search|seeking.*job|i.?m.*looking|want.*job|need.*job|employment opportunity|mujhe job|job chahiye|kaam chahiye|naukri|employment)\b/i;
 
   if (jobOfferRE.test(text) || detectIntentContext(text) === 'job_offer') {
     console.log('💼 [JOB POST] Detected job posting → routing to jobFlow');

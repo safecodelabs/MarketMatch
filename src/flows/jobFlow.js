@@ -96,76 +96,155 @@ async function handleJobPosting(sender, text, session = {}, client = null) {
 
 async function handleJobSeekerStart(sender, session = {}, client = null) {
   const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-  // Initialize seeker context
-  session.jobSeekerContext = {
-    step: 'ask_role'
-  };
-  await sendText(sender, multiLanguage.getMessage(userLang, 'prompt_type_what_looking') || 'What sort of job are you looking for?');
-  return session;
+  try {
+    // Initialize seeker context
+    session.jobSeekerContext = {
+      step: 'ask_role'
+    };
+    
+    const promptMsg = multiLanguage.getMessage(userLang, 'job_prompt_role') || 
+                      'What type of job are you looking for? (e.g., customer support, delivery driver, electrician)';
+    
+    try {
+      await sendText(sender, promptMsg);
+    } catch (sendErr) {
+      console.warn('⚠️ [JOB SEEKER] Could not send first question:', sendErr && sendErr.message);
+      // Continue anyway - message is stored in session
+    }
+    
+    return session;
+  } catch (err) {
+    console.error('❌ [JOB SEEKER] Error in handleJobSeekerStart:', err);
+    return session; // Return session even if there's an error
+  }
 }
 
 async function handleJobSeekerReply(sender, text, session = {}, client = null) {
   const userLang = multiLanguage.getUserLanguage(sender) || 'en';
   session.jobSeekerContext = session.jobSeekerContext || { step: 'ask_role' };
 
-  if (session.jobSeekerContext.step === 'ask_role') {
-    session.jobSeekerContext.role = text;
-    session.jobSeekerContext.step = 'ask_experience';
-    await sendText(sender, 'How much experience do you have? (e.g., 2 years, 6 months, "no experience")');
-    await saveSessionIfAvailable(sender, session);
-    return session;
-  }
-
-  if (session.jobSeekerContext.step === 'ask_experience') {
-    // Try to parse experience (reuse jobParser heuristics)
-    const { parseJobPost } = require('../../utils/jobParser');
-    const parsed = parseJobPost(`Experience: ${text}`);
-    session.jobSeekerContext.experience = parsed.experience;
-    session.jobSeekerContext.step = 'ask_location';
-    await sendText(sender, 'Where are you looking for this job? (city or area)');
-    await saveSessionIfAvailable(sender, session);
-    return session;
-  }
-
-  if (session.jobSeekerContext.step === 'ask_location') {
-    session.jobSeekerContext.location = text;
-
-    // Persist job request
-    const requestPayload = {
-      desiredRole: session.jobSeekerContext.role || null,
-      experience: session.jobSeekerContext.experience || null,
-      location: session.jobSeekerContext.location || null,
-      originalText: `${session.jobSeekerContext.role} ${session.jobSeekerContext.location}`
-    };
-
-    try {
-      const addRes = await db.addJobRequest(sender, requestPayload);
-      if (addRes && addRes.success) {
-        await sendText(sender, multiLanguage.getMessage(userLang, 'success_request_submitted') || '✅ Your job request has been saved. We will notify you when a match appears.');
-
-        // Try searching immediately
-        const matches = await db.searchJobs({ role: session.jobSeekerContext.role, location: session.jobSeekerContext.location });
-        if (matches && matches.length) {
-          const msg = formatJobResults(matches, userLang);
-          await sendText(sender, msg);
-        }
-      } else {
-        await sendText(sender, 'Sorry, could not save your request. Please try again later.');
+  try {
+    if (session.jobSeekerContext.step === 'ask_role') {
+      session.jobSeekerContext.role = text;
+      session.jobSeekerContext.step = 'ask_experience';
+      
+      const expMsg = multiLanguage.getMessage(userLang, 'job_prompt_experience') || 
+                     'How much experience do you have? (e.g., 2 years, 6 months, no experience)';
+      
+      try {
+        await sendText(sender, expMsg);
+      } catch (sendErr) {
+        console.warn('⚠️ [JOB SEEKER] Could not send experience question:', sendErr && sendErr.message);
       }
-    } catch (err) {
-      console.error('❌ [JOBS] Error saving job request:', err);
-      await sendText(sender, 'Sorry, an error occurred. Please try again later.');
+      
+      await saveSessionIfAvailable(sender, session);
+      return session;
     }
 
-    // Clear seeker context
-    session.jobSeekerContext = null;
-    await saveSessionIfAvailable(sender, session);
+    if (session.jobSeekerContext.step === 'ask_experience') {
+      try {
+        const { parseJobPost } = require('../../utils/jobParser');
+        const parsed = parseJobPost(`Experience: ${text}`);
+        session.jobSeekerContext.experience = parsed.experience;
+      } catch (parseErr) {
+        console.warn('⚠️ [JOB SEEKER] Could not parse experience:', parseErr);
+        session.jobSeekerContext.experience = { minMonths: null, raw: text, level: null };
+      }
+      
+      session.jobSeekerContext.step = 'ask_location';
+      
+      const locMsg = multiLanguage.getMessage(userLang, 'job_prompt_location') || 
+                     'Where are you looking for this job? (city or area)';
+      
+      try {
+        await sendText(sender, locMsg);
+      } catch (sendErr) {
+        console.warn('⚠️ [JOB SEEKER] Could not send location question:', sendErr && sendErr.message);
+      }
+      
+      await saveSessionIfAvailable(sender, session);
+      return session;
+    }
+
+    if (session.jobSeekerContext.step === 'ask_location') {
+      session.jobSeekerContext.location = text;
+
+      // Persist job request
+      const requestPayload = {
+        desiredRole: session.jobSeekerContext.role || null,
+        experience: session.jobSeekerContext.experience || null,
+        location: session.jobSeekerContext.location || null,
+        originalText: `${session.jobSeekerContext.role} ${session.jobSeekerContext.location}`
+      };
+
+      try {
+        const addRes = await db.addJobRequest(sender, requestPayload);
+        if (addRes && addRes.success) {
+          const successMsg = multiLanguage.getMessage(userLang, 'job_request_saved') || 
+                            '✅ Your job request has been saved. We will notify you when a match appears.';
+          
+          try {
+            await sendText(sender, successMsg);
+          } catch (sendErr) {
+            console.warn('⚠️ [JOB SEEKER] Could not send success message:', sendErr && sendErr.message);
+          }
+
+          // Try searching immediately for existing matches
+          try {
+            const matches = await db.searchJobs({ role: session.jobSeekerContext.role, location: session.jobSeekerContext.location });
+            if (matches && matches.length) {
+              const msg = formatJobResults(matches, userLang);
+              try {
+                await sendText(sender, msg);
+              } catch (sendErr) {
+                console.warn('⚠️ [JOB SEEKER] Could not send search results:', sendErr && sendErr.message);
+              }
+            }
+          } catch (searchErr) {
+            console.warn('⚠️ [JOB SEEKER] Error searching for jobs:', searchErr);
+          }
+        } else {
+          const errorMsg = multiLanguage.getMessage(userLang, 'job_request_error') || 
+                          'Sorry, could not save your request. Please try again later.';
+          
+          try {
+            await sendText(sender, errorMsg);
+          } catch (sendErr) {
+            console.warn('⚠️ [JOB SEEKER] Could not send error message:', sendErr && sendErr.message);
+          }
+        }
+      } catch (err) {
+        console.error('❌ [JOB SEEKER] Error saving job request:', err);
+        
+        const errorMsg = multiLanguage.getMessage(userLang, 'error_generic') || 
+                        'Sorry, an error occurred. Please try again later.';
+        
+        try {
+          await sendText(sender, errorMsg);
+        } catch (sendErr) {
+          console.warn('⚠️ [JOB SEEKER] Could not send error message:', sendErr && sendErr.message);
+        }
+      }
+
+      // Clear seeker context
+      session.jobSeekerContext = null;
+      await saveSessionIfAvailable(sender, session);
+      return session;
+    }
+
+    // Fallback - shouldn't reach here
+    const notUnderstandMsg = multiLanguage.getMessage(userLang, 'not_understood') || 'I did not understand that.';
+    try {
+      await sendText(sender, notUnderstandMsg);
+    } catch (sendErr) {
+      console.warn('⚠️ [JOB SEEKER] Could not send fallback message:', sendErr && sendErr.message);
+    }
+    
+    return session;
+  } catch (err) {
+    console.error('❌ [JOB SEEKER] Unexpected error in handleJobSeekerReply:', err);
     return session;
   }
-
-  // Fallback
-  await sendText(sender, multiLanguage.getMessage(userLang, 'not_understood'));
-  return session;
 }
 
 function formatJobResults(results, userLang = 'en') {
