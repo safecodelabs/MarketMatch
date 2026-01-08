@@ -410,6 +410,20 @@ async function getUserPendingRequests(userId) {
 }
 
 /**
+ * Get a single user request by id
+ */
+async function getUserRequestById(requestId) {
+  try {
+    const doc = await userRequestsRef.doc(String(requestId)).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() };
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error getting request by id:', error);
+    return null;
+  }
+}
+
+/**
  * Update request status
  */
 async function updateRequestStatus(requestId, status, matchedProviders = []) {
@@ -524,6 +538,71 @@ async function addListing(listingData) {
       createdAt: Date.now()
     };
     const docRef = await listingsRef.add(payload);
+
+    // After adding a listing, notify any pending user requests that could match
+    try {
+      const subCategory = (listingData.subCategory || listingData.category || '').toLowerCase();
+      const city = (listingData.data && (listingData.data.location?.city || listingData.data.location?.area || listingData.data.location?.area)) || null;
+
+      // Only look back 7 days for pending requests
+      const sevenDaysAgo = admin.firestore.Timestamp.fromMillis(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+      // Firestore may require composite indexes for multi-field queries. To avoid requiring
+      // a composite index in the test/dev environment, query by status and filter remaining
+      // conditions in application code.
+      const snapshot = await userRequestsRef.where('status', '==', 'pending').get();
+
+      if (!snapshot.empty) {
+        const { sendText } = require('../src/services/messageService');
+        const multiLanguage = require('../utils/multiLanguage');
+
+        const notifiedUsers = new Set();
+
+        for (const doc of snapshot.docs) {
+          const req = doc.data();
+
+          // Ensure the request is recent enough (within 7 days)
+          const createdAt = req.createdAt && req.createdAt.toMillis ? req.createdAt.toMillis() : (req.createdAt || 0);
+          if (createdAt < sevenDaysAgo.toMillis()) continue;
+
+          // Ensure category/subCategory matches the listing's subCategory
+          const reqCategory = (req.category || req.subCategory || '').toLowerCase();
+          if (reqCategory && subCategory && reqCategory !== subCategory) continue;
+
+          // If the request specified a location, ensure it matches the listing city
+          if (req.location && city && req.location.toLowerCase() !== city.toLowerCase()) {
+            continue;
+          }
+
+          // Avoid notifying the same user multiple times for this listing
+          if (notifiedUsers.has(req.userId)) continue;
+
+          try {
+            // Update request to matched and include the listing in matchedProviders
+            await updateRequestStatus(doc.id, 'matched', [docRef.id]);
+
+            // Fetch user preferred language if available
+            const userProfile = req.userId ? await getUserProfile(req.userId) : null;
+            const userLang = (userProfile && userProfile.preferredLanguage) ? userProfile.preferredLanguage : 'en';
+
+            const message = multiLanguage.getMessage(userLang, 'new_listing_available', {
+              category: listingData.subCategory || listingData.category || 'Service',
+              location: city || (req.location || 'your area'),
+              title: listingData.title || 'New Listing'
+            });
+
+            await sendText(req.userId, message);
+            console.log(`📣 Notified user ${req.userId} about new listing ${docRef.id}`);
+            notifiedUsers.add(req.userId);
+          } catch (err) {
+            console.warn('⚠️ Could not notify user for matching request:', err);
+          }
+        }
+      }
+    } catch (notifyErr) {
+      console.warn('⚠️ Error while notifying pending requests:', notifyErr);
+    }
+
     return { success: true, id: docRef.id };
   } catch (err) {
     console.error("🔥 Error adding listing:", err);
@@ -983,6 +1062,7 @@ module.exports = {
   updateProviderAvailability,
   addUserRequest,
   getUserPendingRequests,
+  getUserRequestById,
   updateRequestStatus,
   // Property Listing Functions
   addListing,

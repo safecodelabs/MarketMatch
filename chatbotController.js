@@ -888,11 +888,10 @@ async function askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLan
     const categoryName = URBAN_HELP_CATEGORIES[entities.category]?.name || 'service';
     message = multiLanguage.getMessage(userLang, 'ask_location', { category: categoryName }) ||
              `Where do you need the ${categoryName}?`;
-    
+
+    // For location, prefer asking the user to reply via voice or text rather than offering a few city buttons.
+    // If needed, we provide a single 'Type location' option to prompt the user explicitly.
     buttons = [
-      { id: 'location_noida', text: '📍 Noida' },
-      { id: 'location_gurgaon', text: '📍 Gurgaon' },
-      { id: 'location_delhi', text: '📍 Delhi' },
       { id: 'type_location', text: '📝 Type location' }
     ];
   }
@@ -2153,6 +2152,26 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           await sendMainMenuViaService(sender);
           return session;
         }
+
+        // If we are awaiting a missing location as part of an urban-help context,
+        // treat the confirmation as the location value instead of reprocessing as a new request.
+        if (session.urbanHelpContext && session.urbanHelpContext.missingInfo && session.urbanHelpContext.missingInfo.includes('location')) {
+          console.log('🔧 [CONFIRMATION FLOW] Confirmed text is location; completing urban-help search');
+          const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+
+          // Update context
+          session.urbanHelpContext.entities = session.urbanHelpContext.entities || {};
+          session.urbanHelpContext.entities.location = confirmedText;
+
+          // Run search directly
+          await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'searching', {
+            category: getCategoryDisplayName(session.urbanHelpContext.entities.category) || session.urbanHelpContext.entities.category || 'Service',
+            location: confirmedText
+          }) || `🔍 Searching for ${session.urbanHelpContext.entities.category} in ${confirmedText}...`, effectiveClient);
+
+          await executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, effectiveClient, userLang);
+          return session;
+        }
         
         // Process the ORIGINAL request, not the "Yes"
         await sendMessageWithClient(sender, `✅ Perfect! Processing: *"${confirmedText}"*`, effectiveClient);
@@ -2188,7 +2207,24 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       await sendMainMenuViaService(sender);
       return session;
     }
-    
+
+    // If we are awaiting a missing location as part of urban-help, treat this as location
+    if (session.urbanHelpContext && session.urbanHelpContext.missingInfo && session.urbanHelpContext.missingInfo.includes('location')) {
+      console.log('🔧 [BUTTON CONFIRMATION] Confirmed text treated as location, executing urban help search');
+      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+
+      session.urbanHelpContext.entities = session.urbanHelpContext.entities || {};
+      session.urbanHelpContext.entities.location = confirmedText;
+
+      await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'searching', {
+        category: getCategoryDisplayName(session.urbanHelpContext.entities.category) || session.urbanHelpContext.entities.category || 'Service',
+        location: confirmedText
+      }) || `🔍 Searching for ${session.urbanHelpContext.entities.category} in ${confirmedText}...`, effectiveClient);
+
+      await executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, effectiveClient, userLang);
+      return session;
+    }
+
     await sendMessageWithClient(sender, `✅ Perfect! Processing: *"${confirmedText}"*`, effectiveClient);
     await handleOriginalRequest(sender, confirmedText, session, effectiveClient);
     return session;
