@@ -1,7 +1,7 @@
 // src/flows/jobFlow.js
-// Handles job poster & seeker flows (posting parsing, request saving, matching & notify)
+// Intelligent job seeker & poster flows with pure intent-based extraction
 
-const { parseJobPost } = require('../../utils/jobParser');
+const { parseJobPost, normalizeRole } = require('../../utils/jobParser');
 const db = require('../../database/firestore');
 const multiLanguage = require('../../utils/multiLanguage');
 const { sendText } = require('../services/messageService');
@@ -10,8 +10,140 @@ module.exports = {
   handleJobPosting,
   handleJobSeekerStart,
   handleJobSeekerReply,
-  formatJobResults
+  formatJobResults,
+  extractJobSeekerInfo
 };
+
+// ======================================================
+// INTELLIGENT INFORMATION EXTRACTION
+// ======================================================
+
+/**
+ * Extract job, location, and experience from user text
+ * Returns: { role, location, experience, extracted }
+ */
+function extractJobSeekerInfo(text) {
+  if (!text || typeof text !== 'string') {
+    return { role: null, location: null, experience: null, extracted: false };
+  }
+
+  const lower = text.toLowerCase();
+  let role = null;
+  let location = null;
+  let experience = null;
+
+  // ===== EXTRACT JOB ROLE =====
+  const jobKeywords = [
+    'customer support', 'customer care', 'support executive',
+    'backend engineer', 'backend developer', 'frontend engineer', 'frontend developer',
+    'full stack developer', 'developer', 'engineer',
+    'delivery driver', 'driver', 'cab driver',
+    'team lead', 'team leader', 'lead',
+    'electrician', 'plumber', 'carpenter', 'painter',
+    'maid', 'househelp', 'cook', 'cleaner',
+    'sales executive', 'telecaller', 'bpo',
+    'data analyst', 'accountant', 'finance',
+    'content writer', 'seo', 'marketing',
+    'it support', 'helpdesk', 'tech support',
+    'manager', 'supervisor', 'coordinator'
+  ];
+
+  for (const keyword of jobKeywords) {
+    if (lower.includes(keyword)) {
+      role = keyword;
+      break; // Take the first match
+    }
+  }
+
+  // ===== EXTRACT LOCATION =====
+  const locationKeywords = [
+    'mumbai', 'bangalore', 'hyderabad', 'delhi', 'noida', 'gurgaon',
+    'pune', 'chandigarh', 'ahmedabad', 'jaipur', 'lucknow',
+    'kolkata', 'chennai', 'coimbatore', 'kochi', 'indore',
+    'new delhi', 'delhi ncr', 'ncr', 'delhi',
+    'work from home', 'wfh', 'remote'
+  ];
+
+  for (const keyword of locationKeywords) {
+    if (lower.includes(keyword)) {
+      location = keyword;
+      break;
+    }
+  }
+
+  // Also try generic location extraction (after "in", "at", "from")
+  if (!location) {
+    const locationMatch = lower.match(/(?:in|at|from|near)\s+([a-z\s]{2,20})/i);
+    if (locationMatch) {
+      location = locationMatch[1].trim();
+    }
+  }
+
+  // ===== EXTRACT EXPERIENCE =====
+  // Try to parse experience (e.g., "2 years", "6 months", "fresher")
+  const expMatch = text.match(/(\d+)\s*(?:years?|yrs?|months?|mos?)/i) || 
+                   text.match(/fresher|no experience|0 experience/i);
+  
+  if (expMatch) {
+    if (/fresher|no experience|0 experience/i.test(expMatch[0])) {
+      experience = { minMonths: 0, raw: 'fresher', level: 'none' };
+    } else {
+      const num = parseInt(expMatch[1]);
+      const isMo = /months?|mos?/i.test(expMatch[0]);
+      const months = isMo ? num : (num * 12);
+      experience = {
+        minMonths: months,
+        raw: expMatch[0],
+        level: months <= 12 ? 'junior' : (months <= 36 ? 'mid' : 'senior')
+      };
+    }
+  }
+
+  const hasExtracted = !!(role || location || experience);
+  
+  return { role, location, experience, extracted: hasExtracted };
+}
+
+// ======================================================
+// DETERMINE WHAT INFORMATION IS MISSING
+// ======================================================
+
+function getMissingInfo(context) {
+  const missing = [];
+  
+  if (!context.role) missing.push('role');
+  if (!context.location) missing.push('location');
+  if (context.experience === null || context.experience === undefined) missing.push('experience');
+  
+  return missing;
+}
+
+// ======================================================
+// GET NEXT QUESTION BASED ON MISSING INFO
+// ======================================================
+
+function getNextQuestion(missingInfo, userLang) {
+  if (missingInfo.length === 0) return null;
+
+  const nextField = missingInfo[0];
+
+  switch (nextField) {
+    case 'role':
+      return multiLanguage.getMessage(userLang, 'job_prompt_role') || 
+             '🔍 What type of job are you looking for? (e.g., customer support, developer, driver)';
+    
+    case 'location':
+      return multiLanguage.getMessage(userLang, 'job_prompt_location') || 
+             '📍 Where are you looking for this job? (city or area)';
+    
+    case 'experience':
+      return multiLanguage.getMessage(userLang, 'job_prompt_experience') || 
+             '📊 How much experience do you have? (e.g., 2 years, 6 months, fresher)';
+    
+    default:
+      return null;
+  }
+}
 
 async function handleJobPosting(sender, text, session = {}, client = null) {
   try {
@@ -97,91 +229,97 @@ async function handleJobPosting(sender, text, session = {}, client = null) {
 async function handleJobSeekerStart(sender, session = {}, client = null) {
   const userLang = multiLanguage.getUserLanguage(sender) || 'en';
   try {
-    // Initialize seeker context
+    // Initialize seeker context with all required fields
     session.jobSeekerContext = {
-      step: 'ask_role'
+      step: 'collecting_info',
+      role: null,
+      location: null,
+      experience: null,
+      attemptCount: 0
     };
     
+    // Start by asking for the job type
     const promptMsg = multiLanguage.getMessage(userLang, 'job_prompt_role') || 
-                      'What type of job are you looking for? (e.g., customer support, delivery driver, electrician)';
+                      '🔍 What type of job are you looking for? (e.g., customer support, developer, driver)';
     
     try {
       await sendText(sender, promptMsg);
     } catch (sendErr) {
       console.warn('⚠️ [JOB SEEKER] Could not send first question:', sendErr && sendErr.message);
-      // Continue anyway - message is stored in session
     }
     
     return session;
   } catch (err) {
     console.error('❌ [JOB SEEKER] Error in handleJobSeekerStart:', err);
-    return session; // Return session even if there's an error
+    return session;
   }
 }
 
 async function handleJobSeekerReply(sender, text, session = {}, client = null) {
   const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-  session.jobSeekerContext = session.jobSeekerContext || { step: 'ask_role' };
-
+  
   try {
-    if (session.jobSeekerContext.step === 'ask_role') {
+    // Ensure context exists
+    if (!session.jobSeekerContext || session.jobSeekerContext.step !== 'collecting_info') {
+      session.jobSeekerContext = {
+        step: 'collecting_info',
+        role: null,
+        location: null,
+        experience: null,
+        attemptCount: 0
+      };
+    }
+
+    console.log(`🔍 [JOB SEEKER] Received: "${text}"`);
+    console.log(`🔍 [JOB SEEKER] Current context before extraction:`, session.jobSeekerContext);
+
+    // ===== EXTRACT ALL AVAILABLE INFORMATION FROM USER'S MESSAGE =====
+    const extracted = extractJobSeekerInfo(text);
+    console.log(`🔍 [JOB SEEKER] Extracted info:`, extracted);
+
+    // ===== MERGE EXTRACTED INFO INTO SESSION =====
+    if (extracted.role) {
+      session.jobSeekerContext.role = extracted.role;
+      console.log(`✅ [JOB SEEKER] Role extracted: "${extracted.role}"`);
+    }
+
+    if (extracted.location) {
+      session.jobSeekerContext.location = extracted.location;
+      console.log(`✅ [JOB SEEKER] Location extracted: "${extracted.location}"`);
+    }
+
+    if (extracted.experience) {
+      session.jobSeekerContext.experience = extracted.experience;
+      console.log(`✅ [JOB SEEKER] Experience extracted:`, extracted.experience);
+    }
+
+    // If nothing was extracted, save the raw text as role
+    if (!extracted.extracted && !session.jobSeekerContext.role) {
       session.jobSeekerContext.role = text;
-      session.jobSeekerContext.step = 'ask_experience';
-      
-      const expMsg = multiLanguage.getMessage(userLang, 'job_prompt_experience') || 
-                     'How much experience do you have? (e.g., 2 years, 6 months, no experience)';
-      
-      try {
-        await sendText(sender, expMsg);
-      } catch (sendErr) {
-        console.warn('⚠️ [JOB SEEKER] Could not send experience question:', sendErr && sendErr.message);
-      }
-      
-      await saveSessionIfAvailable(sender, session);
-      return session;
+      console.log(`✅ [JOB SEEKER] No structured data found, using text as role: "${text}"`);
     }
 
-    if (session.jobSeekerContext.step === 'ask_experience') {
-      try {
-        const { parseJobPost } = require('../../utils/jobParser');
-        const parsed = parseJobPost(`Experience: ${text}`);
-        session.jobSeekerContext.experience = parsed.experience;
-      } catch (parseErr) {
-        console.warn('⚠️ [JOB SEEKER] Could not parse experience:', parseErr);
-        session.jobSeekerContext.experience = { minMonths: null, raw: text, level: null };
-      }
-      
-      session.jobSeekerContext.step = 'ask_location';
-      
-      const locMsg = multiLanguage.getMessage(userLang, 'job_prompt_location') || 
-                     'Where are you looking for this job? (city or area)';
-      
-      try {
-        await sendText(sender, locMsg);
-      } catch (sendErr) {
-        console.warn('⚠️ [JOB SEEKER] Could not send location question:', sendErr && sendErr.message);
-      }
-      
-      await saveSessionIfAvailable(sender, session);
-      return session;
-    }
+    // ===== DETERMINE MISSING INFORMATION =====
+    const missing = getMissingInfo(session.jobSeekerContext);
+    console.log(`📋 [JOB SEEKER] Missing info:`, missing);
+    console.log(`📋 [JOB SEEKER] Current context after extraction:`, session.jobSeekerContext);
 
-    if (session.jobSeekerContext.step === 'ask_location') {
-      session.jobSeekerContext.location = text;
+    // ===== ALL INFORMATION COLLECTED: SAVE AND COMPLETE =====
+    if (missing.length === 0) {
+      console.log(`✅ [JOB SEEKER] All information collected! Saving job request...`);
 
-      // Persist job request
       const requestPayload = {
         desiredRole: session.jobSeekerContext.role || null,
         experience: session.jobSeekerContext.experience || null,
         location: session.jobSeekerContext.location || null,
-        originalText: `${session.jobSeekerContext.role} ${session.jobSeekerContext.location}`
+        originalText: `${session.jobSeekerContext.role} in ${session.jobSeekerContext.location}`
       };
 
       try {
         const addRes = await db.addJobRequest(sender, requestPayload);
         if (addRes && addRes.success) {
           const successMsg = multiLanguage.getMessage(userLang, 'job_request_saved') || 
-                            '✅ Your job request has been saved. We will notify you when a match appears.';
+                            '✅ Your job request has been saved! We will notify you when a matching job appears.';
           
           try {
             await sendText(sender, successMsg);
@@ -191,13 +329,25 @@ async function handleJobSeekerReply(sender, text, session = {}, client = null) {
 
           // Try searching immediately for existing matches
           try {
-            const matches = await db.searchJobs({ role: session.jobSeekerContext.role, location: session.jobSeekerContext.location });
+            const matches = await db.searchJobs({ 
+              role: session.jobSeekerContext.role, 
+              location: session.jobSeekerContext.location 
+            });
+            
             if (matches && matches.length) {
               const msg = formatJobResults(matches, userLang);
               try {
                 await sendText(sender, msg);
               } catch (sendErr) {
-                console.warn('⚠️ [JOB SEEKER] Could not send search results:', sendErr && sendErr.message);
+                console.warn('⚠️ [JOB SEEKER] Could not send matches:', sendErr && sendErr.message);
+              }
+            } else {
+              const noMatchMsg = multiLanguage.getMessage(userLang, 'no_jobs_yet') || 
+                                '📭 No jobs match your criteria yet. We\'ll notify you as soon as one appears!';
+              try {
+                await sendText(sender, noMatchMsg);
+              } catch (sendErr) {
+                console.warn('⚠️ [JOB SEEKER] Could not send no-match message:', sendErr && sendErr.message);
               }
             }
           } catch (searchErr) {
@@ -226,23 +376,40 @@ async function handleJobSeekerReply(sender, text, session = {}, client = null) {
         }
       }
 
-      // Clear seeker context
+      // Clear seeker context - flow complete
       session.jobSeekerContext = null;
       await saveSessionIfAvailable(sender, session);
       return session;
     }
 
-    // Fallback - shouldn't reach here
-    const notUnderstandMsg = multiLanguage.getMessage(userLang, 'not_understood') || 'I did not understand that.';
-    try {
-      await sendText(sender, notUnderstandMsg);
-    } catch (sendErr) {
-      console.warn('⚠️ [JOB SEEKER] Could not send fallback message:', sendErr && sendErr.message);
-    }
+    // ===== ASK FOR MISSING INFORMATION =====
+    const nextQuestion = getNextQuestion(missing, userLang);
     
+    if (nextQuestion) {
+      console.log(`❓ [JOB SEEKER] Asking for missing: ${missing[0]}`);
+      try {
+        await sendText(sender, nextQuestion);
+      } catch (sendErr) {
+        console.warn(`⚠️ [JOB SEEKER] Could not send question for "${missing[0]}":`, sendErr && sendErr.message);
+      }
+    }
+
+    // Save session with updated context
+    await saveSessionIfAvailable(sender, session);
     return session;
+
   } catch (err) {
     console.error('❌ [JOB SEEKER] Unexpected error in handleJobSeekerReply:', err);
+    
+    const errorMsg = multiLanguage.getMessage(userLang, 'error_generic') || 
+                    'Sorry, an error occurred. Please try again later.';
+    
+    try {
+      await sendText(sender, errorMsg);
+    } catch (sendErr) {
+      console.warn('⚠️ [JOB SEEKER] Could not send error message:', sendErr && sendErr.message);
+    }
+
     return session;
   }
 }
