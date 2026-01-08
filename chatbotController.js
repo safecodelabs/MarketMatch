@@ -112,6 +112,13 @@ function detectIntentContext(text) {
   
   const lower = text.toLowerCase();
   
+  // QUICK CHECK: detect structured postings (role/location/salary/contact). Treat as OFFER by default
+  const structuredPostPatterns = [ /\brole\s*[:\-]/i, /\blocation\s*[:\-]/i, /salary\b/i, /salary\s*&\s*benefits/i, /contact\s*[-:]/i, /selection rounds/i ];
+  if (structuredPostPatterns.some(re => re.test(lower))) {
+    console.log('🔍 [CONTEXT DETECTION] Structured posting pattern detected');
+    return 'offer';
+  }
+
   // FIRST: Check for JOB SEEKING patterns (HIGH PRIORITY)
   const jobSeekingPatterns = [
     /looking for.*job/i,
@@ -139,20 +146,20 @@ function detectIntentContext(text) {
   const lookingForPatterns = [
     /looking for/i,
     /searching for/i,
-    /need (a |an )?/i,
-    /want (a |an )?/i,
-    /require (a |an )?/i,
-    /find (a |an )?/i,
-    /i need/i,
-    /i want/i,
-    /i require/i,
+    // more specific "need" and "want" patterns to avoid false positives like "need minimum 6 months experience"
+    /need\s+.*(job|work|employment|service|help|position)/i,
+    /want\s+.*(job|work|employment|service|help|position)/i,
+    /require\s+.*(job|service|help|position)/i,
+    /find\s+.*(job|work|service|help|position)/i,
+    /i need\s+.*(job|work|service|help|position)/i,
+    /i want\s+.*(job|work|service|help|position)/i,
+    /i require\s+.*(job|work|service|help|position)/i,
     /i am looking for/i,
     /i'm looking for/i,
     /help me find/i,
     /where can i find/i,
     /how to get/i,
     /where to get/i,
-    /i am in need/i,
     /i need help finding/i,
     /chahiye/i,
     /mujhe/i,
@@ -232,11 +239,9 @@ function isUserOfferingServices(text) {
   
   const lowerText = text.toLowerCase();
   
-  // CRITICAL FIX: Check for "looking for" FIRST to avoid false positives
-  if (lowerText.includes('looking for') || lowerText.includes('searching for') || 
-      lowerText.includes('need ') || lowerText.includes('want ') || 
-      lowerText.includes('require ') || lowerText.includes('chahiye') ||
-      lowerText.includes('mujhe')) {
+  // CRITICAL: Only treat explicit "looking for" / "searching for" as NOT offering.
+  // Avoid treating generic words like "need" or "want" in other contexts (e.g. "need minimum 6 months") as NOT offering.
+  if (lowerText.includes('looking for') || lowerText.includes('searching for')) {
     console.log(`🔍 [OFFERING CHECK] Contains "looking for" keywords - NOT offering`);
     return false;
   }

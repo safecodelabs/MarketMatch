@@ -379,6 +379,48 @@ function searchListings(listings = [], entities = {}, opts = {}) {
   return filtered.map(f => ({ ...f.item, _score: f.score }));
 }
 
+// -----------------------------
+// Lightweight Intent Helpers
+// -----------------------------
+
+/**
+ * Heuristic intent context detector used by flows that don't need full LLM classify.
+ * Returns: 'offer' (user offering), 'find' (user looking for), or null
+ */
+function detectIntentContext(text = "") {
+  if (!text || typeof text !== 'string') return null;
+  const lower = text.toLowerCase();
+
+  // Job-seeking high priority
+  if (/looking for.*job|need.*job|searching for.*job|job search|seeking.*job|want.*job|employment|naukri/i.test(lower)) {
+    return 'find';
+  }
+
+  // Offer patterns
+  if (/\b(i('?m| am) (a |an )?)\b|\bi have\b|\bi provide\b|\bi offer\b|\bavailable\b|\bhiring\b|\bfor hire\b|\bwe are hiring\b|\bcontact me\b/i.test(lower)) {
+    return 'offer';
+  }
+
+  // generic 'looking for' without job-specific keywords
+  if (/looking for|searching for|need (a |an )?|want (a |an )?|i am looking for|i'm looking for|help me find/i.test(lower)) {
+    // If it mentions job keywords, classify as find (above). Otherwise classify as 'find' as well.
+    return 'find';
+  }
+
+  return null;
+}
+
+/**
+ * Quick heuristic to decide if the user is offering services.
+ * Returns boolean.
+ */
+function isUserOfferingServices(text = "") {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return /\b(i('?m| am) (a |an )?)\b|\bi provide\b|\bi offer\b|\bavailable\b|\bhiring\b|\bfor sale\b|\bfor rent\b|\bi sell\b/i.test(lower);
+}
+
+
 async function generateFollowUpQuestion({ missing = [], entities = {}, language = "en" } = {}) {
   if (!Array.isArray(missing) || missing.length === 0) return "";
   
@@ -497,5 +539,8 @@ module.exports = {
   extractPhone,
   normalizeText,
   isUrbanHelpRequest, // ✅ NEW: Helper function
-  extractUrbanHelpEntities // ✅ NEW: Urban help entity extractor
+  extractUrbanHelpEntities, // ✅ NEW: Urban help entity extractor
+  // Export lightweight helpers for flows that require quick intent checks
+  detectIntentContext,
+  isUserOfferingServices
 };
