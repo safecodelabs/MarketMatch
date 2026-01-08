@@ -58,6 +58,9 @@ const FLOW_MODE = process.env.FLOW_MODE || "draft"; // "draft" for testing, "pub
 // ✅ ADDED: Multi-language support for urban help
 const multiLanguage = require("./utils/multiLanguage");
 
+// ✅ REFACTOR: urban help flow moved to its own module
+const urbanHelpFlow = require('./src/flows/urbanHelpFlow');
+
 // ========================================
 // GLOBAL CLIENT HANDLING (NEW)
 // ========================================
@@ -675,18 +678,40 @@ await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'pro
       const missing = session.urbanHelpContext.missingInfo || [];
       const userLang = multiLanguage.getUserLanguage(sender) || 'en';
 
-      // If location is missing, treat short transcription as the location
+      // If location is missing, treat short transcription as the location and optionally auto-search
       if (missing.includes('location')) {
-        const loc = processingResult.transcription && processingResult.transcription.trim();
+        const locRaw = processingResult.transcription && processingResult.transcription.trim();
+        const loc = locRaw || '';
         if (loc) {
           session.urbanHelpContext.entities = session.urbanHelpContext.entities || {};
           session.urbanHelpContext.entities.location = loc;
+
+          // Persist updated context
+          await saveSession(sender, session);
+
+          // If the user replied with a short location (likely an implicit confirmation), auto-run the search
+          const words = loc.split(/\s+/).filter(Boolean);
+          if (words.length <= 4) {
+            session.urbanHelpContext.step = 'searching';
+            session.step = 'searching_urban_help';
+
+            // Inform user we are searching and then execute the search
+            await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'searching', {
+              category: session.urbanHelpContext.entities.category || session.urbanHelpContext.category || 'Service',
+              location: loc
+            }) || `🔍 Searching for ${session.urbanHelpContext.entities.category || 'service'} in ${loc}...`, client);
+
+            await urbanHelpFlow.executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, client, userLang);
+            return session;
+          }
+
+          // Otherwise show confirmation (longer replies may be an updated full request)
           session.urbanHelpContext.step = 'awaiting_confirmation';
           session.step = 'awaiting_urban_help_confirmation';
 
           await sendUrbanHelpConfirmation(sender, session.urbanHelpContext.transcription || loc, session.urbanHelpContext.entities, userLang, client);
           await saveSession(sender, session);
-          return session;
+          return session; // no change here - keep behavior (handled earlier)
         }
       }
 
@@ -727,7 +752,7 @@ await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'pro
         processingResult.entities?.category ||
         isUrbanHelpRequest(processingResult.transcription)) && !looksLikeHousing) {
       
-      await handleUrbanHelpVoiceIntent(sender, session, processingResult, effectiveClient);
+      await urbanHelpFlow.handleUrbanHelpVoiceIntent(sender, session, processingResult, effectiveClient);
       
     } else {
       // Handle existing property-related intents (or housing overrides)
@@ -765,171 +790,27 @@ await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'pro
  * Handle urban help voice intent
  */
 async function handleUrbanHelpVoiceIntent(sender, session, processingResult, client) {
-  const { transcription, entities, confidence } = processingResult;
-  
-  // Get user language
-  const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-  
-  // Check for missing information
-  const missingInfo = checkMissingUrbanHelpInfo(entities);
-  
-  if (missingInfo.length > 0) {
-    // Ask for missing information
-    await askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLang, client);
-    
-    session.urbanHelpContext = {
-      transcription: transcription,
-      entities: entities,
-      missingInfo: missingInfo,
-      step: "awaiting_missing_info"
-    };
-    session.step = "awaiting_urban_help_info";
-
-    // Persist a pending user request if location is missing so we can match/update later
-    // NOTE: This allows the system to keep track of "I'm looking for X" when the user
-    // only provided the category (e.g., "I need a plumber") and will supply the
-    // location later — so when the location arrives we can update and run the search.
-    try {
-      if (missingInfo.includes('location') && typeof addUserRequest === 'function') {
-        const pending = await addUserRequest(sender, {
-          category: entities.category || null,
-          location: null,
-          originalText: transcription || null,
-          note: 'awaiting_location'
-        });
-        if (pending && pending.success) {
-          session.urbanHelpContext.requestId = pending.requestId;
-          console.log(`✅ [URBAN HELP] Pending user request saved: ${pending.requestId}`);
-        }
-      }
-    } catch (err) {
-      console.warn('⚠️ [URBAN HELP] Could not save pending user request:', err);
-    }
-    
-  } else if (confidence < 0.7) {
-    // Low confidence - ask for clarification
-    await sendMessageWithClient(sender, 
-      multiLanguage.getMessage(userLang, 'not_understood') + 
-      `\n\nI heard: "*${transcription.substring(0, 50)}${transcription.length > 50 ? '...' : ''}*"`,
-      client
-    );
-    
-    await sendInteractiveButtonsWithClient(
-      client,
-      sender,
-      "Is this what you need?",
-      [
-        { id: `confirm_urban_help_${entities.category || 'general'}`, text: '✅ Yes, correct' },
-        { id: 'try_again_urban', text: '🔄 Try again' },
-        { id: 'type_instead', text: '📝 Type instead' }
-      ]
-    );
-    
-    session.urbanHelpContext = {
-      transcription: transcription,
-      entities: entities,
-      step: "awaiting_clarification"
-    };
-    session.step = "awaiting_urban_help_clarification";
-    
-  } else {
-    // Good confidence - show confirmation
-    await sendUrbanHelpConfirmation(sender, transcription, entities, userLang, client);
-    
-    session.urbanHelpContext = {
-      transcription: transcription,
-      entities: entities,
-      step: "awaiting_confirmation"
-    };
-    session.step = "awaiting_urban_help_confirmation";
-  }
+  return urbanHelpFlow.handleUrbanHelpVoiceIntent(sender, session, processingResult, client);
 }
-
 /**
  * Check for missing urban help information
  */
 function checkMissingUrbanHelpInfo(entities) {
-  const missing = [];
-  
-  // Category is always required
-  if (!entities.category) {
-    missing.push('category');
-  }
-  
-  // Location is required for all services
-  if (!entities.location) {
-    missing.push('location');
-  }
-  
-  return missing;
+  return urbanHelpFlow.checkMissingUrbanHelpInfo(entities);
 }
 
 /**
- * Ask for missing urban help information
+ * Ask for missing urban help information (delegates to flow module)
  */
 async function askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLang, client) {
-  let message = '';
-  let buttons = [];
-  
-  if (missingInfo.includes('category')) {
-    message = multiLanguage.getMessage(userLang, 'ask_category') || 
-             "What type of service do you need?";
-    
-    // Show top 4 categories as buttons
-    const topCategories = ['electrician', 'plumber', 'maid', 'cleaner'];
-    buttons = topCategories.map(category => ({
-      id: `category_${category}`,
-      text: `${URBAN_HELP_CATEGORIES[category].emoji} ${URBAN_HELP_CATEGORIES[category].name}`
-    }));
-    
-    buttons.push({ id: 'other_category', text: 'Other Service' });
-    
-  } else if (missingInfo.includes('location')) {
-    const categoryName = URBAN_HELP_CATEGORIES[entities.category]?.name || 'service';
-    message = multiLanguage.getMessage(userLang, 'ask_location', { category: categoryName }) ||
-             `Where do you need the ${categoryName}?`;
-
-    // For location, prefer asking the user to reply via voice or text rather than offering a few city buttons.
-    // If needed, we provide a single 'Type location' option to prompt the user explicitly.
-    buttons = [
-      { id: 'type_location', text: '📝 Type location' }
-    ];
-  }
-  
-  await sendInteractiveButtonsWithClient(client, sender, message, buttons);
+  return urbanHelpFlow.askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLang, client);
 }
 
 /**
- * Send urban help confirmation
+ * Send urban help confirmation (delegates to flow module)
  */
 async function sendUrbanHelpConfirmation(sender, transcription, entities, userLang, client) {
-  const category = entities.category || 'service';
-  const categoryName = URBAN_HELP_CATEGORIES[category]?.name || 'Service';
-  const location = entities.location || 'your area';
-  
-  let confirmationText = '';
-  
-  if (userLang === 'hi') {
-    confirmationText = `मैंने समझा: "*${transcription}"*\n\n` +
-                      `आपको *${location}* में *${categoryName}* चाहिए।\n\n` +
-                      `क्या यह सही है?`;
-  } else if (userLang === 'ta') {
-    confirmationText = `நான் புரிந்து கொண்டேன்: "*${transcription}"*\n\n` +
-                      `உங்களுக்கு *${location}*-ல் *${categoryName}* தேவை.\n\n` +
-                      `இது சரியானதா?`;
-  } else {
-    confirmationText = `I understood: "*${transcription}"*\n\n` +
-                      `You need a *${categoryName}* in *${location}*.\n\n` +
-                      `Is this correct?`;
-  }
-  
-  const buttons = [
-    { id: `confirm_urban_${category}`, text: '✅ Yes, find service' },
-    { id: 'try_again_urban', text: '🔄 Try again' },
-    { id: 'modify_details', text: '✏️ Modify details' }
-  ];
-  
-  await sendInteractiveButtonsWithClient(client, sender, confirmationText, buttons);
+  return urbanHelpFlow.sendUrbanHelpConfirmation(sender, transcription, entities, userLang, client);
 }
 
 /**
@@ -957,7 +838,7 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
       client
     );
     
-    await executeUrbanHelpSearch(sender, urbanContext.entities, session, client, userLang);
+    await urbanHelpFlow.executeUrbanHelpSearch(sender, urbanContext.entities, session, client, userLang);
     
   } else if (response === 'try_again_urban') {
     await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'try_again'));
@@ -1001,48 +882,11 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
 }
 
 /**
- * Execute urban help search - UPDATED TO USE searchUrbanServices
+ * Execute urban help search - DELEGATES TO flow module
  */
 async function executeUrbanHelpSearch(sender, entities, session, client, userLang) {
-  try {
-    // Check if this is actually an offering request
-    const originalText = session.urbanHelpContext?.transcription || 
-                        session.urbanHelpContext?.text || 
-                        session.rawTranscription || '';
-    
-    // CRITICAL FIX: Re-check context before searching
-    const context = detectIntentContext(originalText);
-    const isOffering = isUserOfferingServices(originalText);
-    
-    console.log(`🔍 [URBAN HELP FINAL CHECK] Context: ${context}, IsOffering: ${isOffering}`);
-    
-    if (isOffering || context === 'offer') {
-      console.log("❌ [URBAN HELP] User is actually OFFERING services, not searching");
-      await sendMessageWithClient(
-        sender,
-        "I see you're offering services. Please use the '📝 Post Listing' option from the menu or type your service details again.",
-        client
-      );
-      
-      // Clear context and return to menu
-      delete session.urbanHelpContext;
-      session.step = "menu";
-      session.state = 'initial';
-      await saveSession(sender, session);
-      return;
-    }
-    
-    const { category, location } = entities;
-    
-    console.log(`🔍 [URBAN HELP] Searching for "${category}" in "${location}"`);
-    
-    // Get category name for display
-    const categoryName = getCategoryDisplayName(category);
-    
-    // Send searching message
-    await sendMessageWithClient(
-      sender,
-      `🔍 Searching for ${categoryName} in ${location}...`,
+  return urbanHelpFlow.executeUrbanHelpSearch(sender, entities, session, client, userLang);
+}
       client
     );
     
@@ -1124,71 +968,17 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
 }
 
 /**
- * Get category display name
+ * Get category display name (delegates to urbanHelpFlow)
  */
 function getCategoryDisplayName(category) {
-  if (!category) return 'service';
-  
-  // Check if it matches any known category
-  for (const [knownCategory, data] of Object.entries(URBAN_HELP_CATEGORIES)) {
-    if (category.toLowerCase() === knownCategory.toLowerCase()) {
-      return data.name;
-    }
-  }
-  
-  // Return capitalized version
-  return category.charAt(0).toUpperCase() + category.slice(1);
+  return urbanHelpFlow.getCategoryDisplayName(category);
 }
 
 /**
  * Format urban help results
  */
 function formatUrbanHelpResults(results, userLang, categoryName = null) {
-  if (!results || results.length === 0) {
-    return "No services found.";
-  }
-  
-  // Determine category name
-  let displayCategory = categoryName;
-  if (!displayCategory) {
-    const firstResult = results[0];
-    displayCategory = firstResult.category || 
-                     getCategoryDisplayName(firstResult.category) || 
-                     'service';
-  }
-  
-  let message = `✅ Found ${results.length} ${displayCategory}(s):\n\n`;
-  
-  results.slice(0, 5).forEach((provider, index) => {
-    message += `*${index + 1}. ${provider.name || 'Service Provider'}*\n`;
-    
-    // Only include fields that exist in your database
-    if (provider.phone) {
-      message += `   📞 ${provider.phone}\n`;
-    }
-    
-    if (provider.location) {
-      message += `   📍 ${provider.location}\n`;
-    }
-    
-    if (provider.category) {
-      message += `   🔧 ${getCategoryDisplayName(provider.category)}\n`;
-    }
-    
-    // Format timestamp if needed
-    if (provider.createdAt) {
-      const date = provider.createdAt.toDate ? provider.createdAt.toDate() : new Date(provider.createdAt);
-      message += `   📅 Added: ${date.toLocaleDateString()}\n`;
-    }
-    
-    message += '\n';
-  });
-  
-  if (results.length > 5) {
-    message += `... and ${results.length - 5} more services available.\n`;
-  }
-  
-  return message;
+  return urbanHelpFlow.formatUrbanHelpResults(results, userLang, categoryName);
 }
 
 // ========================================
@@ -1696,15 +1486,21 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
     }
     
   } else {
-    // We have both, show confirmation
-    await sendUrbanHelpConfirmation(sender, text, extractedInfo, userLang, client);
-    
+    // We have both. For text-origin requests, assume user intent is explicit and run search immediately
     session.urbanHelpContext = {
       ...extractedInfo,
       text: text,
-      step: "awaiting_confirmation"
+      step: "searching"
     };
-    session.step = "awaiting_urban_help_confirmation";
+    session.step = "searching_urban_help";
+
+    // Inform the user we're searching and execute the search
+    await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'searching', {
+      category: URBAN_HELP_CATEGORIES[extractedInfo.category]?.name || extractedInfo.category || 'Service',
+      location: extractedInfo.location || 'your area'
+    }) || `🔍 Searching for ${URBAN_HELP_CATEGORIES[extractedInfo.category]?.name || extractedInfo.category || 'service'} in ${extractedInfo.location || 'your area'}...`, client);
+
+    await urbanHelpFlow.executeUrbanHelpSearch(sender, extractedInfo, session, client, userLang);
   }
   
   await saveSession(sender, session);
@@ -1714,109 +1510,7 @@ async function handleUrbanHelpTextRequest(sender, text, session, client) {
  * Extract urban help info from text - UPDATED WITH CONTEXT DETECTION
  */
 function extractUrbanHelpFromText(text) {
-  const lowerText = text.toLowerCase();
-  const result = {
-    category: null,
-    location: null,
-    timing: null,
-    rawText: text,
-    context: detectIntentContext(text)
-  };
-  
-  console.log(`🔍 [EXTRACT] Analyzing text: "${text}"`);
-  console.log(`🔍 [CONTEXT] Detected: ${result.context}`);
-  
-  // Common service keywords to remove when extracting category
-  const commonWords = ['i', 'need', 'want', 'looking', 'for', 'a', 'an', 'the', 
-                       'in', 'at', 'near', 'around', 'mein', 'please', 'mujhe',
-                       'chahiye', 'required', 'service', 'services', 'karwana', 'find',
-                       'am', 'provide', 'offer', 'available'];
-  
-  // 1. Extract location first (easier to identify)
-  const locationMatch = lowerText.match(/\b(in|at|near|around|mein|पर|में)\s+([^,.!?]+)/i);
-  if (locationMatch) {
-    result.location = locationMatch[2].trim()
-      .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-    console.log(`📍 Extracted location: ${result.location}`);
-  }
-  
-  // 2. Extract category based on context
-  if (result.context === 'offer') {
-    // Extract service being offered
-    let serviceText = lowerText;
-    
-    // Remove offering phrases
-    const offeringPhrases = ['i am', 'i\'m', 'i provide', 'i offer', 'available', 'services', 'service'];
-    offeringPhrases.forEach(phrase => {
-      serviceText = serviceText.replace(new RegExp(`\\b${phrase}\\b`, 'gi'), '');
-    });
-    
-    // Remove location
-    if (result.location) {
-      const locationLower = result.location.toLowerCase();
-      serviceText = serviceText.replace(new RegExp(`\\b${locationLower}\\b`, 'g'), '');
-    }
-    
-    // Clean and set as category
-    serviceText = serviceText
-      .replace(/\s+/g, ' ')
-      .replace(/[^\w\s]/gi, '')
-      .trim();
-    
-    if (serviceText && serviceText.length > 2) {
-      result.category = serviceText;
-      console.log(`🔧 Extracted offering category: ${result.category}`);
-    }
-  } else {
-    // Extract category for 'find' context
-    let categoryText = lowerText;
-    
-    // Remove location from text
-    if (result.location) {
-      const locationLower = result.location.toLowerCase();
-      categoryText = categoryText.replace(new RegExp(`\\b${locationLower}\\b`, 'g'), '');
-      categoryText = categoryText.replace(/\s+/g, ' ').trim();
-    }
-    
-    // Remove common words
-    commonWords.forEach(word => {
-      const regex = new RegExp(`\\b${word}\\b`, 'gi');
-      categoryText = categoryText.replace(regex, '');
-    });
-    
-    // Clean up the text
-    categoryText = categoryText
-      .replace(/\s+/g, ' ')
-      .replace(/[^\w\s]/gi, '')
-      .trim();
-    
-    if (categoryText && categoryText.length > 2 && !/^\d+$/.test(categoryText)) {
-      result.category = categoryText;
-      console.log(`🔧 Extracted searching category: ${result.category}`);
-    }
-  }
-  
-  // 3. Check if it matches any known categories (for better display, not for filtering)
-  for (const [knownCategory, data] of Object.entries(URBAN_HELP_CATEGORIES)) {
-    if (data.keywords.some(keyword => lowerText.includes(keyword))) {
-      console.log(`✅ Matches known category: ${knownCategory}`);
-      // ALWAYS use the known category for consistency
-      result.category = knownCategory;
-      break;
-    }
-  }
-  
-  // 4. Extract timing
-  if (lowerText.includes('now') || lowerText.includes('immediate') || lowerText.includes('urgent')) {
-    result.timing = 'immediate';
-  } else if (lowerText.includes('tomorrow') || lowerText.includes('next week')) {
-    result.timing = 'future';
-  }
-  
-  console.log(`📦 Final extraction:`, result);
-  return result;
+  return urbanHelpFlow.extractUrbanHelpFromText(text);
 }
 
 // ========================================
@@ -1982,7 +1676,7 @@ async function handleOriginalRequest(sender, originalText, session, effectiveCli
         location: extracted.location
       }) || `🔍 Searching for ${extracted.category} in ${extracted.location}...`, effectiveClient);
 
-      await executeUrbanHelpSearch(sender, extracted, session, effectiveClient, userLang);
+      await urbanHelpFlow.executeUrbanHelpSearch(sender, extracted, session, effectiveClient, userLang);
     } else {
       // Partial info — ask for what's missing and persist pending request
       const missing = checkMissingUrbanHelpInfo(extracted);
@@ -2169,7 +1863,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
             location: confirmedText
           }) || `🔍 Searching for ${session.urbanHelpContext.entities.category} in ${confirmedText}...`, effectiveClient);
 
-          await executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, effectiveClient, userLang);
+          await urbanHelpFlow.executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, effectiveClient, userLang);
           return session;
         }
         
@@ -2221,7 +1915,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         location: confirmedText
       }) || `🔍 Searching for ${session.urbanHelpContext.entities.category} in ${confirmedText}...`, effectiveClient);
 
-      await executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, effectiveClient, userLang);
+      await urbanHelpFlow.executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, effectiveClient, userLang);
       return session;
     }
 
@@ -2333,7 +2027,7 @@ if (text && !replyId) {
       }
     } else {
       // User is genuinely looking for services
-      await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
+      await urbanHelpFlow.handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
       return session; // ✅ RETURN IMMEDIATELY
     }
   }
@@ -2488,10 +2182,35 @@ if (text && !replyId) {
   if (text && session.urbanHelpContext && (session.urbanHelpContext.step === 'awaiting_location' || session.urbanHelpContext.step === 'awaiting_missing_info' || session.step === 'awaiting_urban_help_info')) {
     console.log(`🔧 [URBAN HELP] Received location while awaiting_location/missing_info: ${text}`);
 
+    // Try to extract location from the reply text first
+    const extracted = extractUrbanHelpFromText(text || '');
+    const loc = extracted.location || text;
+
     // Accept the text as location
     session.urbanHelpContext.entities = session.urbanHelpContext.entities || {};
-    session.urbanHelpContext.entities.location = text;
+    session.urbanHelpContext.entities.location = loc;
     session.urbanHelpContext.text = session.urbanHelpContext.text || text;
+
+    // Persist updated context
+    await saveSession(sender, session);
+
+    // If the reply is short (likely an implicit confirmation), go straight to searching
+    const words = (loc || '').split(/\s+/).filter(Boolean);
+    if (words.length <= 4) {
+      session.urbanHelpContext.step = 'searching';
+      session.step = 'searching_urban_help';
+
+      const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+      await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'searching', {
+        category: session.urbanHelpContext.entities.category || 'service',
+        location: loc
+      }) || `🔍 Searching for ${session.urbanHelpContext.entities.category || 'service'} in ${loc}...`, effectiveClient);
+
+      await urbanHelpFlow.executeUrbanHelpSearch(sender, session.urbanHelpContext.entities, session, effectiveClient, multiLanguage.getUserLanguage(sender) || 'en');
+      return session;
+    }
+
+    // Otherwise show confirmation (longer replies may be an updated full request)
     session.urbanHelpContext.step = "awaiting_confirmation";
 
     await sendUrbanHelpConfirmation(sender,
@@ -2670,7 +2389,8 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
     
     // Handle all confirmation types
     if (replyId.startsWith('confirm_')) {
-        const confirmedText = session.rawTranscription;
+        // Use voice raw transcription if available, otherwise fall back to urbanHelpContext or stored text
+        const confirmedText = session.rawTranscription || session.urbanHelpContext?.text || session.urbanHelpContext?.transcription || session.urbanHelpContext?.rawText || '';
         
         if (!confirmedText) {
             await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'no_transcription'));
@@ -2686,8 +2406,8 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
         const context = detectIntentContext(confirmedText);
         const isOffering = isUserOfferingServices(confirmedText);
         
-        console.log(`🔍 [VOICE] Extracted context: ${context}, IsOffering: ${isOffering}`);
-        console.log(`🔍 [VOICE] Confirmed text: "${confirmedText}"`);
+        console.log(`🔍 [VOICE/TEXT CONFIRM] Extracted context: ${context}, IsOffering: ${isOffering}`);
+        console.log(`🔍 [VOICE/TEXT CONFIRM] Confirmed text: "${confirmedText}"`);
         
         // ✅ CRITICAL FIX: Check for "looking for" patterns first
         if (confirmedText.toLowerCase().includes('looking for') || 
@@ -2696,7 +2416,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
             confirmedText.toLowerCase().includes('want ') ||
             context === 'find') {
             
-            console.log("🔧 [VOICE] User is LOOKING FOR services (based on keywords)");
+            console.log("🔧 [VOICE/TEXT CONFIRM] User is LOOKING FOR services (based on keywords)");
             
             await sendMessageWithClient(sender, `✅ Perfect! You're looking for: *"${confirmedText}"*\n\nSearching for services...`);
             
