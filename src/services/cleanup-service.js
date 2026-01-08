@@ -96,11 +96,11 @@ class CleanupService {
           console.error('❌ Error reconciling sessions for deleted drafts:', reconError);
         }
 
+        return { cleaned: count, deletedDrafts: deletedDraftIds.length, sessionsReset: totalSessionsReset };
       } else {
         console.log('✅ No drafts older than 24 hours');
+        return { cleaned: 0, deletedDrafts: 0, sessionsReset: 0 };
       }
-      
-      return { cleaned: count, deletedDrafts: deletedDraftIds.length, sessionsReset: totalSessionsReset };
       
     } catch (error) {
       console.error('❌ Draft cleanup error:', error.message);
