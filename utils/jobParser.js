@@ -2,12 +2,12 @@
 // Lightweight heuristic parser for free-text job postings
 
 const PHONE_RE = /(?:(?:\+91|91)?\s*[-\s.]*)?([6-9]\d{9})/g;
-const SALARY_RE = /₹?\s?([\d,]+)(?:\s*[–-]\s*₹?\s?([\d,]+))?/i;
+const SALARY_RE = /(?:upto|up to|from)?\s*₹?\s*([\d,]+)(?:\s*[–-]\s*(?:₹?\s*)?([\d,]+))?/i;
 const EXPERIENCE_RE = /(\b\d+\s*(?:years|yrs|year|months|month|mos|mo)\b)|\b(min\s*)?\d+\s*months\b|\b(fresher|freshers|no experience|no-experience)\b/i;
 
 const ROLE_SYNONYMS = [
-  { keys: ['customer service', 'customer support', 'bpo', 'voice process', 'voice process', 'voice'], role: 'customer_service' },
-  { keys: ['international travel', 'international travel voice', 'travel voice'], role: 'voice_process' },
+  { keys: ['international travel', 'international travel voice', 'travel voice', 'voice process', 'voice-only'], role: 'voice_process' },
+  { keys: ['customer service', 'customer support', 'bpo'], role: 'customer_service' },
   { keys: ['driver', 'delivery driver', 'delivery'], role: 'driver' },
   { keys: ['developer', 'frontend', 'backend', 'full stack'], role: 'developer' },
   { keys: ['sales', 'telecaller', 'tele-caller'], role: 'sales' },

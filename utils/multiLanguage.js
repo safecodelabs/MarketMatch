@@ -142,7 +142,8 @@ class MultiLanguage {
                 'language_set': "🌐 Language set to {lang}.",
                 'select_language_prompt': "Please select a language 👇",
                 'language_unsupported': "Unsupported language selected. Please choose from the list.",
-                'new_listing_available': "🔔 A new {category} is available in {location}: {title}"
+                'new_listing_available': "🔔 A new {category} is available in {location}: {title}",
+                'new_job_available': "🔔 New job: {title} in {location} ({category}) — Contact: {contact}"
             },
             
             hi: {
@@ -272,7 +273,8 @@ class MultiLanguage {
                 'language_set': "🌐 भाषा {lang} सेट कर दी गई है।",
                 'select_language_prompt': "कृपया अपनी भाषा चुनें 👇",
                 'language_unsupported': "असमर्थित भाषा चुनी गई। कृपया सूची से चुनें।",
-                'new_listing_available': "🔔 एक नया {category} अब {location} में उपलब्ध है: {title}"
+                'new_listing_available': "🔔 एक नया {category} अब {location} में उपलब्ध है: {title}",
+                'new_job_available': "🔔 नई नौकरी: {title} - {location} ({category}) — संपर्क: {contact}"
             },
             
             ta: {

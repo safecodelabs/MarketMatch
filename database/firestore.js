@@ -29,6 +29,10 @@ const userRequestsRef = db.collection("user_requests");
 // ✅ ADDED: Reference to urban_services collection
 const urbanServicesRef = db.collection("urban_services");
 
+// Jobs collection references
+const jobsRef = db.collection("jobs");
+const jobRequestsRef = db.collection("job_requests");
+
 // -----------------------------------------------
 // ✅ ADDED: SEARCH URBAN SERVICES FUNCTION - FIXED
 // -----------------------------------------------
@@ -1049,6 +1053,135 @@ async function searchCommodities(item, quantity) {
   }
 }
 
+// -----------------------------------------------------
+// JOBS: Add / Search / Request helpers
+// -----------------------------------------------------
+async function addJobPost(posterId, jobData) {
+  try {
+    const docRef = await jobsRef.add({
+      posterId: posterId || null,
+      title: jobData.title || null,
+      role: jobData.normalizedRole || jobData.role || null,
+      location: jobData.location || null,
+      city: jobData.location || null,
+      description: jobData.description || jobData.rawText || null,
+      experience: jobData.experience || null,
+      salary: jobData.salary || null,
+      perks: jobData.perks || null,
+      contact: jobData.contact || null,
+      immediateStart: jobData.immediateStart || false,
+      parsedEntities: jobData,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`✅ [JOBS] Added job post: ${docRef.id}`);
+    return { success: true, id: docRef.id };
+  } catch (error) {
+    console.error('❌ [JOBS] Error adding job post:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function searchJobs({ role = null, location = null, minExperienceMonths = null, limit = 20 } = {}) {
+  try {
+    console.log(`🔍 [JOBS] Searching jobs role=${role}, location=${location}, minExp=${minExperienceMonths}`);
+
+    // To avoid composite index requirements in dev, fetch a limited set and filter in-app
+    const snapshot = await jobsRef.limit(50).get();
+    if (snapshot.empty) return [];
+
+    const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    const filtered = jobs.filter(j => {
+      let ok = true;
+      if (role) {
+        const r = (j.role || '').toString().toLowerCase();
+        const roleStr = role.toString().toLowerCase();
+        ok = ok && (r.includes(roleStr) || roleStr.includes(r));
+      }
+      if (location && j.location) {
+        ok = ok && (j.location.toLowerCase().includes(location.toLowerCase()));
+      }
+      if (minExperienceMonths !== null && j.experience && j.experience.minMonths !== null) {
+        ok = ok && (j.experience.minMonths <= minExperienceMonths);
+      }
+      return ok;
+    });
+
+    return filtered.slice(0, limit);
+  } catch (error) {
+    console.error('❌ [JOBS] Error searching jobs:', error);
+    return [];
+  }
+}
+
+async function addJobRequest(userId, requestData) {
+  try {
+    const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    const docRef = await jobRequestsRef.add({
+      userId,
+      ...requestData,
+      status: 'pending',
+      matchedJobIds: [],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt
+    });
+    console.log(`✅ [JOBS] Job request added: ${docRef.id}`);
+    return { success: true, requestId: docRef.id };
+  } catch (error) {
+    console.error('❌ [JOBS] Error adding job request:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getJobById(jobId) {
+  try {
+    const doc = await jobsRef.doc(String(jobId)).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() };
+  } catch (error) {
+    console.error('❌ [JOBS] Error getting job by id:', error);
+    return null;
+  }
+}
+
+async function getPendingJobRequests(daysWindow = 7) {
+  try {
+    const cutoff = new Date(Date.now() - (daysWindow * 24 * 60 * 60 * 1000));
+    const snapshot = await jobRequestsRef.where('status', '==', 'pending').get();
+    if (snapshot.empty) return [];
+    const results = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (!data.createdAt || (data.createdAt.toDate && data.createdAt.toDate() >= cutoff) || (data.createdAt >= cutoff)) {
+        results.push({ id: doc.id, ...data });
+      }
+    });
+    return results;
+  } catch (error) {
+    console.error('❌ [JOBS] Error getting pending job requests:', error);
+    return [];
+  }
+}
+
+async function updateJobRequestStatus(requestId, status, matchedJobIds = []) {
+  try {
+    const updateData = {
+      status,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    if (matchedJobIds && matchedJobIds.length) {
+      updateData.matchedJobIds = matchedJobIds;
+      updateData.matchedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    await jobRequestsRef.doc(requestId).update(updateData);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ [JOBS] Error updating job request status:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 // Export all functions
 module.exports = {
   db,
@@ -1082,6 +1215,13 @@ module.exports = {
   // User Functions
   getUserProfile,
   saveUserLanguage,
+  // Jobs Functions
+  addJobPost,
+  searchJobs,
+  addJobRequest,
+  getJobById,
+  getPendingJobRequests,
+  updateJobRequestStatus,
   // Legacy Functions for Backward Compatibility
   searchServiceProviders,
   searchCommodities

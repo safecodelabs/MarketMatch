@@ -61,6 +61,9 @@ const multiLanguage = require("./utils/multiLanguage");
 // ✅ REFACTOR: urban help flow moved to its own module
 const urbanHelpFlow = require('./src/flows/urbanHelpFlow');
 
+// ✅ REFACTOR: job flow for posting and seeker flows
+const jobFlow = require('./src/flows/jobFlow');
+
 // ========================================
 // GLOBAL CLIENT HANDLING (NEW)
 // ========================================
@@ -887,89 +890,38 @@ async function handleUrbanHelpConfirmation(sender, response, session, client) {
 async function executeUrbanHelpSearch(sender, entities, session, client, userLang) {
   return urbanHelpFlow.executeUrbanHelpSearch(sender, entities, session, client, userLang);
 }
-      client
-    );
-    
-    // ✅ CHANGED: Use searchUrbanServices instead of searchUrbanHelp
-    const results = await searchUrbanServices(category, location);
 
-    if (results && results.length > 0) {
-      // Format and send results
-      const resultsMessage = formatUrbanHelpResults(results, userLang, categoryName);
-      await sendMessageWithClient(sender, resultsMessage, client);
-      
-      // If we have an existing pending request, update it to 'matched'
-      if (session?.urbanHelpContext?.requestId && typeof updateRequestStatus === 'function') {
-        try {
-          await updateRequestStatus(session.urbanHelpContext.requestId, 'matched', results.map(r => r.id).slice(0, 3));
-          console.log(`✅ [URBAN HELP] Updated request ${session.urbanHelpContext.requestId} to 'matched'`);
-        } catch (err) {
-          console.warn('⚠️ [URBAN HELP] Could not update request status to matched:', err);
-        }
-      } else {
-        // Add to user requests
-        await addUserRequest(sender, {
-          category: category,
-          location: location,
-          status: 'matched',
-          matchedProviders: results.map(r => r.id).slice(0, 3),
-          timestamp: Date.now()
-        });
-      }
-      
-    } else {
-      // No results found
-      const noResultsMessage = 
-        `❌ Sorry, I couldn't find any *${categoryName}* in *${location}*.\n\n` +
-        `I'll notify you when a matching provider becomes available.`;
-          
-      await sendMessageWithClient(sender, noResultsMessage, client);
-      
-      // If we have an existing pending request, just keep it pending (update originalText if needed)
-      if (session?.urbanHelpContext?.requestId && typeof updateRequestStatus === 'function') {
-        try {
-          await updateRequestStatus(session.urbanHelpContext.requestId, 'pending', []);
-          console.log(`✅ [URBAN HELP] Kept request ${session.urbanHelpContext.requestId} as 'pending'`);
-        } catch (err) {
-          console.warn('⚠️ [URBAN HELP] Could not update request to pending:', err);
-        }
-      } else {
-        // Add to user requests as pending (for future notifications)
-        await addUserRequest(sender, {
-          category: category,
-          location: location,
-          status: 'pending',
-          timestamp: Date.now(),
-          originalText: originalText
-        });
-      }
-    }
-    
-    // Send follow-up
-    const followUpText = "\n\nNeed another service? Send another voice message or type 'help'.";
-    await sendMessageWithClient(sender, followUpText, client);
-    
-    // Clear context and return to menu
-    delete session.urbanHelpContext;
-    session.step = "menu";
-    session.state = 'initial';
-    await saveSession(sender, session);
-    
-  } catch (error) {
-    console.error("❌ [URBAN HELP] Error in search:", error);
-    const errorMessage = "Sorry, I encountered an error while searching. Please try again.";
-    await sendMessageWithClient(sender, errorMessage, client);
-    
-    delete session.urbanHelpContext;
-    session.step = "menu";
-    session.state = 'initial';
-    await saveSession(sender, session);
-  }
+/**
+ * Check missing urban help info - DELEGATES TO flow module
+ */
+function checkMissingUrbanHelpInfo(entities) {
+  return urbanHelpFlow.checkMissingUrbanHelpInfo(entities);
 }
 
 /**
- * Get category display name (delegates to urbanHelpFlow)
+ * Ask for missing urban help info - DELEGATES TO flow module
  */
+async function askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLang, client) {
+  return urbanHelpFlow.askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLang, client);
+}
+
+/**
+ * Format urban help results - DELEGATES TO flow module
+ */
+function formatUrbanHelpResults(results, userLang, categoryName = null) {
+  return urbanHelpFlow.formatUrbanHelpResults(results, userLang, categoryName);
+}
+
+/**
+ * Get category display name - DELEGATES TO flow module
+ */
+function getCategoryDisplayName(category) {
+  return urbanHelpFlow.getCategoryDisplayName(category);
+}
+
+// ========================================
+// POST LISTING FLOW HANDLERS
+// ========================================
 function getCategoryDisplayName(category) {
   return urbanHelpFlow.getCategoryDisplayName(category);
 }
@@ -1992,6 +1944,32 @@ if (text && !replyId) {
     await saveSession(sender, session);
   }
   
+  // ✅ JOB DETECTION: Posting vs Searching for Jobs
+  const jobOfferRE = /\b(hiring|vacancy|vacancies|immediate joining|apply now|apply immediately|job opening|vacancy:|hiring:)\b/i;
+  const jobSearchRE = /\b(looking for (a )?job|need a job|need job|job search|seeking a job|seeking job|looking for work)\b/i;
+
+  if (jobOfferRE.test(text) || detectIntentContext(text) === 'job_offer') {
+    console.log('💼 [JOB POST] Detected job posting → routing to jobFlow');
+    try {
+      await jobFlow.handleJobPosting(sender, text, session, effectiveClient);
+    } catch (err) {
+      console.warn('⚠️ [JOB POST] Error while handling job posting:', err);
+    }
+    await saveSession(sender, session);
+    return session;
+  }
+
+  if (jobSearchRE.test(text) || detectIntentContext(text) === 'job_search') {
+    console.log('💼 [JOB SEARCH] Detected job seeker intent → routing to jobFlow');
+    if (session.jobSeekerContext && session.jobSeekerContext.step) {
+      await jobFlow.handleJobSeekerReply(sender, text, session, effectiveClient);
+    } else {
+      await jobFlow.handleJobSeekerStart(sender, session, effectiveClient);
+    }
+    await saveSession(sender, session);
+    return session;
+  }
+
   // ✅ ONLY THEN: Check if it's an urban help request (looking for services)
   if (isUrbanHelpRequest(text)) {
     console.log("🔧 [URBAN HELP] Text request detected - user is LOOKING FOR services");
