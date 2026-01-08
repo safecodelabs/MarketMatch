@@ -112,7 +112,7 @@ class MultiLanguage {
                 'error_unable_edit_listing': "❌ Unable to edit listing. Please try again.",
                 
                 // Language selection confirmation
-                'language_set': "🌐 Language set to {lang}."
+                'language_set': "🌐 Language set to {lang}.",
                 'select_language_prompt': "Please select a language 👇",
                 'language_unsupported': "Unsupported language selected. Please choose from the list."
             },
