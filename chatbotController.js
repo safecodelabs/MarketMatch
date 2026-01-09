@@ -295,6 +295,47 @@ function isUserOfferingServices(text) {
   return false;
 }
 
+// =============================
+// Detect structured job postings
+// =============================
+function isStructuredJobPost(text) {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+
+  // Detect phone/contact
+  const hasPhone = /(?:\+?\d{1,3}[-\s.]*)?(?:\d{10}|\d{3}[-\s.]\d{3}[-\s.]\d{4})/.test(text);
+
+  // Key posting indicators
+  const indicators = [
+    /hiring\b/i,
+    /vacanc(?:y|ies)\b/i,
+    /immediate joining/i,
+    /requirement/i,
+    /require(s)?\b/i,
+    /designation\b/i,
+    /shift\b/i,
+    /ctc\b/i,
+    /salary\b/i,
+    /perks\b/i,
+    /contact\b/i,
+    /location\b/i,
+    /role\b/i
+  ];
+
+  let matches = 0;
+  for (const r of indicators) if (r.test(lower)) matches++;
+
+  // Also consider label-style lines: "Role:", "Location:", "Contact -"
+  const labelStyle = /^(role|location|salary|contact|eligibility|designation)\s*[:\-]/im.test(text);
+
+  // Heuristic: phone + at least one posting indicator OR at least two posting indicators + label style
+  if (hasPhone && matches >= 1) return true;
+  if (matches >= 2 && labelStyle) return true;
+  if (matches >= 3) return true;
+
+  return false;
+}
+
 // ========================================
 // UPDATED: URBAN HELP REQUEST DETECTION - FIXED
 // ========================================
@@ -1721,8 +1762,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // Get effective client (use passed client or global)
   const effectiveClient = getEffectiveClient(client);
   if (!effectiveClient) {
-    console.error("❌ [CONTROLLER] No WhatsApp client available to process message!");
-    return;
+    console.warn("⚠️ [CONTROLLER] No WhatsApp client available; proceeding without client (messages may not be sent)");
   }
   
   console.log("🔍 [CONTROLLER DEBUG] Effective client available:", !!effectiveClient);
@@ -1794,6 +1834,35 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       }
     } catch (err) {
       console.error('🌐 Error setting language from list reply:', err);
+    }
+  }
+
+  // ===========================
+  // PRIORITY ROUTING: If user is mid-way in job seeker flow, route replies directly to jobFlow
+  // This avoids misrouting role replies like "customer service" into posting/urban flows
+  // ===========================
+  if (session.jobSeekerContext && session.jobSeekerContext.step === 'collecting_info') {
+    console.log('🔁 [CONTROLLER] Active job seeker flow detected - routing incoming message to jobFlow');
+    try {
+      await jobFlow.handleJobSeekerReply(sender, text, session, effectiveClient);
+      await saveSession(sender, session);
+      return session;
+    } catch (err) {
+      console.warn('⚠️ [CONTROLLER] Error routing to jobFlow:', err);
+    }
+  }
+
+  // ===========================
+  // STRUCTURED JOB POST DETECTION: Save immediately if text contains job-post fields
+  // ===========================
+  if (isStructuredJobPost(text)) {
+    console.log('💼 [STRUCTURED POST] Detected structured job posting - routing to jobFlow.handleJobPosting (save immediately)');
+    try {
+      await jobFlow.handleJobPosting(sender, text, session, effectiveClient);
+      await saveSession(sender, session);
+      return session;
+    } catch (err) {
+      console.warn('⚠️ [CONTROLLER] Error handling structured job post:', err);
     }
   }
 
