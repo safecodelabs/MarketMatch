@@ -254,7 +254,30 @@ function loadIntentClassifier() {
             result.intent = 'property_rent';
             result.confidence = 0.7;
           }
-          
+
+          // ✅ IMPROVED: Job detection (job postings / openings)
+          const jobKeywords = ['job','hiring','vacancy','vacancies','we are hiring','hiring for','opening','openings','for hire','apply'];
+          for (const jk of jobKeywords) {
+            if (lower.includes(jk)) {
+              // If explicit hiring language, treat as job_offer; otherwise tag as job and capture role
+              if (/hiring|vacancy|openings|we are hiring|hiring for|for hire/i.test(lower)) {
+                result.intent = 'job_offer';
+                result.confidence = 0.75;
+              } else {
+                result.intent = 'job_search_or_offer';
+                result.confidence = 0.5;
+              }
+
+              // Extract job title like "customer support" or "sales manager"
+              const titleMatch = lower.match(/([a-z\s]{2,40})\s+job/);
+              if (titleMatch && titleMatch[1]) {
+                result.entities = result.entities || {};
+                result.entities.position = titleMatch[1].trim();
+              }
+              break;
+            }
+          }
+
           return result;
         }
       };
@@ -401,6 +424,32 @@ class PostingService {
         return await this.startNewPosting(message, intentResult);
       }
       
+      // If not classified as posting but contains strong job keywords, ask a clarifying question and log for retraining
+      const jobPromptRegex = /\b(job|hiring|vacancy|vacancies|we are hiring|hiring for|opening|openings|for hire)\b/i;
+      if (jobPromptRegex.test(message)) {
+        try {
+          await admin.firestore().collection('debug_failed_classifications').add({
+            userId: this.userId,
+            text: message,
+            intentResult,
+            detectedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+          console.log('🔍 Logged failed classification for review');
+        } catch (err) {
+          console.warn('⚠️ Failed to log failed classification:', err.message || err);
+        }
+
+        return {
+          type: 'question',
+          response: 'Do you want to post a job or are you looking for a job? Please reply with "Post" or "Find".',
+          buttons: [
+            { id: 'post_job', title: 'Post a job' },
+            { id: 'find_job', title: 'Find a job' }
+          ],
+          shouldHandle: true
+        };
+      }
+
       return { type: 'not_posting', shouldHandle: false };
       
     } catch (error) {
@@ -443,6 +492,7 @@ class PostingService {
     const postingKeywords = [
       'post', 'list', 'add', 'create', 'offer', 'available',
       'rent', 'sell', 'service', 'help', 'looking for', 'need',
+      'job', 'hiring', 'hiring for', 'vacancy', 'vacancies', 'opening', 'openings',
       '1bhk', '2bhk', '3bhk', 'flat', 'apartment', 'room',
       'plumber', 'electrician', 'cleaner', 'tutor', 'maid', 'cook',
       'carpenter', 'painter', 'driver', 'technician',
