@@ -1837,6 +1837,34 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     }
   }
 
+  // Handle Urban Help "Type Request" button (avoid routing to posting service by mistake). This handles both the menu case and
+  // the case where a quick urban_help draft was created and the session moved into posting_flow.
+  if (replyId && replyId === 'urban_type') {
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+
+    // If a posting draft for urban_help exists, remove it to prevent confusion (user wants to type a request, not post)
+    try {
+      const postingService = new PostingService(sender);
+      const existingDraft = await postingService.draftManager.getUserActiveDraft(sender);
+      if (existingDraft && existingDraft.category === 'urban_help') {
+        console.log('🔧 [URBAN TYPE] Removing existing urban_help draft to switch to typed request');
+        await postingService.draftManager.deleteDraft(existingDraft.id);
+        // Clear posting session markers
+        delete session.mode;
+        delete session.draftId;
+        session.step = 'menu';
+      }
+    } catch (err) {
+      console.warn('⚠️ [URBAN TYPE] Error checking/removing draft:', err);
+    }
+
+    await sendMessageWithClient(sender, multiLanguage.getMessage(userLang, 'type_instead') || '📝 Please type your request:', effectiveClient);
+    session.step = 'awaiting_urban_help_info';
+    session.state = 'awaiting_text_input';
+    await saveSession(sender, session);
+    return session;
+  }
+
   // ===========================
   // PRIORITY ROUTING: If user is mid-way in job seeker flow, route replies directly to jobFlow
   // This avoids misrouting role replies like "customer service" into posting/urban flows
@@ -2005,6 +2033,25 @@ if (text && !replyId) {
   };
   
   const lowerText = text.toLowerCase();
+
+  // QUICK GUARD: If message contains the word 'job' but does NOT contain explicit hiring/post signals,
+  // treat it as a job-seeker query and route to the job flow (avoids misrouting to posting/urban help)
+  const hasJobWord = /\bjob\b/i.test(text);
+  const jobPostSignals = /\b(hiring|vacanc(?:y|ies)|immediate joining|apply now|apply immediately|job opening|vacancy:|hiring:|want to hire|need to hire|looking to hire|ctc|salary|perks)\b/i;
+  if (hasJobWord && !jobPostSignals.test(text)) {
+    console.log('💼 [JOB GUARD] Detected "job" without hiring indicators — routing to job flow');
+    try {
+      if (session.jobSeekerContext && session.jobSeekerContext.step) {
+        await jobFlow.handleJobSeekerReply(sender, text, session, effectiveClient);
+      } else {
+        await jobFlow.handleJobSeekerStart(sender, session, effectiveClient, text);
+      }
+      await saveSession(sender, session);
+      return session;
+    } catch (err) {
+      console.warn('⚠️ [JOB GUARD] Error routing job message to jobFlow:', err);
+    }
+  }
   
   // ✅ CRITICAL FIX: Check for offering FIRST
   const context = detectIntentContext(text);
@@ -2061,7 +2108,8 @@ if (text && !replyId) {
     if (session.jobSeekerContext && session.jobSeekerContext.step) {
       await jobFlow.handleJobSeekerReply(sender, text, session, effectiveClient);
     } else {
-      await jobFlow.handleJobSeekerStart(sender, session, effectiveClient);
+      // Pass the user's original text so we can extract role/location/experience from one message
+      await jobFlow.handleJobSeekerStart(sender, session, effectiveClient, text);
     }
     await saveSession(sender, session);
     return session;
@@ -2688,6 +2736,63 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
   
   await saveSession(sender, session);
   return session;
+}
+
+// ===========================
+// ✅ NEW: Handle 'post_job' and 'find_job' clarifying buttons
+// ===========================
+if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
+  console.log(`🔘 [BUTTON FLOW] Handling job clarification button: ${replyId}`);
+
+  if (replyId === 'post_job') {
+    // Start posting flow using the original message if available
+    const postingService = new PostingService(sender);
+    const originalMessage = session.rawTranscription || session.lastMessage || text || msg || '';
+
+    // Try processing first (may return confirmation/summary)
+    try {
+      const result = await postingService.processMessage(originalMessage);
+      if (result && result.shouldHandle !== false) {
+        await handlePostingResult(sender, result, session, effectiveClient);
+        await saveSession(sender, session);
+        return session;
+      }
+
+      // Fallback: explicitly start a new listing
+      const startResult = await postingService.startNewListing(originalMessage);
+      if (startResult && startResult.shouldHandle !== false) {
+        await handlePostingResult(sender, startResult, session, effectiveClient);
+        await saveSession(sender, session);
+        return session;
+      }
+
+    } catch (err) {
+      console.error('⚠️ [BUTTON FLOW] Error starting posting from button:', err);
+      await sendMessageWithClient(sender, "⚠️ Couldn't start posting. Please type your job details and I'll help you post it.", effectiveClient);
+      session.step = 'menu';
+      await saveSession(sender, session);
+      return session;
+    }
+  }
+
+  if (replyId === 'find_job') {
+    console.log('🔎 [BUTTON FLOW] User chose to Find a job - routing to job seeker flow');
+    try {
+      if (session.jobSeekerContext && session.jobSeekerContext.step) {
+        await jobFlow.handleJobSeekerReply(sender, text, session, effectiveClient);
+      } else {
+        await jobFlow.handleJobSeekerStart(sender, session, effectiveClient);
+      }
+      await saveSession(sender, session);
+      return session;
+    } catch (err) {
+      console.error('⚠️ [BUTTON FLOW] Error routing to jobFlow:', err);
+      await sendMessageWithClient(sender, "⚠️ Couldn't start job search. Please type what kind of job you're looking for.", effectiveClient);
+      session.step = 'menu';
+      await saveSession(sender, session);
+      return session;
+    }
+  }
 }
 
   // ===========================

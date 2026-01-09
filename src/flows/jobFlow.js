@@ -377,7 +377,7 @@ async function handleJobPosting(sender, text, session = {}, client = null) {
   }
 }
 
-async function handleJobSeekerStart(sender, session = {}, client = null) {
+async function handleJobSeekerStart(sender, session = {}, client = null, initialText = null) {
   const userLang = multiLanguage.getUserLanguage(sender) || 'en';
   try {
     // Initialize seeker context with all required fields
@@ -388,6 +388,13 @@ async function handleJobSeekerStart(sender, session = {}, client = null) {
       experience: null,
       attemptCount: 0
     };
+
+    // If initialText was provided (user already sent details in one message), try extracting immediately
+    if (initialText && typeof initialText === 'string' && initialText.trim().length > 0) {
+      console.log('🔍 [JOB SEEKER] Initial text provided to start flow, attempting to extract directly');
+      // Delegate to reply handler which will extract and ask only what's missing or save the request
+      return await handleJobSeekerReply(sender, initialText, session, client);
+    }
     
     // Start by asking for the job type
     const promptMsg = multiLanguage.getMessage(userLang, 'job_prompt_role') || 
