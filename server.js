@@ -474,6 +474,70 @@ app.post("/admin/cleanup", express.json(), async (req, res) => {
 });
 
 // ============================================
+// ADMIN: Run Match & Notify Worker on demand
+// ============================================
+app.post('/admin/run-match-notify', express.json(), async (req, res) => {
+    try {
+        const adminToken = req.body.token || req.headers['x-admin-token'];
+        const expectedToken = process.env.ADMIN_TOKEN || 'admin123';
+        if (adminToken !== expectedToken) return res.status(401).json({ error: 'Unauthorized' });
+
+        const daysWindow = Number(req.body.daysWindow) || Number(process.env.MATCH_DAYS_WINDOW) || 7;
+        const maxRetries = Number(req.body.maxRetries) || Number(process.env.NOTIFY_MAX_RETRIES) || 3;
+
+        const worker = require('./src/services/matchAndNotifyWorker');
+        const result = await worker.runOnce({ daysWindow, maxRetries, includeAuthErrors: !!req.body.includeAuthErrors });
+
+        res.json({ success: true, result, timestamp: new Date().toISOString() });
+    } catch (error) {
+        console.error('❌ Error running match-and-notify on demand:', error.message || error);
+        res.status(500).json({ error: 'Failed to run worker', message: error.message });
+    }
+});
+
+// ============================================
+// PUBLIC DASHBOARD METRICS ENDPOINT (optional)
+// - Enable by setting ENABLE_PUBLIC_DASHBOARD=1
+// - Optionally configure MATCH_DASHBOARD_ALLOWED_ORIGINS (comma-separated) or use '*' to allow all.
+// ============================================
+app.get('/public/dashboard-metrics', async (req, res) => {
+    if (!(process.env.ENABLE_PUBLIC_DASHBOARD === '1' || process.env.ENABLE_PUBLIC_DASHBOARD === 'true')) {
+        return res.status(404).json({ error: 'Not found' });
+    }
+
+    try {
+        const dbModule = require('./database/firestore');
+        const metrics = await dbModule.getDashboardMetrics();
+        const listings = await dbModule.getAllListings();
+
+        // Build a small listing category breakdown
+        const listingBreakdown = {};
+        for (const l of listings || []) {
+            const cat = (l.category || l.property_type || 'other').toString().toLowerCase();
+            listingBreakdown[cat] = (listingBreakdown[cat] || 0) + 1;
+        }
+
+        // CORS - allow requests from configured origins
+        const allowed = (process.env.MATCH_DASHBOARD_ALLOWED_ORIGINS || '*').split(',').map(s => s.trim());
+        const origin = req.get('origin');
+        if (allowed.includes('*') || allowed.includes(origin)) {
+            res.setHeader('Access-Control-Allow-Origin', allowed.includes('*') ? '*' : origin);
+            res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        }
+
+        res.json({
+            ...metrics,
+            listingBreakdown,
+            lastUpdated: new Date().toISOString()
+        });
+    } catch (err) {
+        console.error('❌ [DASHBOARD] Failed to get public metrics:', err && err.message || err);
+        res.status(500).json({ error: 'Failed to fetch metrics' });
+    }
+});
+
+// ============================================
 // ROOT ROUTE - UPDATED WITH POSTING SYSTEM INFO
 // ============================================
 app.get("/", (_, res) => {
@@ -735,6 +799,46 @@ const server = app.listen(PORT, '0.0.0.0', () => {
             console.error("❌ Error initializing cleanup service:", error.message);
         }
     }, 5000); // Wait 5 seconds after server starts
+
+    // ============================================
+    // SCHEDULED MATCH & NOTIFY (optional in-process scheduler)
+    // Enable by setting ENABLE_SCHEDULED_MATCH_NOTIFY=1 (or 'true')
+    // Optional env: MATCH_NOTIFY_INTERVAL_MINUTES, MATCH_DAYS_WINDOW, NOTIFY_MAX_RETRIES
+    // ============================================
+    if (process.env.ENABLE_SCHEDULED_MATCH_NOTIFY === '1' || process.env.ENABLE_SCHEDULED_MATCH_NOTIFY === 'true') {
+        setTimeout(async () => {
+            try {
+                const worker = require('./src/services/matchAndNotifyWorker');
+                const intervalMinutes = Number(process.env.MATCH_NOTIFY_INTERVAL_MINUTES) || 60;
+                const daysWindow = Number(process.env.MATCH_DAYS_WINDOW) || 7;
+                const maxRetries = Number(process.env.NOTIFY_MAX_RETRIES) || 3;
+
+                console.log(`⏰ Scheduling match-and-notify every ${intervalMinutes} minutes (daysWindow=${daysWindow}, maxRetries=${maxRetries})`);
+
+                // Run immediately once, then schedule
+                try {
+                    await worker.runOnce({ daysWindow, maxRetries });
+                    console.log('✅ Initial match-and-notify pass complete');
+                } catch (err) {
+                    console.error('❌ Initial match-and-notify run failed:', err && err.message || err);
+                }
+
+                setInterval(async () => {
+                    console.log('⏰ Scheduled match-and-notify triggered');
+                    try {
+                        await worker.runOnce({ daysWindow, maxRetries });
+                    } catch (err) {
+                        console.error('❌ Scheduled match-and-notify failed:', err && err.message || err);
+                    }
+                }, intervalMinutes * 60 * 1000);
+
+            } catch (error) {
+                console.error('❌ Failed to start scheduled match-and-notify:', error && error.message || error);
+            }
+        }, 10000); // start 10s after server init
+    } else {
+        console.log('⏱️  Match-and-notify in-process scheduler disabled (set ENABLE_SCHEDULED_MATCH_NOTIFY=1 to enable)');
+    }
 });
 
 // Server timeout configuration

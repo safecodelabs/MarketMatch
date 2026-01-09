@@ -1,149 +1,3 @@
-marketplace-ai-bot/
-├── 📂 config/                    # All configurations
-│   ├── environment/
-│   │   ├── development.js
-│   │   ├── production.js
-│   │   └── staging.js
-│   ├── database.js              # DB connections
-│   ├── whatsapp.js              # WhatsApp API config
-│   ├── ai-services.js           # AI/ML service configs
-│   └── payments.js              # Payment gateway configs
-│
-├── 📂 src/
-│   │
-│   ├── 📂 core/                 # CORE PLATFORM (Shared)
-│   │   ├── 📂 auth/
-│   │   │   ├── authMiddleware.js
-│   │   │   ├── roleManager.js
-│   │   │   └── sessionHandler.js
-│   │   │
-│   │   ├── 📂 ai/
-│   │   │   ├── intentClassifier/
-│   │   │   │   ├── IntentClassifier.js
-│   │   │   │   ├── trainingData/
-│   │   │   │   │   ├── housing.json
-│   │   │   │   │   ├── jobs.json
-│   │   │   │   │   └── services.json
-│   │   │   │   └── modelManager.js
-│   │   │   │
-│   │   │   ├── nlpProcessor.js
-│   │   │   └── recommendationEngine.js
-│   │   │
-│   │   ├── 📂 messaging/
-│   │   │   ├── messageRouter.js
-│   │   │   ├── templateManager.js
-│   │   │   └── notificationEngine.js
-│   │   │
-│   │   ├── 📂 database/
-│   │   │   ├── models/
-│   │   │   │   ├── User.js
-│   │   │   │   ├── Conversation.js
-│   │   │   │   └── PlatformAnalytics.js
-│   │   │   ├── migrations/
-│   │   │   └── seeders/
-│   │   │
-│   │   └── 📂 shared/
-│   │       ├── validators/
-│   │       ├── utils/
-│   │       ├── constants/
-│   │       └── errors/
-│   │
-│   ├── 📂 modules/              # BUSINESS VERTICALS (Plugins)
-│   │   │
-│   │   ├── 📂 housing/          # MODULE 1
-│   │   │   ├── 📂 consumer/     # Home seekers/renters
-│   │   │   │   ├── controllers/
-│   │   │   │   ├── services/
-│   │   │   │   ├── flows/
-│   │   │   │   └── views/ (WhatsApp templates)
-│   │   │   │
-│   │   │   ├── 📂 business/     # Realtors/Brokers
-│   │   │   │   ├── adminController.js
-│   │   │   │   ├── analyticsService.js
-│   │   │   │   ├── bulkUploadService.js
-│   │   │   │   └── dashboardFlows/
-│   │   │   │
-│   │   │   ├── 📂 shared/
-│   │   │   │   ├── models/
-│   │   │   │   │   ├── Property.js
-│   │   │   │   │   ├── PropertyAnalytics.js
-│   │   │   │   │   └── Lead.js
-│   │   │   │   ├── validators/
-│   │   │   │   └── constants.js
-│   │   │   │
-│   │   │   └── index.js         # Module entry point
-│   │   │
-│   │   ├── 📂 jobs/             # MODULE 2
-│   │   │   ├── 📂 seeker/
-│   │   │   ├── 📂 employer/
-│   │   │   ├── 📂 shared/
-│   │   │   └── index.js
-│   │   │
-│   │   ├── 📂 services/         # MODULE 3
-│   │   │   ├── 📂 customer/
-│   │   │   ├── 📂 provider/
-│   │   │   ├── 📂 shared/
-│   │   │   └── index.js
-│   │   │
-│   │   ├── 📂 marketplace/      # MODULE 4
-│   │   │   ├── 📂 buyer/
-│   │   │   ├── 📂 seller/
-│   │   │   ├── 📂 shared/
-│   │   │   └── index.js
-│   │   │
-│   │   └── 📂 moduleManager/    # Module loader & router
-│   │       ├── ModuleLoader.js
-│   │       ├── ModuleRouter.js
-│   │       └── dependencyInjector.js
-│   │
-│   ├── 📂 gateways/             # External API integrations
-│   │   ├── whatsapp/
-│   │   │   ├── WhatsAppClient.js
-│   │   │   ├── flowManager.js
-│   │   │   └── webhookHandler.js
-│   │   │
-│   │   ├── payment/
-│   │   │   ├── StripeGateway.js
-│   │   │   └── RazorpayGateway.js
-│   │   │
-│   │   └── thirdParty/
-│   │       ├── googleMaps.js
-│   │       ├── emailService.js
-│   │       └── smsService.js
-│   │
-│   ├── 📂 api/                  # REST/GraphQL APIs (if needed)
-│   │   ├── routes/
-│   │   ├── controllers/
-│   │   └── middleware/
-│   │
-│   └── 📂 workers/              # Background jobs
-│       ├── notificationWorker.js
-│       ├── analyticsWorker.js
-│       └── cleanupWorker.js
-│
-├── 📂 tests/
-│   ├── unit/
-│   ├── integration/
-│   └── e2e/
-│
-├── 📂 scripts/                  # Deployment & maintenance
-│   ├── deploy/
-│   ├── database/
-│   └── monitoring/
-│
-├── 📂 docs/                     # Documentation
-│   ├── api/
-│   ├── modules/
-│   └── architecture/
-│
-├── package.json
-├── docker-compose.yml
-├── Dockerfile
-├── .env.example
-└── README.md
-
-
-
 ✅ Strategy Summary:
 No web UI for admins or users
 Use WhatsApp-only interaction for both job seekers and job posters.
@@ -197,6 +51,22 @@ Check if the sender's number is in the list.
 If yes, treat messages as job posts.
 
 If no, treat messages as job seeker interactions.
+
+---
+
+## Background workers & Scheduling 🔧
+
+- The project includes a generalized `match-and-notify` worker which re-runs matches for pending user requests (jobs, urban-help, listings) and sends notifications when matches appear.
+
+- You can run it manually via NPM: `npm run match-notify` or via the script `scripts/run-match-notify.js`.
+
+- Scheduling options:
+  - GitHub Actions workflow: `.github/workflows/match-and-notify.yml` (runs hourly by default).
+  - In-process scheduler: set `ENABLE_SCHEDULED_MATCH_NOTIFY=1` (see `docs/SCHEDULER.md` for details).
+  - Manual trigger: POST `/admin/run-match-notify` with `token` (use `ADMIN_TOKEN`).
+
+- If notifications fail due to provider auth errors (401), the worker will alert and skip retries until credentials are fixed.
+
 
 🧠 Bonus: Semi-Structured Input Parser
 Instead of making admins type in exact format, allow for flexibility using basic NLP:

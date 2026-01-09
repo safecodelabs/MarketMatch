@@ -2,7 +2,11 @@
     "name": "marketmatch-ai",
     "version": "1.0.0",
     "scripts": {
-        "start": "node server.js"
+        "start": "node server.js",
+        "retry-notifications": "node scripts/retry-notifications.js",
+        "generate-dashboard": "node scripts/generate-dashboard.js",
+        "match-notify": "node scripts/run-match-notify.js",
+        "test-alert": "node scripts/test-alert.js"
     },
     "dependencies": {
         "@ffmpeg-installer/ffmpeg": "^1.1.0",

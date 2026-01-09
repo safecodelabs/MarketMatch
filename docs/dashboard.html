@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>MarketMatch AI — Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #eee; padding: 16px; margin: 8px; display: inline-block; width: 220px; vertical-align: top; }
+    .big { font-size: 28px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>MarketMatch AI — Dashboard</h1>
+  <p id="lastUpdated">Last updated: (static)</p>
+
+  <div class="card"><div>Total users</div><div id="totalUsers" class="big">—</div></div>
+  <div class="card"><div>Listing count</div><div id="totalListings" class="big">—</div></div>
+  <div class="card"><div>Urban help providers</div><div id="totalUrban" class="big">—</div></div>
+  <div class="card"><div>Jobs posted</div><div id="totalJobs" class="big">—</div></div>
+  <div class="card"><div>Job requests</div><div id="totalJobReqs" class="big">—</div></div>
+  <div class="card"><div>Total messages</div><div id="totalMessages" class="big">—</div></div>
+
+  <h2>Messages breakdown</h2>
+  <canvas id="messagesChart" width="600" height="200"></canvas>
+
+  <script>
+    const API = (window.DASHBOARD_METRICS_URL) ? window.DASHBOARD_METRICS_URL : '/public/dashboard-metrics';
+
+    function formatNumber(n) { return n === undefined || n === null ? '—' : n; }
+
+    const ctx = document.getElementById('messagesChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['Inbound', 'Outbound'],
+        datasets: [{
+          label: 'Messages',
+          data: [0, 0],
+          backgroundColor: ['#4e79a7', '#f28e2b']
+        }]
+      }
+    });
+
+    async function fetchMetrics() {
+      try {
+        const res = await fetch(API);
+        if (!res.ok) throw new Error('Metrics API unavailable');
+        const json = await res.json();
+
+        document.getElementById('lastUpdated').innerText = 'Last updated: ' + (json.lastUpdated || new Date().toISOString());
+        document.getElementById('totalUsers').innerText = formatNumber(json.totalUsers);
+        document.getElementById('totalListings').innerText = formatNumber(json.totalListings);
+        document.getElementById('totalUrban').innerText = formatNumber(json.totalUrbanHelpProviders);
+        document.getElementById('totalJobs').innerText = formatNumber(json.totalJobs);
+        document.getElementById('totalJobReqs').innerText = formatNumber(json.totalJobRequests);
+        document.getElementById('totalMessages').innerText = formatNumber(json.totalMessages);
+
+        const inbound = json.inboundMessages || 0;
+        const outbound = json.outboundMessages || 0;
+        chart.data.datasets[0].data = [inbound, outbound];
+        chart.update();
+
+        // optionally show listing breakdown (console for now)
+        if (json.listingBreakdown) console.log('Listing breakdown:', json.listingBreakdown);
+
+      } catch (err) {
+        console.warn('Could not fetch metrics:', err.message || err);
+      }
+    }
+
+    // Initial fetch and poll every 30 seconds
+    fetchMetrics();
+    setInterval(fetchMetrics, 30 * 1000);
+  </script>
+</body>
+</html>

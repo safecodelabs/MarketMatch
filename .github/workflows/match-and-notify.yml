@@ -1,0 +1,26 @@
+name: 'Match and Notify (scheduled)'
+
+on:
+  schedule:
+    - cron: '0 * * * *' # every hour
+  workflow_dispatch: {}
+
+jobs:
+  run-match-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run match & notify
+        env:
+          NODE_ENV: production
+          MATCH_DAYS_WINDOW: 7
+          NOTIFY_MAX_RETRIES: 3
+          # Ensure secure credentials are provided via repo secrets in Secrets -> Actions
+          # e.g., FIREBASE_SERVICE_ACCOUNT and WHATSAPP_TOKEN
+        run: npm run match-notify
