@@ -6,6 +6,16 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_ID;
 
 const API_URL = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
 
+// Custom error type for API send failures so callers can inspect status and API response
+class ApiSendError extends Error {
+  constructor(message, status = null, apiData = null) {
+    super(message);
+    this.name = 'ApiSendError';
+    this.status = status;
+    this.apiData = apiData;
+  }
+}
+
 // --- Utility function for cleaning strings ---
 function cleanString(str, maxLength = 100) {
   if (typeof str !== 'string') return '';
@@ -50,6 +60,21 @@ async function sendMessage(to, messageOrPayload) {
 
     const messageId = res.data.messages?.[0]?.id || 'N/A';
     console.log(`✅ ${logType} sent successfully (ID: ${messageId})`);
+
+    // Log outbound message to Firestore for metrics and audit (best-effort)
+    try {
+      const db = require('../../database/firestore');
+      await db.addMessageLog({
+        direction: 'out',
+        to: to,
+        body: payload && payload.text && payload.text.body ? payload.text.body : JSON.stringify(payload).slice(0, 1000),
+        status: 'sent',
+        messageId: messageId
+      });
+    } catch (logErr) {
+      console.warn('⚠️ [MESSAGE SERVICE] Could not log outbound message:', logErr && logErr.message);
+    }
+
     return res.data;
   } catch (err) {
     console.error("❌ FINAL SEND MESSAGE ERROR:");
@@ -61,12 +86,28 @@ async function sendMessage(to, messageOrPayload) {
     console.error("❌ Payload sent:", payloadForLog.substring(0, 500) + (payloadForLog.length > 500 ? "..." : ""));
 
     // Log the entire response data if available
-    if (err.response?.data) {
-      console.error("❌ API Error Response:", JSON.stringify(err.response.data));
+    const status = err.response?.status || null;
+    const apiData = err.response?.data || null;
+    if (apiData) {
+      console.error("❌ API Error Response:", JSON.stringify(apiData));
     }
 
-    // RETHROW THE ERROR to be caught by the calling function
-    throw new Error(`API Send Failed: ${err.message}`, { cause: err.response?.data });
+    // Record failed outbound attempt (best-effort)
+    try {
+      const db = require('../../database/firestore');
+      await db.addMessageLog({
+        direction: 'out',
+        to: to,
+        body: payload && payload.text && payload.text.body ? payload.text.body : JSON.stringify(payload).slice(0, 1000),
+        status: 'error',
+        error: apiData || { message: err.message }
+      });
+    } catch (logErr) {
+      console.warn('⚠️ [MESSAGE SERVICE] Could not log failed outbound message:', logErr && logErr.message);
+    }
+
+    // Throw a structured ApiSendError so callers can react to status / apiData
+    throw new ApiSendError(`API Send Failed: ${err.message}`, status, apiData);
   }
 }
 
@@ -673,5 +714,8 @@ module.exports = {
   
   // New functions for posting flow
   sendConfirmationWithButtons,
-  sendListingSummary
+  sendListingSummary,
+
+  // Error class for callers
+  ApiSendError
 };

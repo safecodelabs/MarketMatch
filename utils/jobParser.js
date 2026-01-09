@@ -82,6 +82,15 @@ function extractExperienceFromStructured(text) {
     }
   }
 
+  // Fallback: search globally for any "X years" or "Y months" occurrences in the entire text
+  const anyMatch = text.match(/(\d+)\s*(?:years?|yrs?|year|months?|mos?|mo)/i);
+  if (anyMatch) {
+    const num = parseInt(anyMatch[1]);
+    const isMonths = /months?|mos?|mo/i.test(anyMatch[0]);
+    const months = isMonths ? num : (num * 12);
+    return { minMonths: months, raw: anyMatch[0], level: months === 0 ? 'none' : (months <= 12 ? 'junior' : (months <= 36 ? 'mid' : 'senior')) };
+  }
+
   return { minMonths: null, raw: null, level: null };
 }
 
@@ -145,13 +154,27 @@ function parseStructuredJobPost(text) {
   const perks = extractPerksFromStructured(text);
   const immediateStart = /walk.?in|immediate|joining/i.test(text);
 
+  // Prefer explicit Role: field if present (more precise)
   let role = null;
-  if (title) {
-    // Extract role: remove parenthetical content and trim
+  const roleFieldMatch = text.match(/role\s*[:\-]?\s*(.+?)(?:\n|$)/i);
+  if (roleFieldMatch) {
+    role = roleFieldMatch[1].trim();
+  } else if (title) {
+    // Fallback: extract from title (remove parenthetical content and trim)
     role = title.split(/[(\-]/)[0].trim();
   }
 
   const normalizedRole = normalizeRole(role || title || 'unknown');
+
+  // Also compute a small roleTokens set for fuzzy matching later
+  const roleTokens = ((role || title || '')
+    .toString()
+    .toLowerCase()
+    .replace(/[\u2013\u2014–—]/g, ' ')
+    .replace(/[\W_]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+  );
 
   return {
     title,

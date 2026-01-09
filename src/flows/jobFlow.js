@@ -278,14 +278,29 @@ async function handleJobPosting(sender, text, session = {}, client = null) {
 
       for (const req of pending) {
         try {
-          // Simple matching heuristics
+              // Simple matching heuristics
           let matches = true;
 
-          // Match role
+          // Build a combined job text string to check for matches
+          const jobText = ((parsed.title || '') + ' ' + (parsed.role || '') + ' ' + (parsed.rawText || '') + ' ' + (parsed.normalizedRole || '')).toLowerCase();
+
+          // Match role using multiple strategies: exact includes, token overlap, normalized role equality
           if (req.desiredRole) {
-            const r1 = (req.desiredRole || '').toLowerCase();
-            const r2 = (parsed.normalizedRole || parsed.role || '').toString().toLowerCase();
-            if (r1 && r2 && !(r1.includes(r2) || r2.includes(r1))) matches = false;
+            const rawQ = (req.desiredRole || '').toString();
+            const q = rawQ.toLowerCase();
+            const qProcessed = q.replace(/[_-]/g, ' ');
+            const qNorm = normalizeRole(qProcessed) || qProcessed;
+
+            const tokens = qProcessed.split(/\s+/).filter(Boolean);
+            const tokenMatch = tokens.some(tok => jobText.includes(tok));
+            const includesMatch = jobText.includes(qProcessed) || qProcessed.includes(jobText);
+            const normMatch = (parsed.normalizedRole && qNorm && (parsed.normalizedRole.toLowerCase() === qNorm.toLowerCase()));
+
+            if (!(tokenMatch || includesMatch || normMatch)) {
+              matches = false;
+            } else {
+              console.log(`✅ [JOBS] Role match for request ${req.id} (user ${req.userId}): query="${rawQ}" matched against jobText`);
+            }
           }
 
           // Match location if specified
@@ -299,12 +314,12 @@ async function handleJobPosting(sender, text, session = {}, client = null) {
             if (req.experience.minMonths < parsed.experience.minMonths) matches = false;
           }
 
-          if (!matches) continue;
+          if (!matches) {
+            console.log(`🔎 [JOBS] Request ${req.id} (user ${req.userId}) did not match. Query: "${req.desiredRole}" | jobText contains: "${((parsed.title||'') + ' ' + (parsed.role||'') + ' ' + (parsed.rawText||'')).slice(0,140)}"`);
+            continue;
+          }
 
           if (notifiedUsers.has(req.userId)) continue;
-
-          // Update request to matched
-          await db.updateJobRequestStatus(req.id, 'matched', [jobId]);
 
           // Get user language if available
           const userLang = multiLanguage.getUserLanguage(req.userId) || 'en';
@@ -316,11 +331,39 @@ async function handleJobPosting(sender, text, session = {}, client = null) {
             contact: parsed.contact || 'Contact not available'
           });
 
-          await sendText(req.userId, message);
-          notifiedUsers.add(req.userId);
-          console.log(`📣 Notified job seeker ${req.userId} about job ${jobId}`);
+          try {
+            // Attempt to send notification. Only mark a request as matched AFTER a successful send.
+            await sendText(req.userId, message);
+
+            // Update request to matched (after successful send)
+            await db.updateJobRequestStatus(req.id, 'matched', [jobId]);
+
+            notifiedUsers.add(req.userId);
+            console.log(`📣 Notified job seeker ${req.userId} about job ${jobId}`);
+
+          } catch (err) {
+            console.warn('⚠️ [JOBS] Could not notify request:', err);
+
+            // Record the failure for retry & observability
+            try {
+              await db.recordNotificationFailure(req.id, jobId, {
+                message: err.message || '',
+                status: err.status || (err.apiData && err.apiData.error && err.apiData.error.code ? 401 : null),
+                apiData: err.apiData || null
+              });
+            } catch (recErr) {
+              console.error('❌ [JOBS] Failed recording notification failure:', recErr);
+            }
+
+            // If this is an auth error, surface a clear log so ops can fix token/config
+            if (err.status === 401 || (err.apiData && err.apiData.error && err.apiData.error.code === 190)) {
+              console.error('❌ [JOBS] Authentication error sending message (401). Notifications will be retried when token is fixed.');
+            }
+
+            continue;
+          }
         } catch (err) {
-          console.warn('⚠️ [JOBS] Could not notify request:', err);
+          console.warn('⚠️ [JOBS] Could not notify request (outer):', err);
         }
       }
     } catch (notifyErr) {

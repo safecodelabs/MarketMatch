@@ -168,6 +168,21 @@ router.post("/", async (req, res) => {
 
     log('DEBUG', `Processing: ${sender.substring(0, 10)} | ${message.type} | "${extractedText.substring(0, 30)}"`);
 
+    // BEST-EFFORT: record inbound message to Firestore for metrics/audit
+    try {
+      const db = require('../database/firestore');
+      db.addMessageLog({
+        direction: 'in',
+        userId: sender,
+        from: sender,
+        body: extractedText,
+        status: 'received',
+        messageType: message.type
+      }).catch(e => console.warn('⚠️ [WEBHOOK] Could not log inbound message:', e && e.message));
+    } catch (err) {
+      console.warn('⚠️ [WEBHOOK] Failed to record inbound message:', err && err.message);
+    }
+
     // =======================================================
     // 🔥 PASS TO BOT (Async to avoid webhook timeout)
     // =======================================================

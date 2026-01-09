@@ -33,6 +33,9 @@ const urbanServicesRef = db.collection("urban_services");
 const jobsRef = db.collection("jobs");
 const jobRequestsRef = db.collection("job_requests");
 
+// Message logs for inbound/outbound messages
+const messageLogsRef = db.collection("message_logs");
+
 // -----------------------------------------------
 // ✅ ADDED: SEARCH URBAN SERVICES FUNCTION - FIXED
 // -----------------------------------------------
@@ -409,6 +412,29 @@ async function getUserPendingRequests(userId) {
     return requests;
   } catch (error) {
     console.error('❌ [URBAN HELP] Error getting user requests:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all pending user requests across all users (optionally within `daysWindow` days)
+ */
+async function getPendingUserRequestsAll(daysWindow = 7) {
+  try {
+    const cutoff = new Date(Date.now() - (daysWindow * 24 * 60 * 60 * 1000));
+    const snapshot = await userRequestsRef.where('status', '==', 'pending').get();
+    if (snapshot.empty) return [];
+    const results = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const createdAt = data.createdAt && data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt || 0);
+      if (createdAt >= cutoff) {
+        results.push({ id: doc.id, ...data });
+      }
+    });
+    return results;
+  } catch (error) {
+    console.error('❌ [URBAN HELP] Error getting pending user requests:', error);
     return [];
   }
 }
@@ -1182,6 +1208,90 @@ async function updateJobRequestStatus(requestId, status, matchedJobIds = []) {
   }
 }
 
+/**
+ * Record a failed notification attempt for a job request.
+ * This does NOT change request.status so the request remains eligible for future notifications.
+ */
+async function recordNotificationFailure(requestId, jobId, errorObj = {}) {
+  try {
+    const failure = {
+      jobId: jobId || null,
+      message: errorObj.message || '',
+      status: errorObj.status || null,
+      code: (errorObj.apiData && errorObj.apiData.error && errorObj.apiData.error.code) ? errorObj.apiData.error.code : null,
+      data: errorObj.apiData || null,
+      at: new Date().toISOString()
+    };
+
+    // Append to a notificationFailures array for historical traceability
+    await jobRequestsRef.doc(requestId).update({
+      notificationAttempts: admin.firestore.FieldValue.increment(1),
+      lastNotificationError: failure,
+      notificationFailures: admin.firestore.FieldValue.arrayUnion(failure),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ [JOBS] Error recording notification failure for request:', requestId, error);
+    return { success: false, error: error.message };
+  }
+}
+
+// --------------------------------------------------
+// MESSAGE LOGS (INBOUND / OUTBOUND) - for metrics
+// --------------------------------------------------
+async function addMessageLog(logEntry = {}) {
+  try {
+    const entry = {
+      direction: logEntry.direction || 'in', // 'in' or 'out'
+      userId: logEntry.userId || null,
+      from: logEntry.from || null,
+      to: logEntry.to || null,
+      body: logEntry.body || null,
+      status: logEntry.status || null,
+      messageId: logEntry.messageId || null,
+      error: logEntry.error || null,
+      messageType: logEntry.messageType || null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    const doc = await messageLogsRef.add(entry);
+    return { success: true, id: doc.id };
+  } catch (error) {
+    console.error('❌ [LOGS] Error adding message log:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getDashboardMetrics() {
+  try {
+    // Counts are best-effort, Firestore doesn't support server-side counts without aggregation
+    const usersSnap = await usersRef.get();
+    const listingsSnap = await listingsRef.get();
+    const urbanSnap = await urbanHelpProvidersRef.get();
+    const jobsSnap = await jobsRef.get();
+    const jobReqSnap = await jobRequestsRef.get();
+    const messageLogsSnap = await messageLogsRef.get();
+
+    const inbound = messageLogsSnap.docs.filter(d => d.data().direction === 'in').length;
+    const outbound = messageLogsSnap.docs.filter(d => d.data().direction === 'out').length;
+
+    return {
+      totalUsers: usersSnap.size,
+      totalListings: listingsSnap.size,
+      totalUrbanHelpProviders: urbanSnap.size,
+      totalJobs: jobsSnap.size,
+      totalJobRequests: jobReqSnap.size,
+      totalMessages: messageLogsSnap.size,
+      inboundMessages: inbound,
+      outboundMessages: outbound
+    };
+  } catch (err) {
+    console.error('❌ [DASHBOARD] Error getting metrics:', err);
+    return null;
+  }
+}
+
 // Export all functions
 module.exports = {
   db,
@@ -1197,6 +1307,7 @@ module.exports = {
   getUserPendingRequests,
   getUserRequestById,
   updateRequestStatus,
+  getPendingUserRequestsAll,
   // Property Listing Functions
   addListing,
   getAllListings,
@@ -1222,6 +1333,10 @@ module.exports = {
   getJobById,
   getPendingJobRequests,
   updateJobRequestStatus,
+  recordNotificationFailure,
+  // Message log functions
+  addMessageLog,
+  getDashboardMetrics,
   // Legacy Functions for Backward Compatibility
   searchServiceProviders,
   searchCommodities
