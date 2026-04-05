@@ -1348,6 +1348,8 @@ module.exports = {
   // User Functions
   getUserProfile,
   saveUserLanguage,
+  setBrokerStatus,
+  isBrokerUser,
   // Jobs Functions
   addJobPost,
   searchJobs,

@@ -640,20 +640,42 @@ class MultiLanguage {
     /**
      * Get main menu rows
      */
-    getMainMenuRows(language) {
-        const menuOptions = [
+    getMainMenuRows(language, isBroker = false) {
+        let menuOptions = [
             'view_listings',
-            'post_listing', 
-            'manage_listings',
             'saved_listings',
             'change_language'
         ];
+        
+        if (isBroker) {
+            menuOptions = [
+                'view_listings',
+                'post_listing', 
+                'manage_listings',
+                'saved_listings',
+                'change_language'
+            ];
+        }
         
         return menuOptions.map(option => ({
             id: option,
             title: this.getMenuOption(language, option),
             description: this.getMessage(language, `menu_${option}_desc`) || ''
         }));
+    }
+
+    /**
+     * Get user-only menu (non-broker)
+     */
+    getUserMenuRows(language) {
+        return this.getMainMenuRows(language, false);
+    }
+
+    /**
+     * Get broker menu (with posting/managing)
+     */
+    getBrokerMenuRows(language) {
+        return this.getMainMenuRows(language, true);
     }
 
     /**

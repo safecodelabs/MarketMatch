@@ -1095,7 +1095,7 @@ async function handleVoiceConfirmation(sender, response, session, client) {
       await sendMessageWithClient(sender, "📋 Switching to menu options...");
       session.step = "menu";
       delete session.voiceContext;
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       
     } else {
       await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'not_understood'));
@@ -1147,19 +1147,19 @@ async function executeVoiceIntent(sender, intent, entities, session, client) {
     case "view_listing":
       await sendMessageWithClient(sender, "🎤 To view specific listing details, please use the 'View Listings' option from the menu.");
       session.step = "menu";
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       break;
       
     case "contact_agent":
       await sendMessageWithClient(sender, "🎤 For contacting agents, please use the contact information provided in individual listings.");
       session.step = "menu";
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       break;
       
     default:
       await sendMessageWithClient(sender, "🎤 I understood your request but need more details. Please use the menu options.");
       session.step = "menu";
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       break;
   }
   
@@ -1362,7 +1362,7 @@ async function handleVoiceSearchOptions(sender, msg, session, client) {
       delete session.voiceContext;
       delete session.housingFlow;
       await saveSession(sender, session);
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       break;
   }
   
@@ -1824,8 +1824,10 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // Load user's preferred language from profile (if saved) and apply to multiLanguage
+  let userProfile = null;
+  let isBroker = false;
   try {
-    const userProfile = await getUserProfile(sender);
+    userProfile = await getUserProfile(sender);
     if (userProfile && userProfile.preferredLanguage) {
       if (multiLanguage.isLanguageSupported(userProfile.preferredLanguage)) {
         multiLanguage.setUserLanguage(sender, userProfile.preferredLanguage);
@@ -1833,9 +1835,17 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         console.log(`🌐 Applied saved preferred language: ${userProfile.preferredLanguage} for ${sender}`);
       }
     }
+    // Check if user is a broker
+    if (userProfile && userProfile.isBroker) {
+      isBroker = true;
+      session.isBroker = true;
+      console.log(`👔 Broker user detected: ${sender}`);
+    }
   } catch (err) {
-    console.warn('🌐 Could not load user profile language:', err);
+    console.warn('🌐 Could not load user profile:', err);
   }
+  
+  session.isBroker = isBroker;
   
   console.log("🔍 [CONTROLLER DEBUG] Session loaded:", session.step, session.state);
 
@@ -1865,7 +1875,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         session.step = 'menu';
         await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'language_set', { lang: languageNames[lang] || lang }));
         await saveSession(sender, session);
-        await sendMainMenuViaService(sender, lang);
+        await sendMainMenuViaService(sender, lang, session.isBroker);
         return session;
       } else {
         await sendMessageWithClient(sender, 'Unsupported language selected.');
@@ -1959,7 +1969,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           session.state = 'initial';
           session.step = 'menu';
           await saveSession(sender, session);
-          await sendMainMenuViaService(sender);
+          await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
           return session;
         }
 
@@ -2014,7 +2024,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       session.state = 'initial';
       session.step = 'menu';
       await saveSession(sender, session);
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       return session;
     }
 
@@ -2559,7 +2569,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
             session.state = 'initial';
             session.step = 'menu';
             await saveSession(sender, session);
-            await sendMainMenuViaService(sender);
+            await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
             return session;
         }
         
@@ -2638,7 +2648,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
                     session.state = 'initial';
                     session.step = 'menu';
                     await saveSession(sender, session);
-                    await sendMainMenuViaService(sender);
+                    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
                 }
                 return session; // ✅ RETURN IMMEDIATELY
             }
@@ -2693,7 +2703,7 @@ if (replyId && (replyId.startsWith('confirm_') || replyId.startsWith('try_again'
         session.step = 'menu';
         delete session.rawTranscription;
         await saveSession(sender, session);
-        await sendMainMenuViaService(sender);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
     }
     
     await saveSession(sender, session);
@@ -2770,7 +2780,7 @@ if (replyId && (replyId === 'continue_existing_draft' || replyId === 'start_new_
     delete session.mode;
     delete session.draftId;
     await saveSession(sender, session);
-    await sendMainMenuViaService(sender);
+    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
   }
   
   await saveSession(sender, session);
@@ -2853,7 +2863,7 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
         session.state = 'initial';
         session.step = 'menu';
         await saveSession(sender, session);
-        await sendMainMenuViaService(sender);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
         return session;
       }
       
@@ -3029,7 +3039,7 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
     session.step = "menu";
     session.state = 'initial';
     await saveSession(sender, session);
-    await sendMainMenuViaService(sender);
+    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
     return session;
   }
 
@@ -3086,7 +3096,7 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
     session.step = "menu";
     session.state = 'initial';
     await saveSession(sender, session);
-    await sendMainMenuViaService(sender);
+    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
     return session;
   }
 
@@ -3110,7 +3120,7 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
           const languageNames = { en: 'English', hi: 'हिंदी', ta: 'தமிழ்', gu: 'ગુજરાતી', kn: 'ಕನ್ನಡ' };
           await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'language_set', { lang: languageNames[parsed] || parsed }));
 
-          await sendMainMenuViaService(sender, parsed);
+          await sendMainMenuViaService(sender, parsed, session.isBroker);
           return session;
         }
       } catch (err) {
@@ -3138,7 +3148,7 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
       session.step = 'menu';
       session.state = 'initial';
       await saveSession(sender, session);
-      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en');
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       return session;
     }
 
@@ -3184,7 +3194,7 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
         await executeVoiceIntent(sender, processingResult.intent, processingResult.entities, session, effectiveClient);
       } else {
         await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'not_sure_try_menu'));
-        await sendMainMenuViaService(sender);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       }
     }
     
@@ -3496,7 +3506,7 @@ What would you like to do with this listing?`;
   // ==========================================
   if (msg === "cancel_manage" && session.manageListings?.step === "awaiting_action") {
     console.log("🔍 [CONTROLLER] Back to listing list");
-    await handleManageListings(sender);
+    await handleManageListings(sender, session);
     return session;
   }
   
@@ -3618,7 +3628,7 @@ What would you like to do with this saved listing?`;
   // Handle back to saved list
   if (msg === "back_saved" && session.savedListingsFlow?.step === "awaiting_action") {
     console.log("🔍 [CONTROLLER] Back to saved list");
-    await handleSavedListings(sender);
+    await handleSavedListings(sender, session);
     return session;
   }
   
@@ -3733,18 +3743,36 @@ What would you like to do with this saved listing?`;
 
     case "post_listing":
       console.log("📝 Menu: Post Listing selected");
+      // Check if user is a broker
+      if (!session.isBroker) {
+        await sendMessageWithClient(sender, "❌ The posting feature is only available for registered brokers. Please contact support to upgrade your account.", effectiveClient);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
+        session.step = 'menu';
+        session.state = 'initial';
+        await saveSession(sender, session);
+        return session;
+      }
       // Offer dual posting options
       await handlePostListingFlow(sender, session, effectiveClient);
       return session;
 
     case "manage_listings":
       console.log("⚙️ Menu: Manage Listings selected");
-      await handleManageListings(sender);
+      // Check if user is a broker
+      if (!session.isBroker) {
+        await sendMessageWithClient(sender, "❌ The listing management feature is only available for registered brokers. Please contact support to upgrade your account.", effectiveClient);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
+        session.step = 'menu';
+        session.state = 'initial';
+        await saveSession(sender, session);
+        return session;
+      }
+      await handleManageListings(sender, session);
       return session; // Return early since handleManageListings handles session
 
     case "saved_listings":
       console.log("❤️ Menu: Saved Listings selected");
-      await handleSavedListings(sender);
+      await handleSavedListings(sender, session);
       return session; // Return early since handleSavedListings handles session
 
     case "urban_help":
@@ -3888,7 +3916,7 @@ What would you like to do with this saved listing?`;
       // Default: show menu
       console.log(`❓ Unknown command: ${lower}, showing menu`);
       await sendMessageWithClient(sender, "I didn't understand that. Choose an option or type *hi* to restart.");
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       session.step = "menu";
       session.state = 'initial';
       break;
@@ -3976,9 +4004,9 @@ async function sendLanguageListViaService(to) {
   );
 }
 
-async function sendMainMenuViaService(to, language = 'en') {
+async function sendMainMenuViaService(to, language = 'en', isBroker = false) {
   // Use the multiLanguage menu rows when possible
-  const rows = multiLanguage.getMainMenuRows(language);
+  const rows = multiLanguage.getMainMenuRows(language, isBroker);
   const sections = [{ title: multiLanguage.getMessage(language, 'main_menu') || 'Menu', rows }];
 
   const title = multiLanguage.getMessage(language, 'welcome')?.split('\n')?.[0] || '🏡 MarketMatch AI';
@@ -4056,7 +4084,7 @@ async function handleShowListings(sender, session) {
         session.step = "menu";
         session.state = 'initial';
         await saveSession(sender, session);
-        await sendMainMenuViaService(sender);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
         return session;
       }
       
@@ -4090,7 +4118,7 @@ async function handleShowListings(sender, session) {
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       return session;
     }
     
@@ -4128,7 +4156,7 @@ async function handleShowListings(sender, session) {
     session.step = "menu";
     session.state = 'initial';
     await saveSession(sender, session);
-    await sendMainMenuViaService(sender);
+    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
     
     return session;
   }
@@ -4137,7 +4165,7 @@ async function handleShowListings(sender, session) {
 // ========================================
 // HANDLE MANAGE LISTINGS FUNCTION - ADDED TO FIX ERROR
 // ========================================
-async function handleManageListings(sender) {
+async function handleManageListings(sender, session) {
   console.log("⚙️ [MANAGE LISTINGS] Handling manage listings");
   
   try {
@@ -4160,7 +4188,7 @@ async function handleManageListings(sender) {
         "To post a listing, select '📝 Post Listing' from the main menu."
       );
       
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       return;
     }
     
@@ -4202,14 +4230,14 @@ async function handleManageListings(sender) {
     console.error("❌ [MANAGE LISTINGS] Error:", error);
     await sendMessageWithClient(sender, "❌ Sorry, I couldn't load your listings. Please try again.");
     
-    await sendMainMenuViaService(sender);
+    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
   }
 }
 
 // ========================================
 // HANDLE SAVED LISTINGS FUNCTION - ADDED TO FIX ERROR
 // ========================================
-async function handleSavedListings(sender) {
+async function handleSavedListings(sender, session) {
   console.log("❤️ [SAVED LISTINGS] Handling saved listings");
   
   try {
@@ -4232,7 +4260,7 @@ async function handleSavedListings(sender) {
         "Browse listings and tap the ❤️ button to save them for later!"
       );
       
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
       return;
     }
     
@@ -4274,7 +4302,7 @@ async function handleSavedListings(sender) {
     console.error("❌ [SAVED LISTINGS] Error:", error);
     await sendMessageWithClient(sender, "❌ Sorry, I couldn't load your saved listings. Please try again.");
     
-    await sendMainMenuViaService(sender);
+    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
   }
 }
 
@@ -4294,7 +4322,7 @@ async function handleListingSelection(sender, msg, session) {
     
     if (!selectedListing) {
       await sendMessageWithClient(sender, "❌ Listing not found. Please try again.");
-      await handleManageListings(sender);
+      await handleManageListings(sender, session);
       return;
     }
     
@@ -4331,7 +4359,7 @@ What would you like to do with this listing?`;
   } catch (error) {
     console.error("❌ [MANAGE LISTINGS] Error in selection:", error);
     await sendMessageWithClient(sender, "❌ Error loading listing details. Please try again.");
-    await handleManageListings(sender);
+    await handleManageListings(sender, session);
   }
 }
 
@@ -4347,7 +4375,7 @@ async function handleDeleteListing(sender, session) {
     
     if (!listingId || !listing) {
       await sendMessageWithClient(sender, "❌ Could not find listing to delete.");
-      await handleManageListings(sender);
+      await handleManageListings(sender, session);
       return;
     }
     
@@ -4366,7 +4394,7 @@ async function handleDeleteListing(sender, session) {
       session.state = 'initial';
       await saveSession(sender, session);
       
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
     } else {
       await sendMessageWithClient(
         sender,
@@ -4404,7 +4432,7 @@ What would you like to do with this listing?`;
   } catch (error) {
     console.error("❌ [MANAGE LISTINGS] Error deleting:", error);
     await sendMessageWithClient(sender, "❌ Error deleting listing. Please try again.");
-    await handleManageListings(sender);
+    await handleManageListings(sender, session);
   }
 }
 
@@ -4424,7 +4452,7 @@ async function handleSavedListingSelection(sender, msg, session) {
     
     if (!selectedListing) {
       await sendMessageWithClient(sender, "❌ Saved listing not found. Please try again.");
-      await handleSavedListings(sender);
+      await handleSavedListings(sender, session);
       return;
     }
     
@@ -4461,7 +4489,7 @@ What would you like to do with this saved listing?`;
   } catch (error) {
     console.error("❌ [SAVED LISTINGS] Error in selection:", error);
     await sendMessageWithClient(sender, "❌ Error loading saved listing details. Please try again.");
-    await handleSavedListings(sender);
+    await handleSavedListings(sender, session);
   }
 }
 
@@ -4477,7 +4505,7 @@ async function handleRemoveSavedListing(sender, session) {
     
     if (!listingId || !listing) {
       await sendMessageWithClient(sender, "❌ Could not find saved listing to remove.");
-      await handleSavedListings(sender);
+      await handleSavedListings(sender, session);
       return;
     }
     
@@ -4496,7 +4524,7 @@ async function handleRemoveSavedListing(sender, session) {
       session.state = 'initial';
       await saveSession(sender, session);
       
-      await sendMainMenuViaService(sender);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
     } else {
       await sendMessageWithClient(
         sender,
@@ -4534,7 +4562,7 @@ What would you like to do with this saved listing?`;
   } catch (error) {
     console.error("❌ [SAVED LISTINGS] Error removing:", error);
     await sendMessageWithClient(sender, "❌ Error removing saved listing. Please try again.");
-    await handleSavedListings(sender);
+    await handleSavedListings(sender, session);
   }
 }
 
@@ -4673,7 +4701,7 @@ async function handleTextListingInput(sender, text, session) {
   session.step = "menu";
   session.state = 'initial';
   await saveSession(sender, session);
-  await sendMainMenuViaService(sender);
+  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
 }
 
 // ========================================
