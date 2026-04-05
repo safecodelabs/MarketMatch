@@ -32,6 +32,7 @@ const {
   getUserSavedListings,
   isListingSaved,
   searchListingsByCriteria,
+  addBrokerLead,
   // ✅ ADDED: Urban Help Functions
   searchUrbanServices,
   addUrbanHelpProvider,
@@ -96,6 +97,40 @@ function getEffectiveClient(client) {
   }
   
   return effectiveClient;
+}
+
+const ENABLE_URBAN_HELP = false;
+const ENABLE_BROKER_CRM = true;
+
+function normalizeListingButtonId(id) {
+  return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function getListingByButtonId(listings, buttonId, prefix) {
+  if (!buttonId || !Array.isArray(listings)) return null;
+  const normalizedId = buttonId.replace(prefix, '');
+  return listings.find(listing => normalizeListingButtonId(listing.id) === normalizedId);
+}
+
+async function createBrokerLead(sender, listing, session) {
+  if (!listing) return { success: false, error: 'Listing not found' };
+
+  const leadData = {
+    userId: sender,
+    listingId: listing.id || null,
+    listingTitle: listing.title || listing.property_type || listing.type || 'Property',
+    listingLocation: listing.location || listing.city || null,
+    listingPrice: listing.price || null,
+    listingBedrooms: listing.bhk || listing.bedrooms || null,
+    listingType: listing.property_type || listing.type || null,
+    listingContact: listing.contact || null,
+    userContact: (session && session.data && session.data.contact) ? session.data.contact : sender,
+    status: 'new',
+    source: 'whatsapp',
+    rawMessage: session && session.lastMessage ? session.lastMessage : null
+  };
+
+  return await addBrokerLead(leadData);
 }
 
 // ========================================
@@ -1784,6 +1819,10 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
     isInitialized: false
   };
 
+  if (!ENABLE_URBAN_HELP && session.urbanHelpContext) {
+    delete session.urbanHelpContext;
+  }
+
   // Load user's preferred language from profile (if saved) and apply to multiLanguage
   try {
     const userProfile = await getUserProfile(sender);
@@ -2116,7 +2155,7 @@ if (text && !replyId) {
   }
 
   // ✅ ONLY THEN: Check if it's an urban help request (looking for services)
-  if (isUrbanHelpRequest(text)) {
+  if (ENABLE_URBAN_HELP && isUrbanHelpRequest(text)) {
     console.log("🔧 [URBAN HELP] Text request detected - user is LOOKING FOR services");
     
     // CRITICAL: DETERMINE CONTEXT AGAIN TO BE SURE
@@ -3093,6 +3132,16 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
   // 10) URBAN HELP TEXT INPUT
   // ===========================
   if (session.step === "awaiting_urban_help_text" && text) {
+    if (!ENABLE_URBAN_HELP) {
+      console.log("🔧 [URBAN HELP] Ignored because urban help is disabled");
+      delete session.urbanHelpContext;
+      session.step = 'menu';
+      session.state = 'initial';
+      await saveSession(sender, session);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en');
+      return session;
+    }
+
     console.log("🔧 [URBAN HELP] Processing text input:", text);
     await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
     return session;
@@ -3105,7 +3154,7 @@ if (replyId && (replyId === 'post_job' || replyId === 'find_job')) {
     console.log("📝 [TEXT INPUT] Processing text after voice fallback:", text);
     
     // Check if it's an urban help request
-    if (isUrbanHelpRequest(text)) {
+    if (ENABLE_URBAN_HELP && isUrbanHelpRequest(text)) {
       await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
     } else {
       // Process as property-related request
@@ -3631,38 +3680,34 @@ What would you like to do with this saved listing?`;
     }
     
     if (msg.startsWith("VIEW_DETAILS_")) {
-        const index = parseInt(msg.replace('VIEW_DETAILS_', ''));
-  const targetListing = listingData?.listings?.[index];
+      const selectedListing = getListingByButtonId(listingData?.listings || [], msg, 'VIEW_DETAILS_') || currentListing;
       console.log("📄 View details button clicked");
       await sendMessageWithClient(
         sender, 
-        `*Full Details for ${currentListing.title || 'Property'}*\n\n` +
-        `*Description:*\n${currentListing.description || "No full description provided."}\n\n` +
-        `*Contact:* ${currentListing.contact || "N/A"}\n` +
-        `*Location:* ${currentListing.location || "N/A"}\n` +
-        `*Price:* ${currentListing.price || "Price on request"}`
+        `*Full Details for ${selectedListing.title || 'Property'}*\n\n` +
+        `*Description:*\n${selectedListing.description || "No full description provided."}\n\n` +
+        `*Contact:* ${selectedListing.contact || "N/A"}\n` +
+        `*Location:* ${selectedListing.location || "N/A"}\n` +
+        `*Price:* ${selectedListing.price || "Price on request"}`
       );
       await handleShowListings(sender, session); 
       return session;
     }
-    
-    if (msg.startsWith("SAVE_LISTING_")) {
-      console.log("💾 Save button clicked");
-      const listingId = msg.replace('SAVE_LISTING_', '');
-      
-      // Save the listing to user's saved listings
-      const result = await saveListingToUser(sender, listingId);
-      
-      if (result.success) {
+
+    if (msg.startsWith("INTERESTED_")) {
+      const selectedListing = getListingByButtonId(listingData?.listings || [], msg, 'INTERESTED_') || currentListing;
+      console.log("🤝 Interested button clicked");
+
+      const brokerResult = await createBrokerLead(sender, selectedListing, session);
+      if (brokerResult.success) {
+        const contactInfo = selectedListing.contact ? ` The broker can be reached at ${selectedListing.contact}.` : '';
         await sendMessageWithClient(
-          sender, 
-          `✅ Listing *${currentListing.title || 'Property'}* has been saved to your favorites! ❤️\n\n` +
-          `You can view all your saved listings from the main menu.`
+          sender,
+          `✅ Got it! I've captured your interest in *${selectedListing.title || 'this property'}*.${contactInfo} Our broker CRM team will follow up with you shortly.`
         );
-      } else if (result.error === 'Listing already saved') {
-        await sendMessageWithClient(sender, `⚠️ This listing is already in your saved listings.`);
       } else {
-        await sendMessageWithClient(sender, `❌ Could not save the listing. Please try again.`);
+        console.error('❌ [BROKER CRM] Failed to save lead:', brokerResult.error);
+        await sendMessageWithClient(sender, `❌ I couldn't capture your interest right now. Please try again or contact the broker directly.`);
       }
       
       await handleShowListings(sender, session);
@@ -3707,6 +3752,14 @@ What would you like to do with this saved listing?`;
     case "help":
     case "service":
       console.log("🔧 Menu: Urban Help selected");
+      if (!ENABLE_URBAN_HELP) {
+        await sendMessageWithClient(sender, "🏠 This bot is focused only on property search and matching right now. Please choose another option.", effectiveClient);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en');
+        session.step = 'menu';
+        session.state = 'initial';
+        await saveSession(sender, session);
+        return session;
+      }
       await handleUrbanHelpMenu(sender, session, effectiveClient);
       return session;
 
@@ -3826,7 +3879,7 @@ What would you like to do with this saved listing?`;
 
     default:
       // Check if text contains urban help keywords
-      if (isUrbanHelpRequest(text)) {
+      if (ENABLE_URBAN_HELP && isUrbanHelpRequest(text)) {
         console.log("🔧 [URBAN HELP] Text request detected");
         await handleUrbanHelpTextRequest(sender, text, session, effectiveClient);
         return session;

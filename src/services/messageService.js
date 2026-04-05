@@ -331,6 +331,10 @@ async function sendSimpleText(to, text) {
   return await sendText(to, text);
 }
 
+function normalizeListingButtonId(id) {
+  return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 // -------------------------------------------------------------
 // 7) SEND LISTING CARD (Uses sendButtons) - UPDATED VERSION
 // -------------------------------------------------------------
@@ -384,21 +388,23 @@ Tap a button below to interact.`;
 
     console.log(`📝 Body text length: ${bodyText.length}/1024`);
 
-    // 4. Construct buttons - MATCHING CONTROLLER'S EXPECTED IDs
-const buttons = [
-  { 
-    id: `VIEW_DETAILS_${currentIndex}`, 
-    title: "📄 View Details" 
-  },
-  { 
-    id: `SAVE_LISTING_${currentIndex}`, 
-    title: "❤️ Save" 
-  },
-  { 
-    id: "NEXT_LISTING", 
-    title: "⏭️ Next" 
-  },
-];
+    const buttonListingId = normalizeListingButtonId(listing.id);
+
+  // 4. Construct buttons - MATCHING CONTROLLER'S EXPECTED IDs
+  const buttons = [
+    { 
+      id: `VIEW_DETAILS_${buttonListingId}`, 
+      title: "📄 View Details" 
+    },
+    { 
+      id: `INTERESTED_${buttonListingId}`, 
+      title: "🤝 I'm Interested" 
+    },
+    { 
+      id: "NEXT_LISTING", 
+      title: "⏭️ Next" 
+    },
+  ];
 
     console.log("🔘 Prepared buttons:", buttons.map(b => ({ id: b.id, title: b.title })));
 
@@ -437,7 +443,7 @@ ${listing.title || 'Property Listing'}
 *Reply with:*
 • "next" - Next listing
 • "view" - View details
-• "save" - Save this listing`;
+• "interested" - I'm interested in this property`;
 
     return await sendText(to, fallbackText);
   }

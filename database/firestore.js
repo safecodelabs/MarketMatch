@@ -23,6 +23,7 @@ const db = admin.firestore();
 const listingsRef = db.collection("listings");
 const usersRef = db.collection("users");
 const savedRef = db.collection("saved");
+const brokerLeadsRef = db.collection("broker_leads");
 const urbanHelpProvidersRef = db.collection("urban_help_providers");
 const userRequestsRef = db.collection("user_requests");
 
@@ -554,6 +555,26 @@ async function getTopListings(limit = 10) {
   } catch (err) {
     console.error("❌ [DB] Error in getTopListings:", err);
     return { listings: [], totalCount: 0 };
+  }
+}
+
+// -----------------------------------------------
+// ADD BROKER LEAD TO CRM
+// -----------------------------------------------
+async function addBrokerLead(leadData) {
+  try {
+    const payload = {
+      ...leadData,
+      status: leadData.status || 'new',
+      createdAt: admin.firestore.Timestamp.now(),
+      createdAtMillis: Date.now()
+    };
+    const docRef = await brokerLeadsRef.add(payload);
+    console.log(`✅ [BROKER CRM] Lead created: ${docRef.id}`);
+    return { success: true, id: docRef.id };
+  } catch (err) {
+    console.error("❌ [BROKER CRM] Error adding broker lead:", err);
+    return { success: false, error: err.message || err };
   }
 }
 
@@ -1312,6 +1333,7 @@ module.exports = {
   addListing,
   getAllListings,
   getTopListings,
+  addBrokerLead,
   getUserListings,
   getListingById,
   saveSavedListing,

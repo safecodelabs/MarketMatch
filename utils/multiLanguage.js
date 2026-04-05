@@ -11,7 +11,7 @@ class MultiLanguage {
         this.languageStrings = {
             en: {
                 // General Messages
-                'welcome': "👋 *Welcome to MarketMatch AI!*\n\nI'm your personal assistant for:\n🏠 Rentals & Real Estate\n🔧 Urban Help Services\n👤 PG / Flatmates\n\nLet's begin by choosing your preferred language.",
+                'welcome': "👋 *Welcome to MarketMatch AI!*\n\nI'm your personal assistant for:\n🏠 Rentals & Real Estate\n\nLet's begin by choosing your preferred language.",
                 'not_understood': "I didn't quite understand that.",
                 'try_again': "Please try sending your message again.",
                 'type_instead': "📝 Please type your request:",
@@ -157,7 +157,7 @@ class MultiLanguage {
             
             hi: {
                 // General Messages
-                'welcome': "👋 *मार्केटमैच एआई में आपका स्वागत है!*\n\nमैं आपका व्यक्तिगत सहायक हूं:\n🏠 किराया और रियल एस्टेट के लिए\n🔧 शहरी सहायता सेवाओं के लिए\n👤 पीजी / फ्लैटमेट्स के लिए\n\nआइए अपनी पसंदीदा भाषा चुनकर शुरू करें।",
+                'welcome': "👋 *मार्केटमैच एआई में आपका स्वागत है!*\n\nमैं आपका व्यक्तिगत सहायक हूं:\n🏠 किराया और रियल एस्टेट के लिए\n\nआइए अपनी पसंदीदा भाषा चुनकर शुरू करें।",
                 'not_understood': "मैं समझ नहीं पाया।",
                 'try_again': "कृपया अपना संदेश फिर से भेजें।",
                 'type_instead': "📝 कृपया अपना अनुरोध टाइप करें:",
@@ -646,7 +646,6 @@ class MultiLanguage {
             'post_listing', 
             'manage_listings',
             'saved_listings',
-            'urban_help',
             'change_language'
         ];
         
