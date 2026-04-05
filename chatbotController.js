@@ -2275,7 +2275,7 @@ if (text && !replyId) {
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
   // ===========================
-  if (false && (metadata?.type === "audio" || metadata?.type === "voice" || text === 'voice_note')) {
+  if (metadata?.type === "audio" || metadata?.type === "voice" || text === 'voice_note') {
     console.log("🎤 [VOICE] Audio message detected");
     
     // Get session
@@ -4097,136 +4097,6 @@ function parseLangFromText(text) {
 }
 
 // ========================================
-// HANDLE SHOW LISTINGS FUNCTION - ADDED TO FIX ERROR
-// ========================================
-/**
- * Handle showing listings to the user
- */
-async function handleShowListings(sender, session, searchCriteria = null) {
-  console.log("🏠 [LISTINGS] Handling show listings", searchCriteria ? `with criteria: ${JSON.stringify(searchCriteria)}` : "without criteria");
-  
-  try {
-    const effectiveClient = getEffectiveClient();
-    
-    if (!effectiveClient) {
-      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
-      session.step = "menu";
-      session.state = 'initial';
-      await saveSession(sender, session);
-      return session;
-    }
-    
-    // Get user's saved preferences if any
-    const userProfile = await getUserProfile(sender);
-    const userLang = userProfile?.language || 'en';
-    
-    // Check if we have listing data in session
-    const listingData = session.housingFlow?.listingData;
-    let currentIndex = session.housingFlow?.currentIndex || 0;
-    
-    if (!listingData || !listingData.listings || listingData.listings.length === 0) {
-      // No listing data in session, fetch listings (filtered if criteria provided)
-      await sendMessageWithClient(sender, searchCriteria ? "🔍 Searching for properties that match your criteria..." : "🔍 Fetching available listings...");
-      
-      let filteredListings;
-      if (searchCriteria) {
-        // Use search criteria to filter listings
-        filteredListings = await searchListingsByCriteria(searchCriteria);
-        console.log(`🔍 [FILTERED] Found ${filteredListings?.length || 0} listings matching criteria`);
-      } else {
-        // Get top listings without filtering
-        filteredListings = await getTopListings(10);
-      }
-      
-      if (!filteredListings || filteredListings.length === 0) {
-        const noResultsMessage = searchCriteria 
-          ? "📭 No listings found matching your criteria.\n\nTry different search terms or check back later!"
-          : "📭 No listings available at the moment.\n\nTry posting a listing or check back later!";
-        
-        await sendMessageWithClient(sender, noResultsMessage);
-        
-        session.step = "menu";
-        session.state = 'initial';
-        await saveSession(sender, session);
-        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-        return session;
-      }
-      
-      // Store in session
-      session.housingFlow = {
-        currentIndex: 0,
-        listingData: {
-          listings: filteredListings,
-          totalCount: topListings.length
-        }
-      };
-      
-      currentIndex = 0;
-      await saveSession(sender, session);
-    }
-    
-    // Get current listing
-    const listings = session.housingFlow.listingData.listings;
-    const totalListings = session.housingFlow.listingData.totalCount;
-    
-    if (currentIndex >= totalListings) {
-      currentIndex = 0;
-      session.housingFlow.currentIndex = 0;
-      await saveSession(sender, session);
-    }
-    
-    const currentListing = listings[currentIndex];
-    
-    if (!currentListing) {
-      await sendMessageWithClient(sender, "❌ Could not load listing details. Please try again.");
-      session.step = "menu";
-      session.state = 'initial';
-      await saveSession(sender, session);
-      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-      return session;
-    }
-    
-    // Check if listing is already saved
-    const isSaved = await isListingSaved(sender, currentListing.id);
-    
-    // Send listing card
-    await sendListingCard(
-      sender,
-      {
-        id: currentListing.id,
-        title: currentListing.title || currentListing.type || "Property",
-        location: currentListing.location || "Location not specified",
-        price: currentListing.price || "Price on request",
-        bedrooms: currentListing.bhk || currentListing.bedrooms || "N/A",
-        property_type: currentListing.type || currentListing.propertyType || "Property",
-        description: currentListing.description || "No description available",
-        contact: currentListing.contact || currentListing.phone || "Contact not provided",
-        isSaved: isSaved
-      },
-      currentIndex,
-      totalListings
-    );
-    
-    // Update session
-    session.step = "awaiting_listing_action";
-    await saveSession(sender, session);
-    
-    return session;
-    
-  } catch (error) {
-    console.error("❌ [LISTINGS] Error in handleShowListings:", error);
-    await sendMessageWithClient(sender, "❌ Sorry, I couldn't load the listings. Please try again.");
-    
-    session.step = "menu";
-    session.state = 'initial';
-    await saveSession(sender, session);
-    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-    
-    return session;
-  }
-}
-
-// ========================================
 // HANDLE MANAGE LISTINGS FUNCTION - ADDED TO FIX ERROR
 // ========================================
 async function handleManageListings(sender, session) {
@@ -4755,6 +4625,136 @@ What would you like to do with this listing?`;
   );
 }
 
+// ========================================
+// HANDLE SHOW LISTINGS FUNCTION - ADDED TO FIX ERROR
+// ========================================
+/**
+ * Handle showing listings to the user
+ */
+async function handleShowListings(sender, session, searchCriteria = null) {
+  console.log("🏠 [LISTINGS] Handling show listings", searchCriteria ? `with criteria: ${JSON.stringify(searchCriteria)}` : "without criteria");
+  
+  try {
+    const effectiveClient = getEffectiveClient();
+    
+    if (!effectiveClient) {
+      await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
+      session.step = "menu";
+      session.state = 'initial';
+      await saveSession(sender, session);
+      return session;
+    }
+    
+    // Get user's saved preferences if any
+    const userProfile = await getUserProfile(sender);
+    const userLang = userProfile?.language || 'en';
+    
+    // Check if we have listing data in session
+    const listingData = session.housingFlow?.listingData;
+    let currentIndex = session.housingFlow?.currentIndex || 0;
+    
+    if (!listingData || !listingData.listings || listingData.listings.length === 0) {
+      // No listing data in session, fetch listings (filtered if criteria provided)
+      await sendMessageWithClient(sender, searchCriteria ? "🔍 Searching for properties that match your criteria..." : "🔍 Fetching available listings...");
+      
+      let filteredListings;
+      if (searchCriteria) {
+        // Use search criteria to filter listings
+        filteredListings = await searchListingsByCriteria(searchCriteria);
+        console.log(`🔍 [FILTERED] Found ${filteredListings?.length || 0} listings matching criteria`);
+      } else {
+        // Get top listings without filtering
+        filteredListings = await getTopListings(10);
+      }
+      
+      if (!filteredListings || filteredListings.length === 0) {
+        const noResultsMessage = searchCriteria 
+          ? "📭 No listings found matching your criteria.\n\nTry different search terms or check back later!"
+          : "📭 No listings available at the moment.\n\nTry posting a listing or check back later!";
+        
+        await sendMessageWithClient(sender, noResultsMessage);
+        
+        session.step = "menu";
+        session.state = 'initial';
+        await saveSession(sender, session);
+        await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
+        return session;
+      }
+      
+      // Store in session
+      session.housingFlow = {
+        currentIndex: 0,
+        listingData: {
+          listings: filteredListings,
+          totalCount: topListings.length
+        }
+      };
+      
+      currentIndex = 0;
+      await saveSession(sender, session);
+    }
+    
+    // Get current listing
+    const listings = session.housingFlow.listingData.listings;
+    const totalListings = session.housingFlow.listingData.totalCount;
+    
+    if (currentIndex >= totalListings) {
+      currentIndex = 0;
+      session.housingFlow.currentIndex = 0;
+      await saveSession(sender, session);
+    }
+    
+    const currentListing = listings[currentIndex];
+    
+    if (!currentListing) {
+      await sendMessageWithClient(sender, "❌ Could not load listing details. Please try again.");
+      session.step = "menu";
+      session.state = 'initial';
+      await saveSession(sender, session);
+      await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
+      return session;
+    }
+    
+    // Check if listing is already saved
+    const isSaved = await isListingSaved(sender, currentListing.id);
+    
+    // Send listing card
+    await sendListingCard(
+      sender,
+      {
+        id: currentListing.id,
+        title: currentListing.title || currentListing.type || "Property",
+        location: currentListing.location || "Location not specified",
+        price: currentListing.price || "Price on request",
+        bedrooms: currentListing.bhk || currentListing.bedrooms || "N/A",
+        property_type: currentListing.type || currentListing.propertyType || "Property",
+        description: currentListing.description || "No description available",
+        contact: currentListing.contact || currentListing.phone || "Contact not provided",
+        isSaved: isSaved
+      },
+      currentIndex,
+      totalListings
+    );
+    
+    // Update session
+    session.step = "awaiting_listing_action";
+    await saveSession(sender, session);
+    
+    return session;
+    
+  } catch (error) {
+    console.error("❌ [LISTINGS] Error in handleShowListings:", error);
+    await sendMessageWithClient(sender, "❌ Sorry, I couldn't load the listings. Please try again.");
+    
+    session.step = "menu";
+    session.state = 'initial';
+    await saveSession(sender, session);
+    await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
+    
+    return session;
+  }
+}
+
 /**
  * Handle text listing input - PLACEHOLDER
  */
@@ -4771,6 +4771,16 @@ async function handleTextListingInput(sender, text, session) {
 // ========================================
 // MODULE EXPORTS
 // ========================================
+}
+async function handleShowListings(sender, session, searchCriteria = null) {
+  console.log("🏠 [LISTINGS] Placeholder - handleShowListings not implemented");
+  await sendMessageWithClient(sender, "Listing display feature is currently under development.");
+  session.step = "menu";
+  session.state = 'initial';
+  await saveSession(sender, session);
+  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
+}
+
 module.exports = {
   handleIncomingMessage,
   handleShowListings,
