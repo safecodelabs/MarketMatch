@@ -465,8 +465,10 @@ class PostingService {
   async isPostingIntent(message, intentResult = null) {
     // First check with intent classifier if result provided
     if (intentResult && intentResult.intent) {
+      // Only treat direct posting intents as posting operations.
+      // Property rent/search combos are frequently user searches, not listings.
       const postingIntents = [
-        'property_sale', 'property_rent', 'service_offer', 'commodity_sell',
+        'property_sale', 'service_offer', 'commodity_sell',
         'vehicle_sell', 'electronics_sell', 'furniture_sell', 'job_offer'
       ];
       
@@ -475,32 +477,48 @@ class PostingService {
         return true;
       }
       
+      // Handle property rent offers explicitly only when phrasing indicates a listing
+      if (intentResult.intent === 'property_rent') {
+        const explicitRentPhrases = [
+          'for rent', 'rent out', 'available for rent', 'available on rent', 'to rent out', 'renting out'
+        ];
+        if (explicitRentPhrases.some(phrase => lowerMsg.includes(phrase))) {
+          console.log(`📝 [POSTING SERVICE] Explicit rent offering detected`);
+          return true;
+        }
+      }
+      
+      // Handle property sale intent explicitly only when phrasing indicates a listing
+      if (intentResult.intent === 'property_sale') {
+        const explicitSalePhrases = [
+          'for sale', 'sell', 'selling', 'put up for sale', 'sell my', 'to sell'
+        ];
+        if (explicitSalePhrases.some(phrase => lowerMsg.includes(phrase))) {
+          console.log(`📝 [POSTING SERVICE] Explicit sale offering detected`);
+          return true;
+        }
+      }
+      
       // Also check if context is 'offer'
       if (intentResult.context === 'offer') {
         console.log(`📝 [POSTING SERVICE] Intent classifier detected offer context`);
         return true;
       }
       
-      // Check confidence
-      if (intentResult.confidence > 0.7) {
+      // Check confidence; only if classifier is quite confident about posting context
+      if (intentResult.confidence > 0.85) {
+        console.log(`📝 [POSTING SERVICE] High confidence classifier result: ${intentResult.confidence}`);
         return true;
       }
     }
     
-    // Fallback to keyword matching
+    // Fallback to keyword matching using conservative words only.
     const lowerMsg = message.toLowerCase();
     const postingKeywords = [
       'post', 'list', 'add', 'create', 'offer', 'available',
-      'rent', 'sell', 'service', 'help', 'looking for', 'need',
-      'job', 'hiring', 'hiring for', 'vacancy', 'vacancies', 'opening', 'openings',
-      '1bhk', '2bhk', '3bhk', 'flat', 'apartment', 'room',
-      'plumber', 'electrician', 'cleaner', 'tutor', 'maid', 'cook',
-      'carpenter', 'painter', 'driver', 'technician',
-      'i\'m', 'i am', 'available for', 'provide', 'professional',
-      'experienced', 'for hire', 'for rent', 'selling',
-      'mai', 'main', 'mein', 'hun', 'hoon', // Hindi: I am
-      'deta', 'deti', 'dete', 'deti hoon', 'deta hoon', // Hindi: provide
-      'mason', 'worker', 'labour', 'contractor' // ADDED: Construction keywords
+      'sell', 'selling', 'for sale', 'for rent', 'rent out',
+      'hiring', 'vacancy', 'vacancies', 'opening', 'openings',
+      'for hire', 'available for', 'available on'
     ];
     
     const hasKeyword = postingKeywords.some(keyword => lowerMsg.includes(keyword));

@@ -2164,7 +2164,64 @@ if (text && !replyId) {
     return session;
   }
 
-  // ✅ ONLY THEN: Check if it's an urban help request (looking for services)
+  // ✅ PROPERTY SEARCH DETECTION: Check if user is looking for property/housing
+  const propertySearchPatterns = [
+    /\b(looking for|need|want|searching for|find me|show me)\b.*\b(\d+\s?bhk|flat|apartment|house|home|property|accommodation|pg|room)\b/i,
+    /\b(\d+\s?bhk|flat|apartment|house|home|property|accommodation|pg|room)\b.*\b(for rent|for sale|in)\b/i,
+    /\b(rent|buy|purchase)\b.*\b(\d+\s?bhk|flat|apartment|house|home|property)\b/i
+  ];
+  
+  const isPropertySearch = propertySearchPatterns.some(pattern => pattern.test(text)) || 
+                          detectIntentContext(text) === 'property_search' ||
+                          detectIntentContext(text) === 'property_rent' ||
+                          detectIntentContext(text) === 'property_sale';
+  
+  if (isPropertySearch && !isOffering) {
+    console.log("🏠 [PROPERTY SEARCH] Detected property search request - routing to listing display");
+    
+    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
+    let searchMessage = '';
+    
+    if (userLang === 'hi') {
+      searchMessage = "🏠 मैं आपके लिए प्रॉपर्टी खोज रहा हूं...";
+    } else if (userLang === 'ta') {
+      searchMessage = "🏠 உங்கள் சொத்தைத் தேடுகிறேன்...";
+    } else {
+      searchMessage = "🏠 Searching for properties that match your needs...";
+    }
+    
+    await sendMessageWithClient(sender, searchMessage, effectiveClient);
+    
+    // Extract search criteria and show listings
+    try {
+      // Simple extraction for BHK and location
+      const bhkMatch = text.match(/(\d+)\s?bhk/i);
+      const locationMatch = text.match(/(?:in\s+)([a-zA-Z\s]+)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?bhk)/i);
+      
+      const searchCriteria = {
+        bedrooms: bhkMatch ? parseInt(bhkMatch[1]) : null,
+        location: locationMatch ? locationMatch[1].trim() : null,
+        type: text.toLowerCase().includes('rent') ? 'rent' : 
+              text.toLowerCase().includes('sale') || text.toLowerCase().includes('buy') ? 'sale' : null
+      };
+      
+      console.log("🔍 [PROPERTY SEARCH] Extracted criteria:", searchCriteria);
+      
+      // Show listings with criteria
+      await handleShowListings(sender, session, searchCriteria);
+      await saveSession(sender, session);
+      return session;
+    } catch (error) {
+      console.error("❌ [PROPERTY SEARCH] Error showing listings:", error);
+      await sendMessageWithClient(sender, "Sorry, I couldn't search for properties right now. Please try again.", effectiveClient);
+      await sendMainMenuViaService(sender, userLang, session.isBroker);
+      session.step = 'menu';
+      session.state = 'initial';
+      await saveSession(sender, session);
+      return session;
+    }
+  }
+  
   if (ENABLE_URBAN_HELP && isUrbanHelpRequest(text)) {
     console.log("🔧 [URBAN HELP] Text request detected - user is LOOKING FOR services");
     
@@ -2214,12 +2271,11 @@ if (text && !replyId) {
   
   // Save the session after all checks
   await saveSession(sender, session);
-}
 
   // ===========================
   // 0) PRIORITY: CHECK FOR VOICE MESSAGES - UPDATED WITH SIMPLE CONFIRMATION FLOW AND ACCESS TOKEN ERROR HANDLING
   // ===========================
-  if (metadata?.type === "audio" || metadata?.type === "voice" || text === 'voice_note') {
+  if (false && (metadata?.type === "audio" || metadata?.type === "voice" || text === 'voice_note')) {
     console.log("🎤 [VOICE] Audio message detected");
     
     // Get session
@@ -4046,8 +4102,8 @@ function parseLangFromText(text) {
 /**
  * Handle showing listings to the user
  */
-async function handleShowListings(sender, session) {
-  console.log("🏠 [LISTINGS] Handling show listings");
+async function handleShowListings(sender, session, searchCriteria = null) {
+  console.log("🏠 [LISTINGS] Handling show listings", searchCriteria ? `with criteria: ${JSON.stringify(searchCriteria)}` : "without criteria");
   
   try {
     const effectiveClient = getEffectiveClient();
@@ -4069,17 +4125,25 @@ async function handleShowListings(sender, session) {
     let currentIndex = session.housingFlow?.currentIndex || 0;
     
     if (!listingData || !listingData.listings || listingData.listings.length === 0) {
-      // No listing data in session, fetch top listings
-      await sendMessageWithClient(sender, "🔍 Fetching available listings...");
+      // No listing data in session, fetch listings (filtered if criteria provided)
+      await sendMessageWithClient(sender, searchCriteria ? "🔍 Searching for properties that match your criteria..." : "🔍 Fetching available listings...");
       
-      const topListings = await getTopListings(10); // Get top 10 listings
+      let filteredListings;
+      if (searchCriteria) {
+        // Use search criteria to filter listings
+        filteredListings = await searchListingsByCriteria(searchCriteria);
+        console.log(`🔍 [FILTERED] Found ${filteredListings?.length || 0} listings matching criteria`);
+      } else {
+        // Get top listings without filtering
+        filteredListings = await getTopListings(10);
+      }
       
-      if (!topListings || topListings.length === 0) {
-        await sendMessageWithClient(
-          sender,
-          "📭 No listings available at the moment.\n\n" +
-          "Try posting a listing or check back later!"
-        );
+      if (!filteredListings || filteredListings.length === 0) {
+        const noResultsMessage = searchCriteria 
+          ? "📭 No listings found matching your criteria.\n\nTry different search terms or check back later!"
+          : "📭 No listings available at the moment.\n\nTry posting a listing or check back later!";
+        
+        await sendMessageWithClient(sender, noResultsMessage);
         
         session.step = "menu";
         session.state = 'initial';
@@ -4092,7 +4156,7 @@ async function handleShowListings(sender, session) {
       session.housingFlow = {
         currentIndex: 0,
         listingData: {
-          listings: topListings,
+          listings: filteredListings,
           totalCount: topListings.length
         }
       };
