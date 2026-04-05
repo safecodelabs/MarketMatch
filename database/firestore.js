@@ -1045,6 +1045,29 @@ async function saveUserLanguage(userId, lang) {
   }
 }
 
+async function setBrokerStatus(userId, isBroker = false) {
+  try {
+    await usersRef.doc(userId).set({ 
+      isBroker: isBroker,
+      updatedAt: admin.firestore.Timestamp.now()
+    }, { merge: true });
+    return true;
+  } catch (err) {
+    console.error("🔥 Error setting broker status:", err);
+    return false;
+  }
+}
+
+async function isBrokerUser(userId) {
+  try {
+    const profile = await getUserProfile(userId);
+    return profile && profile.isBroker === true;
+  } catch (err) {
+    console.error("🔥 Error checking broker status:", err);
+    return false;
+  }
+}
+
 // -----------------------------------------------------
 // UPDATE USER PROFILE WITH SAVED LISTINGS (LEGACY SUPPORT)
 // -----------------------------------------------------
