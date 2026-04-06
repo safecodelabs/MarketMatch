@@ -1850,6 +1850,61 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Session loaded:", session.step, session.state);
 
   // ===========================
+  // ✅ PRIORITY: Check for property search FIRST (before any other routing)
+  // ===========================
+  if (text && !replyId) {
+    const propertySearchPatterns = [
+      /\b(looking for|need|want|searching for|find me|show me|i need|i want|i am looking|I'm looking|i'm looking)\b.*\b(\d+\s?bhk|flat|apartment|house|home|property|accommodation|pg|room|bhk)\b/i,
+      /\b(\d+\s?bhk|flat|apartment|house|home|property|accommodation|pg|room|bhk)\b.*\b(for rent|for sale|in|rent|sale|fo rent|to rent|to buy)\b/i,
+      /\b(rent|buy|purchase|lease)\b.*\b(\d+\s?bhk|flat|apartment|house|home|property|bhk)\b/i,
+      /\b(\d+\s?bhk|bhk)\b.*\b(rent|sale|buy|lease|in)\b/i
+    ];
+    
+    const isPropertySearch = propertySearchPatterns.some(pattern => pattern.test(text)) || 
+                            detectIntentContext(text) === 'property_search' ||
+                            detectIntentContext(text) === 'property_rent' ||
+                            detectIntentContext(text) === 'property_sale';
+    
+    if (isPropertySearch) {
+      console.log("🏠 [PRIORITY PROPERTY SEARCH] Detected property search request - routing to listing display");
+      
+      const userLang = 'en'; // Force English for property searches
+      const searchMessage = "🏠 Searching for properties that match your needs...";
+      
+      await sendMessageWithClient(sender, searchMessage, effectiveClient);
+      
+      // Extract search criteria and show listings
+      try {
+        // Simple extraction for BHK and location
+        const bhkMatch = text.match(/(\d+)\s?bhk/i);
+        const locationMatch = text.match(/(?:in\s+)([a-zA-Z\s]+)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?bhk)/i);
+        
+        const searchCriteria = {
+          bedrooms: bhkMatch ? parseInt(bhkMatch[1]) : null,
+          location: locationMatch ? locationMatch[1].trim() : null,
+          type: text.toLowerCase().includes('rent') ? 'rent' : 
+                text.toLowerCase().includes('sale') || text.toLowerCase().includes('buy') ? 'sale' : null
+        };
+        
+        console.log("🔍 [PRIORITY PROPERTY SEARCH] Extracted criteria:", searchCriteria);
+        
+        // Show listings with criteria
+        await handleShowListings(sender, session, searchCriteria);
+        await saveSession(sender, session);
+        return session;
+      } catch (error) {
+        console.error("❌ [PRIORITY PROPERTY SEARCH] Error showing listings:", error);
+        await sendMessageWithClient(sender, "Sorry, I couldn't search for properties right now. Please try again.", effectiveClient);
+        await sendMainMenuViaService(sender, 'en', session.isBroker);
+        session.step = 'menu';
+        session.state = 'initial';
+        await saveSession(sender, session);
+        return session;
+      }
+    }
+  }
+
+  // ===========================
   // ✅ CRITICAL FIX: Declare replyId EARLY
   // ===========================
   let replyId = null;
@@ -2165,62 +2220,7 @@ if (text && !replyId) {
   }
 
   // ✅ PROPERTY SEARCH DETECTION: Check if user is looking for property/housing
-  const propertySearchPatterns = [
-    /\b(looking for|need|want|searching for|find me|show me)\b.*\b(\d+\s?bhk|flat|apartment|house|home|property|accommodation|pg|room)\b/i,
-    /\b(\d+\s?bhk|flat|apartment|house|home|property|accommodation|pg|room)\b.*\b(for rent|for sale|in)\b/i,
-    /\b(rent|buy|purchase)\b.*\b(\d+\s?bhk|flat|apartment|house|home|property)\b/i
-  ];
-  
-  const isPropertySearch = propertySearchPatterns.some(pattern => pattern.test(text)) || 
-                          detectIntentContext(text) === 'property_search' ||
-                          detectIntentContext(text) === 'property_rent' ||
-                          detectIntentContext(text) === 'property_sale';
-  
-  if (isPropertySearch && !isOffering) {
-    console.log("🏠 [PROPERTY SEARCH] Detected property search request - routing to listing display");
-    
-    const userLang = multiLanguage.getUserLanguage(sender) || 'en';
-    let searchMessage = '';
-    
-    if (userLang === 'hi') {
-      searchMessage = "🏠 मैं आपके लिए प्रॉपर्टी खोज रहा हूं...";
-    } else if (userLang === 'ta') {
-      searchMessage = "🏠 உங்கள் சொத்தைத் தேடுகிறேன்...";
-    } else {
-      searchMessage = "🏠 Searching for properties that match your needs...";
-    }
-    
-    await sendMessageWithClient(sender, searchMessage, effectiveClient);
-    
-    // Extract search criteria and show listings
-    try {
-      // Simple extraction for BHK and location
-      const bhkMatch = text.match(/(\d+)\s?bhk/i);
-      const locationMatch = text.match(/(?:in\s+)([a-zA-Z\s]+)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?bhk)/i);
-      
-      const searchCriteria = {
-        bedrooms: bhkMatch ? parseInt(bhkMatch[1]) : null,
-        location: locationMatch ? locationMatch[1].trim() : null,
-        type: text.toLowerCase().includes('rent') ? 'rent' : 
-              text.toLowerCase().includes('sale') || text.toLowerCase().includes('buy') ? 'sale' : null
-      };
-      
-      console.log("🔍 [PROPERTY SEARCH] Extracted criteria:", searchCriteria);
-      
-      // Show listings with criteria
-      await handleShowListings(sender, session, searchCriteria);
-      await saveSession(sender, session);
-      return session;
-    } catch (error) {
-      console.error("❌ [PROPERTY SEARCH] Error showing listings:", error);
-      await sendMessageWithClient(sender, "Sorry, I couldn't search for properties right now. Please try again.", effectiveClient);
-      await sendMainMenuViaService(sender, userLang, session.isBroker);
-      session.step = 'menu';
-      session.state = 'initial';
-      await saveSession(sender, session);
-      return session;
-    }
-  }
+  // MOVED TO TOP PRIORITY CHECK ABOVE
   
   if (ENABLE_URBAN_HELP && isUrbanHelpRequest(text)) {
     console.log("🔧 [URBAN HELP] Text request detected - user is LOOKING FOR services");
@@ -4646,8 +4646,7 @@ async function handleShowListings(sender, session, searchCriteria = null) {
     }
     
     // Get user's saved preferences if any
-    const userProfile = await getUserProfile(sender);
-    const userLang = userProfile?.language || 'en';
+    const userLang = 'en'; // Force English for property searches
     
     // Check if we have listing data in session
     const listingData = session.housingFlow?.listingData;
