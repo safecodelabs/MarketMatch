@@ -23,10 +23,18 @@ async function addListing(data) {
   try {
     const docRef = db.collection("listings").doc();
 
+    // Extract bedrooms from property_type
+    let bedrooms = null;
+    const bhkMatch = data.property_type?.match(/(\d+)/);
+    if (bhkMatch) {
+      bedrooms = parseInt(bhkMatch[1]);
+    }
+
     await docRef.set({
       title: data.title || "",
       location: data.location || "",
       category: data.property_type || "",
+      bedrooms: bedrooms,
       price: Number(data.price) || 0,
       contact: data.contact || "",
       description: data.description || "",

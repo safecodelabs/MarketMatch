@@ -274,40 +274,47 @@ function isUserOfferingServices(text) {
   
   const lowerText = text.toLowerCase();
   
-  // CRITICAL: Only treat explicit "looking for" / "searching for" as NOT offering.
-  // Avoid treating generic words like "need" or "want" in other contexts (e.g. "need minimum 6 months") as NOT offering.
-  if (lowerText.includes('looking for') || lowerText.includes('searching for')) {
-    console.log(`🔍 [OFFERING CHECK] Contains "looking for" keywords - NOT offering`);
+  // CRITICAL: Check for searching keywords first - if present, NOT offering
+  if (/\b(looking for|need|want|searching for|i need|i want|i am looking|i'm looking|I'm looking|find me|show me)\b/i.test(lowerText)) {
+    console.log(`🔍 [OFFERING CHECK] Contains searching keywords - NOT offering`);
     return false;
   }
   
-  // Check for offering patterns (include 'for rent' / 'rent out' for property posts)
+  // Check for offering patterns
   const offeringPatterns = [
     /i('?m| am) (a |an )?/i,
     /i have (a |an )?/i,
     /i provide/i,
     /i offer/i,
-    /available/i,
-    /for rent/i,
-    /rent out/i
+    /available for/i,
+    /rent out/i,
+    /selling/i,
+    /we offer/i,
+    /we provide/i,
+    /services? offered/i,
+    /offering/i
   ];
   
-  const hasPattern = offeringPatterns.some(pattern => pattern.test(lowerText));
+  const hasOfferingPattern = offeringPatterns.some(pattern => pattern.test(lowerText));
   
-  // Additional quick check: '2bhk for rent', '1 bhk for rent' etc. -> offering
-  const bhkForRentPattern = /(\b\d+\s?bhk\b).*(for rent|for lease|rent out)|\b\d+\s?bhk\s?for rent\b/i;
-  if (bhkForRentPattern.test(lowerText)) {
+  // Property offering: must have offering context + property keywords
+  const hasPropertyKeywords = /\b(\d+\s?bhk|flat|apartment|house|home|property|room|bhk)\b/i.test(lowerText);
+  const hasPropertyOfferingContext = /\b(for rent|for sale|available|vacant|vacancy|my property|my house|my flat|my apartment)\b/i.test(lowerText);
+  
+  if (hasPropertyKeywords && hasPropertyOfferingContext && hasOfferingPattern) {
+    console.log(`🎯 [OFFERING DETECTION] PROPERTY OFFERING detected`);
     return true;
   }
   
-  if (hasPattern) {
-    // Double-check it's not actually a "looking for" disguised as "I'm"
-    // Example: "I'm looking for" vs "I'm a plumber"
-    if (lowerText.includes('looking for') || lowerText.includes('searching for')) {
-      return false;
-    }
-    
-    // Check if it's followed by a profession/service
+  // Job offering
+  if (/\b(hiring|vacancy|job opening|we need|we are looking|we want|recruiting)\b/i.test(lowerText)) {
+    console.log(`🎯 [OFFERING DETECTION] JOB OFFERING detected`);
+    return true;
+  }
+  
+  // Service offering
+  if (hasOfferingPattern) {
+    // Check if it's a service profession
     const professionMatch = lowerText.match(/i('?m| am| have) (a |an )?([a-z]+)/i);
     if (professionMatch) {
       const profession = professionMatch[3];
@@ -318,15 +325,15 @@ function isUserOfferingServices(text) {
                                'househelp', 'naukrani', 'ayah', 'babysitter', 'caretaker', 'gardener',
                                'security', 'guard', 'watchman', 'delivery', 'packer', 'mover'];
       
-      // If it's a service profession, it's likely an offering
       if (serviceKeywords.some(keyword => profession.includes(keyword))) {
         return true;
       }
     }
     
-    return hasPattern;
+    return hasOfferingPattern;
   }
   
+  console.log(`🎯 [OFFERING DETECTION] No offering detected`);
   return false;
 }
 
@@ -1850,6 +1857,104 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   console.log("🔍 [CONTROLLER DEBUG] Session loaded:", session.step, session.state);
 
   // ===========================
+  // ✅ LANGUAGE CHANGE CHECK
+  // ===========================
+  if (text && !replyId) {
+    const lowerText = text.toLowerCase().trim();
+    
+    if (lowerText === 'english' || lowerText === 'en' || lowerText === 'angrezi') {
+      try {
+        const saved = await saveUserLanguage(sender, 'en');
+        if (saved) {
+          multiLanguage.setUserLanguage(sender, 'en');
+          session.preferredLanguage = 'en';
+          await sendMessageWithClient(sender, "✅ Language changed to English!", effectiveClient);
+          await saveSession(sender, session);
+          return session;
+        }
+      } catch (err) {
+        console.warn('🌐 Error changing language:', err);
+      }
+    } else if (lowerText === 'hindi' || lowerText === 'hi' || lowerText === 'हिंदी') {
+      try {
+        const saved = await saveUserLanguage(sender, 'hi');
+        if (saved) {
+          multiLanguage.setUserLanguage(sender, 'hi');
+          session.preferredLanguage = 'hi';
+          await sendMessageWithClient(sender, "✅ भाषा हिंदी में बदल दी गई!", effectiveClient);
+          await saveSession(sender, session);
+          return session;
+        }
+      } catch (err) {
+        console.warn('🌐 Error changing language:', err);
+      }
+    }
+  }
+
+  // ===========================
+  // ✅ FOLLOW-UP: Handle property search details
+  // ===========================
+  if (text && !replyId && session.step === 'awaiting_property_details' && session.pendingPropertySearch) {
+    console.log("🏠 [PROPERTY DETAILS] Processing additional property search details");
+    
+    // Merge new information with pending search
+    const pending = session.pendingPropertySearch;
+    const newText = text.toLowerCase();
+    
+    // Extract missing information from the new message
+    if (!pending.bedrooms) {
+      const bhkMatch = text.match(/(\d+)\s?bhk/i) || text.match(/(\d+)\s?rk/i);
+      if (bhkMatch) {
+        pending.bedrooms = parseInt(bhkMatch[1]);
+      }
+    }
+    
+    if (!pending.location) {
+      const locationMatch = text.match(/(?:in\s+)([a-zA-Z\s]+)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?bhk)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?rk)/i);
+      if (locationMatch) {
+        pending.location = locationMatch[1].trim();
+      } else if (text.match(/\b(delhi|mumbai|bangalore|chennai|pune|hyderabad|kolkata|ahmedabad|jaipur|surat|kanpur|nagpur|lucknow|indore|thane|pimpri|nasik|vadodara|agra|meerut|rajkot|varanasi)\b/i)) {
+        pending.location = text.match(/\b(delhi|mumbai|bangalore|chennai|pune|hyderabad|kolkata|ahmedabad|jaipur|surat|kanpur|nagpur|lucknow|indore|thane|pimpri|nasik|vadodara|agra|meerut|rajkot|varanasi)\b/i)[0];
+      }
+    }
+    
+    if (!pending.type) {
+      if (newText.includes('rent') || newText.includes('for rent') || newText.includes('to rent')) {
+        pending.type = 'rent';
+      } else if (newText.includes('sale') || newText.includes('buy') || newText.includes('for sale') || newText.includes('to buy')) {
+        pending.type = 'sale';
+      }
+    }
+    
+    console.log("🔍 [PROPERTY DETAILS] Updated criteria:", pending);
+    
+    // Check if we still have missing information
+    const stillMissing = [];
+    if (!pending.bedrooms) stillMissing.push('bedrooms (e.g., 1BHK, 2BHK)');
+    if (!pending.location) stillMissing.push('location (e.g., Delhi, Mumbai)');
+    if (!pending.type) stillMissing.push('type (rent or sale)');
+    
+    if (stillMissing.length > 0) {
+      const question = "I still need:\n\n" + stillMissing.map(item => `• ${item}`).join('\n') + "\n\nPlease provide the remaining details!";
+      await sendMessageWithClient(sender, question, effectiveClient);
+      session.pendingPropertySearch = pending;
+      await saveSession(sender, session);
+      return session;
+    }
+    
+    // All information complete, show listings
+    const searchMessage = "🏠 Perfect! Searching for properties that match your requirements...";
+    await sendMessageWithClient(sender, searchMessage, effectiveClient);
+    
+    await handleShowListings(sender, session, pending);
+    delete session.pendingPropertySearch;
+    session.step = 'menu';
+    session.state = 'initial';
+    await saveSession(sender, session);
+    return session;
+  }
+
+  // ===========================
   // ✅ PRIORITY: Check for property search FIRST (before any other routing)
   // ===========================
   if (text && !replyId) {
@@ -1866,41 +1971,55 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
                             detectIntentContext(text) === 'property_sale';
     
     if (isPropertySearch) {
-      console.log("🏠 [PRIORITY PROPERTY SEARCH] Detected property search request - routing to listing display");
+      console.log("🏠 [PRIORITY PROPERTY SEARCH] Detected property search request");
       
-      const userLang = 'en'; // Force English for property searches
+      // Extract search criteria
+      const bhkMatch = text.match(/(\d+)\s?bhk/i) || text.match(/(\d+)\s?rk/i);
+      const locationMatch = text.match(/(?:in\s+)([a-zA-Z\s]+)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?bhk)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?rk)/i);
+      const typeMatch = text.toLowerCase().includes('rent') || text.toLowerCase().includes('for rent') || text.toLowerCase().includes('to rent');
+      const saleMatch = text.toLowerCase().includes('sale') || text.toLowerCase().includes('buy') || text.toLowerCase().includes('for sale') || text.toLowerCase().includes('to buy');
+      
+      const searchCriteria = {
+        bedrooms: bhkMatch ? parseInt(bhkMatch[1]) : null,
+        location: locationMatch ? locationMatch[1].trim() : null,
+        type: typeMatch ? 'rent' : saleMatch ? 'sale' : null
+      };
+      
+      console.log("🔍 [PRIORITY PROPERTY SEARCH] Extracted criteria:", searchCriteria);
+      
+      // Check what information is missing
+      const missing = [];
+      if (!searchCriteria.bedrooms) missing.push('bedrooms (e.g., 1BHK, 2BHK)');
+      if (!searchCriteria.location) missing.push('location (e.g., Delhi, Mumbai)');
+      if (!searchCriteria.type) missing.push('type (rent or sale)');
+      
+      if (missing.length > 0) {
+        // Ask for missing information
+        const userLang = 'en'; // Force English
+        let question = "I need a bit more information to find the perfect property for you:\n\n";
+        question += missing.map(item => `• ${item}`).join('\n');
+        question += "\n\nPlease provide the missing details!";
+        
+        await sendMessageWithClient(sender, question, effectiveClient);
+        
+        // Store partial criteria in session for follow-up
+        session.pendingPropertySearch = searchCriteria;
+        session.step = 'awaiting_property_details';
+        session.state = 'awaiting_text_input';
+        await saveSession(sender, session);
+        return session;
+      }
+      
+      // All information available, show listings
+      const userLang = 'en'; // Force English
       const searchMessage = "🏠 Searching for properties that match your needs...";
       
       await sendMessageWithClient(sender, searchMessage, effectiveClient);
       
-      // Extract search criteria and show listings
-      try {
-        // Simple extraction for BHK and location
-        const bhkMatch = text.match(/(\d+)\s?bhk/i);
-        const locationMatch = text.match(/(?:in\s+)([a-zA-Z\s]+)/i) || text.match(/([a-zA-Z\s]+)(?:\s+\d+\s?bhk)/i);
-        
-        const searchCriteria = {
-          bedrooms: bhkMatch ? parseInt(bhkMatch[1]) : null,
-          location: locationMatch ? locationMatch[1].trim() : null,
-          type: text.toLowerCase().includes('rent') ? 'rent' : 
-                text.toLowerCase().includes('sale') || text.toLowerCase().includes('buy') ? 'sale' : null
-        };
-        
-        console.log("🔍 [PRIORITY PROPERTY SEARCH] Extracted criteria:", searchCriteria);
-        
-        // Show listings with criteria
-        await handleShowListings(sender, session, searchCriteria);
-        await saveSession(sender, session);
-        return session;
-      } catch (error) {
-        console.error("❌ [PRIORITY PROPERTY SEARCH] Error showing listings:", error);
-        await sendMessageWithClient(sender, "Sorry, I couldn't search for properties right now. Please try again.", effectiveClient);
-        await sendMainMenuViaService(sender, 'en', session.isBroker);
-        session.step = 'menu';
-        session.state = 'initial';
-        await saveSession(sender, session);
-        return session;
-      }
+      // Show listings with criteria
+      await handleShowListings(sender, session, searchCriteria);
+      await saveSession(sender, session);
+      return session;
     }
   }
 

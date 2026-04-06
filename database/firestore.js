@@ -485,39 +485,57 @@ async function searchListingsByCriteria(criteria) {
   try {
     console.log("🔍 [DB] Searching listings with criteria:", criteria);
     
-    let query = listingsRef;
-    
-    // Apply filters
-    if (criteria.type) {
-      query = query.where("type", "==", criteria.type);
-    }
-    
-    if (criteria.location) {
-      query = query.where("location", "==", criteria.location);
-    }
-    
-    if (criteria.bedrooms) {
-      query = query.where("bhk", "==", criteria.bedrooms);
-    }
-    
-    if (criteria.maxPrice) {
-      query = query.where("price", "<=", criteria.maxPrice);
-    }
-    
-    const snapshot = await query
-      .orderBy(criteria.maxPrice ? "price" : "timestamp", criteria.maxPrice ? "asc" : "desc")
-      .limit(20)
+    // For Firestore queries, we need to handle complex filtering manually
+    // since Firestore doesn't support all query combinations
+    const snapshot = await listingsRef
+      .orderBy("timestamp", "desc")
+      .limit(50) // Get more to filter client-side
       .get();
     
     if (snapshot.empty) {
-      console.log("📭 [DB] No listings found with given criteria");
+      console.log("📭 [DB] No listings found");
       return [];
     }
     
-    const listings = snapshot.docs.map(doc => ({
+    let listings = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
+    
+    // Apply filters client-side
+    if (criteria.type) {
+      listings = listings.filter(listing => 
+        listing.category?.toLowerCase().includes(criteria.type.toLowerCase()) ||
+        (criteria.type === 'rent' && listing.title?.toLowerCase().includes('rent')) ||
+        (criteria.type === 'sale' && (listing.title?.toLowerCase().includes('sale') || listing.title?.toLowerCase().includes('buy')))
+      );
+    }
+    
+    if (criteria.location) {
+      listings = listings.filter(listing => 
+        listing.location?.toLowerCase().includes(criteria.location.toLowerCase())
+      );
+    }
+    
+    if (criteria.bedrooms) {
+      listings = listings.filter(listing => 
+        listing.bedrooms === criteria.bedrooms ||
+        listing.category?.toLowerCase().includes(`${criteria.bedrooms}bhk`) ||
+        listing.category?.toLowerCase().includes(`${criteria.bedrooms} rk`)
+      );
+    }
+    
+    if (criteria.maxPrice) {
+      listings = listings.filter(listing => listing.price <= criteria.maxPrice);
+    }
+    
+    // Sort by price if maxPrice specified, otherwise by timestamp
+    if (criteria.maxPrice) {
+      listings.sort((a, b) => a.price - b.price);
+    }
+    
+    // Limit to 20 results
+    listings = listings.slice(0, 20);
     
     console.log(`✅ [DB] Found ${listings.length} listings matching criteria`);
     return listings;
