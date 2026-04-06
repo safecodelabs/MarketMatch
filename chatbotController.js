@@ -1118,20 +1118,6 @@ async function executeUrbanHelpSearch(sender, entities, session, client, userLan
 }
 
 /**
- * Check missing urban help info - DELEGATES TO flow module
- */
-function checkMissingUrbanHelpInfo(entities) {
-  return urbanHelpFlow.checkMissingUrbanHelpInfo(entities);
-}
-
-/**
- * Ask for missing urban help info - DELEGATES TO flow module
- */
-async function askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLang, client) {
-  return urbanHelpFlow.askForMissingUrbanHelpInfo(sender, entities, missingInfo, userLang, client);
-}
-
-/**
  * Format urban help results - DELEGATES TO flow module
  */
 function formatUrbanHelpResults(results, userLang, categoryName = null) {
@@ -2580,6 +2566,8 @@ if (text && !replyId) {
     }
   }
 
+  }
+
   // Get session
   session = (await getSession(sender)) || { 
     step: "start",
@@ -2733,48 +2721,6 @@ if (text && !replyId) { // Only check text messages, not button clicks
       await saveSession(sender, session);
       return session;
     }
-}
-
-// ===========================
-// ✅ NEW: Handle posting result function
-// ===========================
-async function handlePostingResult(sender, postingResult, session, effectiveClient) {
-  console.log(`📝 [HANDLE POSTING] Handling posting result: ${postingResult.type}`);
-  
-  switch(postingResult.type) {
-    case 'question':
-    case 'confirmation':
-      await sendMessageWithClient(sender, postingResult.response, effectiveClient);
-      session.step = "posting_flow";
-      break;
-      
-    case 'confirmation_with_buttons':
-    case 'summary_with_buttons':
-      console.log(`📝 [HANDLE POSTING] Sending confirmation with buttons`);
-      await sendInteractiveButtonsWithClient(
-        effectiveClient,
-        sender,
-        postingResult.response,
-        postingResult.buttons || [
-          { id: 'confirm_yes', title: '✅ Yes, Post It' },
-          { id: 'confirm_no', title: '❌ No, Cancel' }
-        ]
-      );
-      session.step = "posting_flow";
-      session.expectedField = 'confirmation';
-      break;
-      
-    case 'success':
-    case 'cancelled':
-    case 'error':
-      await sendMessageWithClient(sender, postingResult.response, effectiveClient);
-      session.step = "menu";
-      session.state = 'initial';
-      break;
-      
-    default:
-      console.log(`⚠️ [HANDLE POSTING] Unknown posting result type: ${postingResult.type}`);
-  }
 }
 
 // ===========================
@@ -4961,154 +4907,6 @@ async function handleTextListingInput(sender, text, session) {
   await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
 }
 
-// ========================================
-// MODULE EXPORTS
-// ========================================
-}
-async function handleShowListings(sender, session, searchCriteria = null) {
-  console.log("🏠 [LISTINGS] Placeholder - handleShowListings not implemented");
-  await sendMessageWithClient(sender, "Listing display feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleManageListings(sender, session) {
-  console.log("⚙️ [MANAGE LISTINGS] Placeholder - handleManageListings not implemented");
-  await sendMessageWithClient(sender, "Manage listings feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleSavedListings(sender, session) {
-  console.log("❤️ [SAVED LISTINGS] Placeholder - handleSavedListings not implemented");
-  await sendMessageWithClient(sender, "Saved listings feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handlePostListingFlow(sender, session = null, client = null) {
-  console.log("📝 [POST LISTING] Placeholder - handlePostListingFlow not implemented");
-  await sendMessageWithClient(sender, "Post listing feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleFlowSubmission(sender, flowData, session, client) {
-  console.log("📋 [FLOW SUBMISSION] Placeholder - handleFlowSubmission not implemented");
-  await sendMessageWithClient(sender, "Flow submission feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleVoiceMessage(sender, metadata, client) {
-  console.log("🎤 [VOICE] Placeholder - handleVoiceMessage not implemented");
-  await sendMessageWithClient(sender, "Voice message feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleVoiceConfirmation(sender, response, session, client) {
-  console.log("🎤 [VOICE CONFIRMATION] Placeholder - handleVoiceConfirmation not implemented");
-  await sendMessageWithClient(sender, "Voice confirmation feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleListingSelection(sender, msg, session) {
-  console.log("🔍 [LISTING SELECTION] Placeholder - handleListingSelection not implemented");
-  await sendMessageWithClient(sender, "Listing selection feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleDeleteListing(sender, session) {
-  console.log("🗑️ [DELETE LISTING] Placeholder - handleDeleteListing not implemented");
-  await sendMessageWithClient(sender, "Delete listing feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleSavedListingSelection(sender, msg, session) {
-  console.log("❤️ [SAVED LISTING SELECTION] Placeholder - handleSavedListingSelection not implemented");
-  await sendMessageWithClient(sender, "Saved listing selection feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleRemoveSavedListing(sender, session) {
-  console.log("💔 [REMOVE SAVED LISTING] Placeholder - handleRemoveSavedListing not implemented");
-  await sendMessageWithClient(sender, "Remove saved listing feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleFieldEdit(sender, session) {
-  console.log("✏️ [FIELD EDIT] Placeholder - handleFieldEdit not implemented");
-  await sendMessageWithClient(sender, "Field edit feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function updateFieldValue(sender, session) {
-  console.log("🔄 [UPDATE FIELD] Placeholder - updateFieldValue not implemented");
-  await sendMessageWithClient(sender, "Update field feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function saveAllEdits(sender, session) {
-  console.log("💾 [SAVE EDITS] Placeholder - saveAllEdits not implemented");
-  await sendMessageWithClient(sender, "Save edits feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handleTextListingInput(sender, text, session) {
-  console.log("📝 [TEXT LISTING] Placeholder - handleTextListingInput not implemented");
-  await sendMessageWithClient(sender, "Text listing input feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
-async function handlePostingConfirmation(sender, replyId, session, client) {
-  console.log("✅ [POSTING CONFIRMATION] Placeholder - handlePostingConfirmation not implemented");
-  await sendMessageWithClient(sender, "Posting confirmation feature is currently under development.");
-  session.step = "menu";
-  session.state = 'initial';
-  await saveSession(sender, session);
-  await sendMainMenuViaService(sender, multiLanguage.getUserLanguage(sender) || 'en', session.isBroker);
-}
-
 module.exports = {
   handleIncomingMessage,
   handleShowListings,
@@ -5120,23 +4918,18 @@ module.exports = {
   handleVoiceConfirmation,
   setWhatsAppClient,
   getEffectiveClient,
-  // ✅ ADDED: Urban Help functions
   handleUrbanHelpConfirmation,
   executeUrbanHelpSearch,
-  // ✅ ADDED: Helper functions for manage and saved listings
   handleListingSelection,
   handleDeleteListing,
   handleSavedListingSelection,
   handleRemoveSavedListing,
-  // Exported helpers for testing
   detectIntentContext,
   isUserOfferingServices,
   isUrbanHelpRequest,
-  // ✅ ADDED: Placeholder functions for missing implementations
   handleFieldEdit,
   updateFieldValue,
   saveAllEdits,
   handleTextListingInput,
-  // ✅ ADDED: Posting confirmation handler
   handlePostingConfirmation
 };
