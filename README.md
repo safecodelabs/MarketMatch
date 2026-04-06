@@ -1,61 +1,3 @@
-marketmatchai/
-├── src/
-│   ├── api/                     # Route entrypoints
-│   │   ├── index.js             # Main router
-│   │   ├── jobs.js              # /jobs
-│   │   ├── cars.js              # /cars
-│   │   ├── housing.js           # /housing
-│   │   ├── services.js          # /local services
-│   │   ├── users.js             # /profile, auth
-│   │   └── admin.js             # /moderation tools
-│
-│   ├── bots/
-│   │   ├── whatsappBot.js       # Main webhook logic
-│   │   ├── messageParser.js     # Parse user input
-│   │   ├── commandRouter.js     # Match input → action
-│   │   └── templates/           # Prewritten bot responses
-│
-│   ├── categories/              # Category logic (modular)
-│   │   ├── jobs.js
-│   │   ├── cars.js
-│   │   ├── housing.js
-│   │   ├── services.js
-│   │   └── clothing.js
-│
-│   ├── controllers/             # Business logic per route
-│   │   ├── jobsController.js
-│   │   ├── carsController.js
-│   │   ├── usersController.js
-│   │   └── housingController.js
-│
-│   ├── firebase/
-│   │   ├── firebaseConfig.js    # Init Firebase App + Firestore
-│   │   └── auth.js              # Session validation
-│
-│   ├── services/                # Shared services
-│   │   ├── whatsappService.js
-│   │   ├── searchService.js     # Filter/search helpers
-│   │   ├── favoritesService.js
-│   │   ├── notificationService.js
-│   │   └── paymentService.js    # (future)
-│
-│   ├── middlewares/
-│   │   └── verifyToken.js
-│
-│   ├── utils/
-│   │   ├── logger.js
-│   │   ├── formatter.js
-│   │   └── idGenerator.js
-│
-│   └── index.js                # Main server entry
-│
-├── .env                        # Firebase + WhatsApp creds
-├── .gitignore
-├── package.json
-└── README.md
-
-
-
 ✅ Strategy Summary:
 No web UI for admins or users
 Use WhatsApp-only interaction for both job seekers and job posters.
@@ -109,6 +51,22 @@ Check if the sender's number is in the list.
 If yes, treat messages as job posts.
 
 If no, treat messages as job seeker interactions.
+
+---
+
+## Background workers & Scheduling 🔧
+
+- The project includes a generalized `match-and-notify` worker which re-runs matches for pending user requests (jobs, urban-help, listings) and sends notifications when matches appear.
+
+- You can run it manually via NPM: `npm run match-notify` or via the script `scripts/run-match-notify.js`.
+
+- Scheduling options:
+  - GitHub Actions workflow: `.github/workflows/match-and-notify.yml` (runs hourly by default).
+  - In-process scheduler: set `ENABLE_SCHEDULED_MATCH_NOTIFY=1` (see `docs/SCHEDULER.md` for details).
+  - Manual trigger: POST `/admin/run-match-notify` with `token` (use `ADMIN_TOKEN`).
+
+- If notifications fail due to provider auth errors (401), the worker will alert and skip retries until credentials are fixed.
+
 
 🧠 Bonus: Semi-Structured Input Parser
 Instead of making admins type in exact format, allow for flexibility using basic NLP:
