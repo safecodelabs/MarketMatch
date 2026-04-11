@@ -176,20 +176,49 @@ function parsePropertySearchIntent(text, previousContext = null) {
     }
   }
   
-  // Extract location - look for specific cities first
+  // Extract location - look for specific cities first with fuzzy matching
   const cities = [
     'delhi', 'noida', 'gurugram', 'gurgaon', 'faridabad', 'greater noida',
     'mumbai', 'pune', 'bangalore', 'hyderabad', 'chennai', 'kolkata',
     'ahmedabad', 'jaipur', 'surat', 'kanpur', 'nagpur', 'lucknow',
     'indore', 'thane', 'vasai', 'agra', 'meerut', 'rajkot', 'varanasi',
-    'sector 62', 'sector 18', 'sector 45', 'dlf phase', 'mg road', 'mg road'
+    'sector 62', 'sector 18', 'sector 45', 'dlf phase', 'mg road'
   ];
   
+  // First try exact matches
   for (const city of cities) {
     const cityPattern = new RegExp(`\\b${city}\\b`, 'i');
     if (cityPattern.test(text)) {
       result.location = city.charAt(0).toUpperCase() + city.slice(1);
       break;
+    }
+  }
+  
+  // If no exact match, try fuzzy matching for common typos
+  if (!result.location) {
+    const fuzzyMatches = {
+      'delihi': 'Delhi',
+      'delhi': 'Delhi',
+      'mumbay': 'Mumbai',
+      'bombay': 'Mumbai',
+      'banglore': 'Bangalore',
+      'bangaluru': 'Bangalore',
+      'gurgao': 'Gurugram',
+      'gurgaon': 'Gurugram',
+      'noida': 'Noida',
+      'hydrabad': 'Hyderabad',
+      'hydrabad': 'Hyderabad',
+      'chenai': 'Chennai',
+      'madras': 'Chennai',
+      'calcuta': 'Kolkata',
+      'calcutta': 'Kolkata'
+    };
+    
+    for (const [typo, correct] of Object.entries(fuzzyMatches)) {
+      if (text.toLowerCase().includes(typo)) {
+        result.location = correct;
+        break;
+      }
     }
   }
   
@@ -2012,18 +2041,17 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       if (searchIntent.isPropertySearch) {
         console.log("🏠 [NLP] Property search detected:", searchIntent);
         
-        // Check for missing information
+        // Check for missing information - make type optional
         const missing = [];
         if (!searchIntent.bedrooms) missing.push('bedrooms');
         if (!searchIntent.location) missing.push('location');
-        if (!searchIntent.type) missing.push('type (rent/sale)');
+        // Type is now optional - we'll default to 'rent' if not specified
         
         if (missing.length > 0) {
           console.log("📋 [NLP] Missing info:", missing);
           let question = "🏠 I found your property search! But I need a bit more info:\n\n";
           if (!searchIntent.bedrooms) question += "• How many bedrooms? (1BHK, 2BHK, 3BHK, etc.)\n";
           if (!searchIntent.location) question += "• Which city/area? (Delhi, Mumbai, Gurugram, Noida, etc.)\n";
-          if (!searchIntent.type) question += "• For rent or sale?\n";
           
           await sendMessageWithClient(sender, question, effectiveClient);
           session.pendingPropertySearch = searchIntent;
@@ -2033,7 +2061,13 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           return session;
         }
         
-        // All information available
+        // All required information available (bedrooms and location)
+        // Default type to 'rent' if not specified
+        if (!searchIntent.type) {
+          searchIntent.type = 'rent';
+          console.log("🏠 [NLP] Defaulting type to 'rent' for complete search");
+        }
+        
         console.log("✅ [NLP] Complete property search criteria:", searchIntent);
         await sendMessageWithClient(sender, "🔍 Searching for properties that match your needs...", effectiveClient);
         
@@ -2061,17 +2095,16 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       const updated = parsePropertySearchIntent(text, session.pendingPropertySearch);
       console.log("📋 [NLP] Updated criteria:", updated);
       
-      // Check if still missing info
+      // Check if still missing info - type is optional
       const stillMissing = [];
       if (!updated.bedrooms) stillMissing.push('bedrooms');
       if (!updated.location) stillMissing.push('location');
-      if (!updated.type) stillMissing.push('type (rent/sale)');
+      // Type is now optional
       
       if (stillMissing.length > 0) {
         let question = "Still need:\n";
         if (!updated.bedrooms) question += "• Bedrooms (1BHK, 2BHK, etc.)\n";
         if (!updated.location) question += "• Location\n";
-        if (!updated.type) question += "• Rent or Sale?\n";
         
         await sendMessageWithClient(sender, question, effectiveClient);
         session.pendingPropertySearch = updated;
@@ -2079,15 +2112,27 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         return session;
       }
       
-      // Complete - show listings
-      await sendMessageWithClient(sender, "✅ Got it! Searching for properties...", effectiveClient);
+      // All required info now available
+      if (!updated.type) {
+        updated.type = 'rent';
+        console.log("🏠 [NLP] Defaulting type to 'rent' for follow-up search");
+      }
+      
+      console.log("✅ [NLP] Follow-up search complete:", updated);
+      await sendMessageWithClient(sender, "🔍 Searching for properties that match your needs...", effectiveClient);
+      
       await handleShowListings(sender, session, {
         bedrooms: updated.bedrooms,
         location: updated.location,
         type: updated.type
       });
       
+      // Clear pending search
       delete session.pendingPropertySearch;
+      session.step = "menu";
+      session.state = 'initial';
+      await saveSession(sender, session);
+      return session;
       session.step = 'menu';
       session.state = 'initial';
       await saveSession(sender, session);
