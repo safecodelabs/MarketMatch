@@ -7,6 +7,9 @@ const voiceService = require("./src/services/voiceService");
 // ✅ FIXED: Correct path to posting-service
 const PostingService = require("./src/services/posting-service");
 
+// ✅ ADVANCED NLP: Import the new AI-powered intent classifier
+const AdvancedIntentClassifier = require("./utils/advancedIntentClassifier");
+
 // ✅ UPDATED: Added new session functions
 const { 
   getSession, 
@@ -134,147 +137,85 @@ async function createBrokerLead(sender, listing, session) {
 }
 
 // ========================================
+// ADVANCED NLP CLASSIFIER INITIALIZATION
+// ========================================
+const advancedClassifier = new AdvancedIntentClassifier();
+
+// ========================================
 // PROPERTY SEARCH NLP PARSER - INTELLIGENT INTENT DETECTION
 // ========================================
+// ========================================
+// ADVANCED PROPERTY SEARCH NLP PARSER - AI-POWERED INTENT DETECTION
+// ========================================
 function parsePropertySearchIntent(text, previousContext = null) {
-  const lowerText = text.toLowerCase();
-  
-  // Initialize result with previous context
-  const result = previousContext ? { ...previousContext } : {
-    isPropertySearch: false,
-    bedrooms: null,
-    location: null,
-    type: null,
-    budget: null,
-    furnished: null,
-    parking: null
-  };
-  
-  // Property search keywords - check if this looks like a property search
-  const searchKeywords = /\b(looking for|need|want|searching for|find me|show me|i need|i want|i am looking|i'm looking|show properties|list properties|available|offering|for rent|for sale|rent out|bhk|apartment|flat|house|home|property|accommodation|pg|room|rk)\b/i;
-  
-  if (!searchKeywords.test(text)) {
-    result.isPropertySearch = false;
+  try {
+    // Use the advanced AI classifier for intelligent analysis
+    const analysis = advancedClassifier.analyzePropertySearch(text);
+
+    // Convert to the expected format for backward compatibility
+    const result = {
+      isPropertySearch: analysis.isPropertySearch,
+      bedrooms: analysis.searchCriteria.bedrooms || null,
+      location: analysis.searchCriteria.location || null,
+      type: analysis.searchCriteria.type || null,
+      budget: analysis.searchCriteria.budget || null,
+      furnished: null,
+      parking: null,
+      confidence: analysis.confidence,
+      intent: analysis.intent,
+      entities: analysis.entities
+    };
+
+    // Merge with previous context if provided
+    if (previousContext) {
+      result.bedrooms = result.bedrooms || previousContext.bedrooms;
+      result.location = result.location || previousContext.location;
+      result.type = result.type || previousContext.type;
+      result.budget = result.budget || previousContext.budget;
+    }
+
+    console.log("🧠 [ADVANCED NLP] AI-powered property search analysis:", result);
     return result;
-  }
-  
-  // Extract bedrooms
-  const bhkPatterns = [
-    /(\d+)\s?bhk/i,
-    /(\d+)\s?bhk flat/i,
-    /(\d+)\s?bhk apartment/i,
-    /(\d+)\s?bhk house/i,
-    /(\d+)\s?rk\b/i,
-    /(\d+)\s?bedroom/i
-  ];
-  
-  for (const pattern of bhkPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      result.bedrooms = parseInt(match[1]);
-      break;
+
+  } catch (error) {
+    console.error("❌ [ADVANCED NLP] Error in parsePropertySearchIntent:", error);
+
+    // Fallback to basic analysis if AI fails
+    const lowerText = text.toLowerCase();
+    const result = {
+      isPropertySearch: /\b(looking for|need|want|searching for|find me|i need|bhk|apartment|flat|house|property)\b/i.test(text),
+      bedrooms: null,
+      location: null,
+      type: 'rent', // Default to rent
+      budget: null,
+      furnished: null,
+      parking: null
+    };
+
+    // Basic bedroom extraction
+    const bhkMatch = text.match(/(\d+)\s*(bhk|rk)/i);
+    if (bhkMatch) {
+      result.bedrooms = parseInt(bhkMatch[1]);
     }
-  }
-  
-  // Extract location - look for specific cities first with fuzzy matching
-  const cities = [
-    'delhi', 'noida', 'gurugram', 'gurgaon', 'faridabad', 'greater noida',
-    'mumbai', 'pune', 'bangalore', 'hyderabad', 'chennai', 'kolkata',
-    'ahmedabad', 'jaipur', 'surat', 'kanpur', 'nagpur', 'lucknow',
-    'indore', 'thane', 'vasai', 'agra', 'meerut', 'rajkot', 'varanasi',
-    'sector 62', 'sector 18', 'sector 45', 'dlf phase', 'mg road'
-  ];
-  
-  // First try exact matches
-  for (const city of cities) {
-    const cityPattern = new RegExp(`\\b${city}\\b`, 'i');
-    if (cityPattern.test(text)) {
-      result.location = city.charAt(0).toUpperCase() + city.slice(1);
-      break;
-    }
-  }
-  
-  // If no exact match, try fuzzy matching for common typos
-  if (!result.location) {
-    const fuzzyMatches = {
+
+    // Basic location extraction with fuzzy matching
+    const fuzzyLocations = {
       'delihi': 'Delhi',
       'delhi': 'Delhi',
       'mumbay': 'Mumbai',
-      'bombay': 'Mumbai',
       'banglore': 'Bangalore',
-      'bangaluru': 'Bangalore',
-      'gurgao': 'Gurugram',
-      'gurgaon': 'Gurugram',
-      'noida': 'Noida',
-      'hydrabad': 'Hyderabad',
-      'hydrabad': 'Hyderabad',
-      'chenai': 'Chennai',
-      'madras': 'Chennai',
-      'calcuta': 'Kolkata',
-      'calcutta': 'Kolkata'
+      'gurgao': 'Gurugram'
     };
-    
-    for (const [typo, correct] of Object.entries(fuzzyMatches)) {
+
+    for (const [typo, correct] of Object.entries(fuzzyLocations)) {
       if (text.toLowerCase().includes(typo)) {
         result.location = correct;
         break;
       }
     }
+
+    return result;
   }
-  
-  // Also try generic location patterns
-  if (!result.location) {
-    const locationPatterns = [
-      /(?:in|at|near)\s+([a-z\s]+?)(?:\s+(?:for|to|rent|sale|buy)|\s+\d+|$)/i,
-      /([a-z\s]+?)\s+(?:sector|area|location)/i
-    ];
-    
-    for (const pattern of locationPatterns) {
-      const match = text.match(pattern);
-      if (match && match[1].length < 30) {
-        const loc = match[1].trim();
-        if (!/^(for|to|rent|sale|bhk|rk|bedroom|a|an|of|the)$/i.test(loc)) {
-          result.location = loc;
-          break;
-        }
-      }
-    }
-  }
-  
-  // Extract type (rent or sale)
-  const rentPatterns = /\b(rent|for rent|to rent|rental|lease|renting|take on rent|monthly)\b/i;
-  const salePatterns = /\b(sale|buy|purchase|for sale|selling|to buy|for purchase|ownership)\b/i;
-  
-  if (rentPatterns.test(text)) {
-    result.type = 'rent';
-  } else if (salePatterns.test(text)) {
-    result.type = 'sale';
-  }
-  
-  // Extract budget/price
-  const budgetMatch = text.match(/(?:budget|price|rupees|rs|₹|under|max|upto|up to|between)\s*[₹]?\s*(\d+(?:\s*(?:to|and|-)\s*\d+)?)\s*(?:k|lakh|lac|thousand)?\b/i);
-  if (budgetMatch) {
-    result.budget = budgetMatch[1];
-  }
-  
-  // Check for furnished/furnished context
-  if (/\b(furnished|unfurnished|semi-furnished|semi furnished)\b/i.test(text)) {
-    const furnished = text.match(/\b(furnished|unfurnished|semi-furnished|semi furnished)\b/i);
-    result.furnished = furnished[1];
-  }
-  
-  // Check for parking
-  if (/\b(parking|car parking|bike parking)\b/i.test(text)) {
-    result.parking = true;
-  }
-  
-  // Determine if this is a property search
-  result.isPropertySearch = searchKeywords.test(text) &&
-    (result.bedrooms || result.location || result.type || 
-     /\b(apartment|flat|house|property|bhk|rk|accommodation)\b/i.test(text));
-  
-  console.log("🧠 [NLP] Parsed intent:", result);
-  return result;
 }
 
 // ========================================
@@ -2037,51 +1978,53 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ===========================
   if (text && !replyId) {
     try {
-      const searchIntent = parsePropertySearchIntent(text);
-      if (searchIntent.isPropertySearch) {
-        console.log("🏠 [NLP] Property search detected:", searchIntent);
-        
-        // Check for missing information - make type optional
-        const missing = [];
-        if (!searchIntent.bedrooms) missing.push('bedrooms');
-        if (!searchIntent.location) missing.push('location');
-        // Type is now optional - we'll default to 'rent' if not specified
-        
-        if (missing.length > 0) {
-          console.log("📋 [NLP] Missing info:", missing);
-          let question = "🏠 I found your property search! But I need a bit more info:\n\n";
-          if (!searchIntent.bedrooms) question += "• How many bedrooms? (1BHK, 2BHK, 3BHK, etc.)\n";
-          if (!searchIntent.location) question += "• Which city/area? (Delhi, Mumbai, Gurugram, Noida, etc.)\n";
-          
+      const propertyAnalysis = advancedClassifier.analyzePropertySearch(text);
+      if (propertyAnalysis.isPropertySearch) {
+        console.log("🏠 [ADVANCED NLP] Property search detected:", propertyAnalysis);
+
+        // Extract search criteria from the enhanced analysis
+        const searchCriteria = propertyAnalysis.searchCriteria;
+        const hasBedrooms = searchCriteria.bedrooms !== null && searchCriteria.bedrooms !== undefined;
+        const hasLocation = searchCriteria.location !== null && searchCriteria.location !== undefined;
+
+        if (!hasBedrooms && !hasLocation) {
+          // No key criteria found, ask for both
+          console.log("📋 [ADVANCED NLP] No bedrooms or location found, asking for both");
+          let question = "🏠 I found your property search! To help you better, please tell me:\n\n";
+          question += "• Which city/area are you looking in? (Delhi, Mumbai, etc.)\n";
+          question += "• How many bedrooms do you need? (1BHK, 2BHK, 3BHK, etc.)\n";
+
           await sendMessageWithClient(sender, question, effectiveClient);
-          session.pendingPropertySearch = searchIntent;
+          session.pendingPropertySearch = propertyAnalysis;
           session.step = 'awaiting_property_details';
           session.state = 'awaiting_text_input';
           await saveSession(sender, session);
           return session;
         }
-        
-        // All required information available (bedrooms and location)
+
+        // We have at least bedrooms or location - proceed with search
         // Default type to 'rent' if not specified
-        if (!searchIntent.type) {
-          searchIntent.type = 'rent';
-          console.log("🏠 [NLP] Defaulting type to 'rent' for complete search");
+        if (!searchCriteria.type) {
+          searchCriteria.type = 'rent';
+          console.log("🏠 [ADVANCED NLP] Defaulting type to 'rent' for flexible search");
         }
-        
-        console.log("✅ [NLP] Complete property search criteria:", searchIntent);
+
+        console.log("✅ [ADVANCED NLP] Proceeding with flexible search criteria:", searchCriteria);
         await sendMessageWithClient(sender, "🔍 Searching for properties that match your needs...", effectiveClient);
-        
+
         await handleShowListings(sender, session, {
-          bedrooms: searchIntent.bedrooms,
-          location: searchIntent.location,
-          type: searchIntent.type
+          bedrooms: searchCriteria.bedrooms,
+          location: searchCriteria.location,
+          type: searchCriteria.type,
+          budget: searchCriteria.budget,
+          category: searchCriteria.category
         });
-        
+
         await saveSession(sender, session);
         return session;
       }
     } catch (err) {
-      console.error('❌ [PROPERTY SEARCH] Error processing property search:', err);
+      console.error('❌ [ADVANCED PROPERTY SEARCH] Error processing property search:', err);
     }
   }
 
@@ -2090,55 +2033,68 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ===========================
   if (text && !replyId && session.step === 'awaiting_property_details' && session.pendingPropertySearch) {
     try {
-      console.log("🏠 [NLP] Processing follow-up property search details");
-      
-      const updated = parsePropertySearchIntent(text, session.pendingPropertySearch);
-      console.log("📋 [NLP] Updated criteria:", updated);
-      
-      // Check if still missing info - type is optional
-      const stillMissing = [];
-      if (!updated.bedrooms) stillMissing.push('bedrooms');
-      if (!updated.location) stillMissing.push('location');
-      // Type is now optional
-      
-      if (stillMissing.length > 0) {
-        let question = "Still need:\n";
-        if (!updated.bedrooms) question += "• Bedrooms (1BHK, 2BHK, etc.)\n";
-        if (!updated.location) question += "• Location\n";
-        
+      console.log("🏠 [ADVANCED NLP] Processing follow-up property search details");
+
+      const followUpAnalysis = advancedClassifier.analyzePropertySearch(text);
+      const combinedCriteria = { ...session.pendingPropertySearch.searchCriteria };
+
+      // Merge follow-up information with pending search
+      if (followUpAnalysis.searchCriteria.bedrooms && !combinedCriteria.bedrooms) {
+        combinedCriteria.bedrooms = followUpAnalysis.searchCriteria.bedrooms;
+      }
+      if (followUpAnalysis.searchCriteria.location && !combinedCriteria.location) {
+        combinedCriteria.location = followUpAnalysis.searchCriteria.location;
+      }
+      if (followUpAnalysis.searchCriteria.budget && !combinedCriteria.budget) {
+        combinedCriteria.budget = followUpAnalysis.searchCriteria.budget;
+      }
+      if (followUpAnalysis.searchCriteria.type && !combinedCriteria.type) {
+        combinedCriteria.type = followUpAnalysis.searchCriteria.type;
+      }
+
+      console.log("📋 [ADVANCED NLP] Combined criteria:", combinedCriteria);
+
+      // Check if we now have enough info - be flexible
+      const hasBedroomsNow = combinedCriteria.bedrooms !== null && combinedCriteria.bedrooms !== undefined;
+      const hasLocationNow = combinedCriteria.location !== null && combinedCriteria.location !== undefined;
+
+      if (!hasBedroomsNow && !hasLocationNow) {
+        // Still missing both key criteria
+        let question = "I still need some key information:\n";
+        if (!combinedCriteria.bedrooms) question += "• Bedrooms (1BHK, 2BHK, etc.)\n";
+        if (!combinedCriteria.location) question += "• Location (Delhi, Mumbai, etc.)\n";
+
         await sendMessageWithClient(sender, question, effectiveClient);
-        session.pendingPropertySearch = updated;
+        session.pendingPropertySearch.searchCriteria = combinedCriteria;
         await saveSession(sender, session);
         return session;
       }
-      
-      // All required info now available
-      if (!updated.type) {
-        updated.type = 'rent';
-        console.log("🏠 [NLP] Defaulting type to 'rent' for follow-up search");
+
+      // We now have at least one key criterion - proceed with search
+      if (!combinedCriteria.type) {
+        combinedCriteria.type = 'rent';
+        console.log("🏠 [ADVANCED NLP] Defaulting type to 'rent' for follow-up search");
       }
-      
-      console.log("✅ [NLP] Follow-up search complete:", updated);
+
+      console.log("✅ [ADVANCED NLP] Follow-up search complete:", combinedCriteria);
       await sendMessageWithClient(sender, "🔍 Searching for properties that match your needs...", effectiveClient);
-      
+
       await handleShowListings(sender, session, {
-        bedrooms: updated.bedrooms,
-        location: updated.location,
-        type: updated.type
+        bedrooms: combinedCriteria.bedrooms,
+        location: combinedCriteria.location,
+        type: combinedCriteria.type,
+        budget: combinedCriteria.budget,
+        category: combinedCriteria.category
       });
-      
+
       // Clear pending search
       delete session.pendingPropertySearch;
       session.step = "menu";
       session.state = 'initial';
       await saveSession(sender, session);
       return session;
-      session.step = 'menu';
-      session.state = 'initial';
-      await saveSession(sender, session);
-      return session;
     } catch (err) {
-      console.error('❌ [NLP FOLLOW-UP] Error processing follow-up:', err);
+      console.error('❌ [ADVANCED NLP FOLLOW-UP] Error processing follow-up:', err);
     }
   }
   
