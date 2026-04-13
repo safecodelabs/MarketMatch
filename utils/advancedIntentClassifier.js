@@ -230,9 +230,21 @@ class AdvancedIntentClassifier {
     const intent = this.classifyIntent(text);
     const entities = this.extractEntities(text);
 
+    // Check for explicit property search phrases
+    const lowerText = text.toLowerCase();
+    const propertySearchPhrases = [
+      'looking for', 'searching for', 'find me', 'need', 'want',
+      'show me', 'find a', 'find an', 'i need', 'i want'
+    ];
+    const hasPropertySearchPhrase = propertySearchPhrases.some(phrase => lowerText.includes(phrase));
+
     // Advanced property search analysis
     const result = {
-      isPropertySearch: intent.intent === 'property_search' || entities.locations.length > 0 || entities.bedrooms || entities.propertyTypes.length > 0,
+      isPropertySearch: intent.intent === 'property_search' ||
+                       entities.locations.length > 0 ||
+                       entities.bedrooms ||
+                       entities.propertyTypes.length > 0 ||
+                       hasPropertySearchPhrase,
       intent: intent.intent,
       confidence: intent.confidence,
       entities: entities,
@@ -375,8 +387,14 @@ class AdvancedIntentClassifier {
                lowerText.includes('for sale') || lowerText.includes('selling') || lowerText.includes('bought')) {
       result.searchCriteria.type = 'sale';
     } else {
-      // Default to rent for property searches, but check for sale indicators
-      result.searchCriteria.type = 'rent';
+      // Smart default: if user is "looking for" or "searching for", they likely want to rent
+      // If they wanted to sell, they'd say "sell my property" or similar
+      if (hasPropertySearchPhrase) {
+        result.searchCriteria.type = 'rent';
+      } else {
+        // Default to rent for property searches
+        result.searchCriteria.type = 'rent';
+      }
     }
 
     // Extract property category with enhanced detection

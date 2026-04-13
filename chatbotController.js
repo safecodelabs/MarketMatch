@@ -1984,32 +1984,29 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
 
         // Extract search criteria from the enhanced analysis
         const searchCriteria = propertyAnalysis.searchCriteria;
-        const hasBedrooms = searchCriteria.bedrooms !== null && searchCriteria.bedrooms !== undefined;
-        const hasLocation = searchCriteria.location !== null && searchCriteria.location !== undefined;
 
-        if (!hasBedrooms && !hasLocation) {
-          // No key criteria found, ask for both
-          console.log("📋 [ADVANCED NLP] No bedrooms or location found, asking for both");
-          let question = "🏠 I found your property search! To help you better, please tell me:\n\n";
-          question += "• Which city/area are you looking in? (Delhi, Mumbai, etc.)\n";
-          question += "• How many bedrooms do you need? (1BHK, 2BHK, 3BHK, etc.)\n";
+        // Always proceed with search if property search is detected with high confidence
+        // Be more lenient - proceed even if some criteria are missing
+        const hasAnyCriteria = searchCriteria.bedrooms || searchCriteria.location || searchCriteria.budget || searchCriteria.category;
 
-          await sendMessageWithClient(sender, question, effectiveClient);
-          session.pendingPropertySearch = propertyAnalysis;
+        if (!hasAnyCriteria && propertyAnalysis.confidence < 0.8) {
+          // Low confidence and no criteria - ask for clarification
+          console.log("📋 [ADVANCED NLP] Low confidence and no criteria, asking for clarification");
+          await sendMessageWithClient(sender, "🏠 I think you're looking for property! Could you please tell me:\n\n• What city/area are you interested in?\n• How many bedrooms do you need?\n• Are you looking to rent or buy?", effectiveClient);
           session.step = 'awaiting_property_details';
           session.state = 'awaiting_text_input';
           await saveSession(sender, session);
           return session;
         }
 
-        // We have at least bedrooms or location - proceed with search
+        // We have some criteria or high confidence - proceed with search
         // Default type to 'rent' if not specified
         if (!searchCriteria.type) {
           searchCriteria.type = 'rent';
           console.log("🏠 [ADVANCED NLP] Defaulting type to 'rent' for flexible search");
         }
 
-        console.log("✅ [ADVANCED NLP] Proceeding with flexible search criteria:", searchCriteria);
+        console.log("✅ [ADVANCED NLP] Proceeding with search criteria:", searchCriteria);
         await sendMessageWithClient(sender, "🔍 Searching for properties that match your needs...", effectiveClient);
 
         await handleShowListings(sender, session, {
@@ -2054,15 +2051,15 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
 
       console.log("📋 [ADVANCED NLP] Combined criteria:", combinedCriteria);
 
-      // Check if we now have enough info - be flexible
-      const hasBedroomsNow = combinedCriteria.bedrooms !== null && combinedCriteria.bedrooms !== undefined;
-      const hasLocationNow = combinedCriteria.location !== null && combinedCriteria.location !== undefined;
+      // Check if we now have enough info - be very lenient
+      const hasAnyCriteria = combinedCriteria.bedrooms || combinedCriteria.location || combinedCriteria.budget || combinedCriteria.category;
 
-      if (!hasBedroomsNow && !hasLocationNow) {
-        // Still missing both key criteria
-        let question = "I still need some key information:\n";
-        if (!combinedCriteria.bedrooms) question += "• Bedrooms (1BHK, 2BHK, etc.)\n";
-        if (!combinedCriteria.location) question += "• Location (Delhi, Mumbai, etc.)\n";
+      if (!hasAnyCriteria) {
+        // Still missing all key criteria
+        let question = "I still need some information to search for properties:\n";
+        if (!combinedCriteria.location) question += "• Which city/area are you looking in?\n";
+        if (!combinedCriteria.bedrooms) question += "• How many bedrooms do you need?\n";
+        question += "• Are you looking to rent or buy?";
 
         await sendMessageWithClient(sender, question, effectiveClient);
         session.pendingPropertySearch.searchCriteria = combinedCriteria;
@@ -2070,7 +2067,7 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         return session;
       }
 
-      // We now have at least one key criterion - proceed with search
+      // We now have at least some criteria - proceed with search
       if (!combinedCriteria.type) {
         combinedCriteria.type = 'rent';
         console.log("🏠 [ADVANCED NLP] Defaulting type to 'rent' for follow-up search");
