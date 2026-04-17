@@ -379,7 +379,6 @@ class AdvancedIntentClassifier {
     }
 
     // Enhanced property type detection (rent/sale)
-    const lowerText = text.toLowerCase();
     if (lowerText.includes('rent') || lowerText.includes('rental') || lowerText.includes('lease') ||
         lowerText.includes('on rent') || lowerText.includes('for rent') || lowerText.includes('rented')) {
       result.searchCriteria.type = 'rent';
