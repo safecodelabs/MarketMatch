@@ -512,9 +512,10 @@ async function searchListingsByCriteria(criteria) {
     }
     
     if (criteria.location) {
-      listings = listings.filter(listing => 
-        listing.location?.toLowerCase().includes(criteria.location.toLowerCase())
-      );
+      listings = listings.filter(listing => {
+        const listingLocation = (listing.location || listing.city || listing.area || '').toLowerCase();
+        return listingLocation.includes(criteria.location.toLowerCase());
+      });
     }
     
     if (criteria.bedrooms) {

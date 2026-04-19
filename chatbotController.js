@@ -4858,8 +4858,16 @@ async function handleShowListings(sender, session, searchCriteria = null) {
     const listingData = session.housingFlow?.listingData;
     let currentIndex = session.housingFlow?.currentIndex || 0;
     console.log("🏠 [LISTINGS] Checking session for cached listings...");
-    
-    if (!listingData || !listingData.listings || listingData.listings.length === 0) {
+
+    if (searchCriteria && listingData && listingData.searchCriteria) {
+      const previousCriteria = listingData.searchCriteria || {};
+      if (JSON.stringify(previousCriteria) !== JSON.stringify(searchCriteria)) {
+        console.log("🏠 [LISTINGS] New search criteria detected, invalidating cached listing data");
+        session.housingFlow = { currentIndex: 0, listingData: null };
+      }
+    }
+
+    if (!session.housingFlow?.listingData || !session.housingFlow.listingData.listings || session.housingFlow.listingData.listings.length === 0) {
       // No listing data in session, fetch listings (filtered if criteria provided)
       console.log("🏠 [LISTINGS] No cached listings, fetching from database...");
       await sendMessageWithClient(sender, searchCriteria ? "🔍 Fetching properties that match your criteria..." : "🔍 Fetching available listings...");
@@ -4898,7 +4906,8 @@ async function handleShowListings(sender, session, searchCriteria = null) {
         currentIndex: 0,
         listingData: {
           listings: filteredListings,
-          totalCount: filteredListings.length
+          totalCount: filteredListings.length,
+          searchCriteria: searchCriteria || null
         }
       };
       
