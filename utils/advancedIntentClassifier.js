@@ -119,11 +119,25 @@ class AdvancedIntentClassifier {
     const numbers = doc.numbers().out('array');
     entities.numbers = numbers.map(n => parseFloat(n));
 
-    // Extract BHK/RK patterns
-    const bhkMatch = text.match(/(\d+)\s*(bhk|rk|bedroom)/i);
-    if (bhkMatch) {
-      entities.bedrooms = parseInt(bhkMatch[1]);
-      entities.propertyType = bhkMatch[2].toLowerCase();
+    // Extract ALL BHK/RK patterns (user may ask for multiple options)
+    const bhkPattern = /(\d+)\s*(bhk|rk|bedroom)/gi;
+    let bhkMatch;
+    const allBedrooms = [];
+    const allPropertyTypes = [];
+    
+    while ((bhkMatch = bhkPattern.exec(text)) !== null) {
+      allBedrooms.push(parseInt(bhkMatch[1]));
+      allPropertyTypes.push(bhkMatch[2].toLowerCase());
+    }
+
+    // If multiple options found, store them; otherwise store single
+    if (allBedrooms.length > 1) {
+      entities.multipleBedroomOptions = allBedrooms;
+      entities.multiplePropertyTypes = allPropertyTypes;
+      entities.bedrooms = allBedrooms[0]; // Default to first for backward compatibility
+    } else if (allBedrooms.length === 1) {
+      entities.bedrooms = allBedrooms[0];
+      entities.propertyType = allPropertyTypes[0];
     }
 
     // Extract currency amounts
@@ -248,8 +262,17 @@ class AdvancedIntentClassifier {
       intent: intent.intent,
       confidence: intent.confidence,
       entities: entities,
-      searchCriteria: {}
+      searchCriteria: {},
+      multipleOptionsDetected: false,
+      userOptions: {}
     };
+
+    // Check for multiple bedroom options
+    if (entities.multipleBedroomOptions && entities.multipleBedroomOptions.length > 1) {
+      result.multipleOptionsDetected = true;
+      result.userOptions.bedrooms = entities.multipleBedroomOptions;
+      result.userOptions.propertyTypes = entities.multiplePropertyTypes;
+    }
 
     // Enhanced bedrooms extraction with multiple patterns
     if (entities.bedrooms) {

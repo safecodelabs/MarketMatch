@@ -1985,6 +1985,24 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       if (propertyAnalysis.isPropertySearch) {
         console.log("🏠 [ADVANCED NLP] Property search detected:", propertyAnalysis);
 
+        // Check for multiple bedroom options and ask user to clarify
+        if (propertyAnalysis.multipleOptionsDetected && propertyAnalysis.userOptions.bedrooms) {
+          console.log("🏠 [MULTIPLE OPTIONS] User asked for multiple bedroom options:", propertyAnalysis.userOptions.bedrooms);
+          
+          const options = propertyAnalysis.userOptions.bedrooms.map((bhk, idx) => 
+            `${idx + 1}. ${bhk}${propertyAnalysis.userOptions.propertyTypes[idx] === 'bhk' ? 'BHK' : 'RK'}`
+          ).join('\n');
+          
+          const clarificationMsg = `🏠 I found you're interested in multiple options:\n\n${options}\n\nWhich one would you prefer? Reply with the number (e.g., "1" or "2")`;
+          
+          await sendMessageWithClient(sender, clarificationMsg, effectiveClient);
+          session.step = 'awaiting_bedroom_choice';
+          session.state = 'awaiting_text_input';
+          session.pendingPropertySearch = propertyAnalysis;
+          await saveSession(sender, session);
+          return session;
+        }
+
         // Extract search criteria from the enhanced analysis
         const searchCriteria = propertyAnalysis.searchCriteria;
         console.log("🏠 [SEARCH CRITERIA] Extracted criteria:", searchCriteria);
@@ -2035,7 +2053,47 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   }
 
   // ===========================
-  // ✅ FOLLOW-UP: Handle property search details from previous incomplete search
+  // ✅ HANDLE BEDROOM CHOICE - Multiple Options Selection
+  // ===========================
+  if (text && !replyId && session.step === 'awaiting_bedroom_choice' && session.pendingPropertySearch) {
+    try {
+      console.log("🏠 [BEDROOM CHOICE] User selecting bedroom option:", text);
+      
+      const choice = parseInt(text.trim());
+      const pendingSearch = session.pendingPropertySearch;
+      
+      if (isNaN(choice) || choice < 1 || choice > pendingSearch.userOptions.bedrooms.length) {
+        await sendMessageWithClient(sender, `❌ Please select a valid option (1-${pendingSearch.userOptions.bedrooms.length})`, effectiveClient);
+        return session;
+      }
+      
+      const selectedBedrooms = pendingSearch.userOptions.bedrooms[choice - 1];
+      console.log("🏠 [BEDROOM CHOICE] User selected:", selectedBedrooms, "bedrooms");
+      
+      // Update search criteria with selected option
+      const searchCriteria = pendingSearch.searchCriteria;
+      searchCriteria.bedrooms = selectedBedrooms;
+      
+      if (!searchCriteria.type) {
+        searchCriteria.type = 'rent';
+      }
+      
+      console.log("✅ [BEDROOM CHOICE] Proceeding with search:", searchCriteria);
+      await sendMessageWithClient(sender, `✅ Got it! Searching for ${selectedBedrooms}-bedroom properties in ${searchCriteria.location}...`, effectiveClient);
+      
+      await handleShowListings(sender, session, searchCriteria);
+      
+      delete session.pendingPropertySearch;
+      session.step = 'awaiting_listing_action';
+      await saveSession(sender, session);
+      return session;
+    } catch (err) {
+      console.error('❌ [BEDROOM CHOICE] Error:', err);
+      await sendMessageWithClient(sender, "❌ Something went wrong. Please try again.", effectiveClient);
+    }
+  }
+
+  // ===========================
   // ===========================
   if (text && !replyId && session.step === 'awaiting_property_details' && session.pendingPropertySearch) {
     try {

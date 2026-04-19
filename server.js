@@ -243,6 +243,65 @@ app.use("/webhook", webhookRoute);
 app.use("/api/flow", flowWebhookRouter);
 
 // ============================================
+// BROKER DASHBOARD ROUTES - NEW
+// ============================================
+const brokerRoute = require("./routes/broker");
+app.use("/api/broker", brokerRoute);
+
+// Serve broker dashboard
+app.get("/broker/dashboard", (req, res) => {
+  res.sendFile(__dirname + "/docs/broker-dashboard.html");
+});
+
+app.get("/broker/login", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Broker Login - MarketMatch</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+      <style>
+        body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .login-box { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); width: 100%; max-width: 400px; }
+        .login-box h2 { color: #667eea; margin-bottom: 30px; text-align: center; }
+      </style>
+    </head>
+    <body>
+      <div class="login-box">
+        <h2><i class="fas fa-dashboard"></i> Broker Login</h2>
+        <form id="loginForm">
+          <div class="mb-3">
+            <label>Email</label>
+            <input type="email" class="form-control" id="email" required>
+          </div>
+          <div class="mb-3">
+            <label>Password</label>
+            <input type="password" class="form-control" id="password" required>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">Login</button>
+          <p class="mt-3 text-center">Don't have account? <a href="/broker/signup">Sign Up</a></p>
+        </form>
+      </div>
+      <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+      <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const response = await axios.post('/api/broker/login', {
+            email: document.getElementById('email').value,
+            password: document.getElementById('password').value
+          });
+          if (response.data.success) {
+            localStorage.setItem('brokerToken', response.data.token);
+            window.location.href = '/broker/dashboard';
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// ============================================
 // TEST ROUTES - UPDATED WITH POSTING SYSTEM INFO
 // ============================================
 app.get("/test", (_, res) => {
