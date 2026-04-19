@@ -1978,16 +1978,21 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
   // ===========================
   if (text && !replyId) {
     try {
+      console.log("🏠 [PROPERTY DETECTION] Analyzing text for property search...");
       const propertyAnalysis = advancedClassifier.analyzePropertySearch(text);
+      console.log("🏠 [PROPERTY DETECTION] Analysis result:", propertyAnalysis.isPropertySearch, "Confidence:", propertyAnalysis.confidence);
+      
       if (propertyAnalysis.isPropertySearch) {
         console.log("🏠 [ADVANCED NLP] Property search detected:", propertyAnalysis);
 
         // Extract search criteria from the enhanced analysis
         const searchCriteria = propertyAnalysis.searchCriteria;
+        console.log("🏠 [SEARCH CRITERIA] Extracted criteria:", searchCriteria);
 
         // Always proceed with search if property search is detected with high confidence
         // Be more lenient - proceed even if some criteria are missing
         const hasAnyCriteria = searchCriteria.bedrooms || searchCriteria.location || searchCriteria.budget || searchCriteria.category;
+        console.log("🏠 [SEARCH CRITERIA] Has any criteria:", hasAnyCriteria);
 
         if (!hasAnyCriteria && propertyAnalysis.confidence < 0.8) {
           // Low confidence and no criteria - ask for clarification
@@ -2007,8 +2012,10 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
         }
 
         console.log("✅ [ADVANCED NLP] Proceeding with search criteria:", searchCriteria);
+        console.log("📤 [LISTINGS] Sending search message to user...");
         await sendMessageWithClient(sender, "🔍 Searching for properties that match your needs...", effectiveClient);
-
+        
+        console.log("📤 [LISTINGS] Calling handleShowListings with criteria:", searchCriteria);
         await handleShowListings(sender, session, {
           bedrooms: searchCriteria.bedrooms,
           location: searchCriteria.location,
@@ -2017,11 +2024,13 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
           category: searchCriteria.category
         });
 
+        console.log("📤 [LISTINGS] handleShowListings completed");
         await saveSession(sender, session);
         return session;
       }
     } catch (err) {
       console.error('❌ [ADVANCED PROPERTY SEARCH] Error processing property search:', err);
+      console.error('❌ [ADVANCED PROPERTY SEARCH] Error stack:', err.stack);
     }
   }
 
