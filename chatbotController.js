@@ -4785,6 +4785,7 @@ async function handleShowListings(sender, session, searchCriteria = null) {
     const effectiveClient = getEffectiveClient();
     
     if (!effectiveClient) {
+      console.log("❌ [LISTINGS] No effective client available");
       await sendMessageWithClient(sender, multiLanguage.getMessageForUser(sender, 'error_no_client'));
       session.step = "menu";
       session.state = 'initial';
@@ -4798,22 +4799,28 @@ async function handleShowListings(sender, session, searchCriteria = null) {
     // Check if we have listing data in session
     const listingData = session.housingFlow?.listingData;
     let currentIndex = session.housingFlow?.currentIndex || 0;
+    console.log("🏠 [LISTINGS] Checking session for cached listings...");
     
     if (!listingData || !listingData.listings || listingData.listings.length === 0) {
       // No listing data in session, fetch listings (filtered if criteria provided)
-      await sendMessageWithClient(sender, searchCriteria ? "🔍 Searching for properties that match your criteria..." : "🔍 Fetching available listings...");
+      console.log("🏠 [LISTINGS] No cached listings, fetching from database...");
+      await sendMessageWithClient(sender, searchCriteria ? "🔍 Fetching properties that match your criteria..." : "🔍 Fetching available listings...");
       
       let filteredListings;
       if (searchCriteria) {
         // Use search criteria to filter listings
+        console.log("🏠 [LISTINGS] Searching with criteria:", searchCriteria);
         filteredListings = await searchListingsByCriteria(searchCriteria);
-        console.log(`🔍 [FILTERED] Found ${filteredListings?.length || 0} listings matching criteria`);
+        console.log(`🔍 [LISTINGS] Search complete. Found ${filteredListings?.length || 0} listings matching criteria`);
       } else {
         // Get top listings without filtering
+        console.log("🏠 [LISTINGS] Fetching top 10 listings without filter");
         filteredListings = await getTopListings(10);
+        console.log(`🔍 [LISTINGS] Fetched ${filteredListings?.length || 0} top listings`);
       }
       
       if (!filteredListings || filteredListings.length === 0) {
+        console.log("❌ [LISTINGS] No listings found!");
         const noResultsMessage = searchCriteria 
           ? "📭 No listings found matching your criteria.\n\nTry different search terms or check back later!"
           : "📭 No listings available at the moment.\n\nTry posting a listing or check back later!";
@@ -4828,21 +4835,24 @@ async function handleShowListings(sender, session, searchCriteria = null) {
       }
       
       // Store in session
+      console.log("🏠 [LISTINGS] Storing listings in session. Count:", filteredListings.length);
       session.housingFlow = {
         currentIndex: 0,
         listingData: {
           listings: filteredListings,
-          totalCount: topListings.length
+          totalCount: filteredListings.length
         }
       };
       
       currentIndex = 0;
       await saveSession(sender, session);
+      console.log("🏠 [LISTINGS] Listings stored and session saved");
     }
     
     // Get current listing
     const listings = session.housingFlow.listingData.listings;
     const totalListings = session.housingFlow.listingData.totalCount;
+    console.log("🏠 [LISTINGS] Retrieved listings from session. Total count:", totalListings, "Current index:", currentIndex);
     
     if (currentIndex >= totalListings) {
       currentIndex = 0;
@@ -4851,8 +4861,10 @@ async function handleShowListings(sender, session, searchCriteria = null) {
     }
     
     const currentListing = listings[currentIndex];
+    console.log("🏠 [LISTINGS] Current listing:", currentListing?.id || "Not found");
     
     if (!currentListing) {
+      console.log("❌ [LISTINGS] Current listing is null or undefined");
       await sendMessageWithClient(sender, "❌ Could not load listing details. Please try again.");
       session.step = "menu";
       session.state = 'initial';
@@ -4862,9 +4874,11 @@ async function handleShowListings(sender, session, searchCriteria = null) {
     }
     
     // Check if listing is already saved
+    console.log("🏠 [LISTINGS] Checking if listing is saved...");
     const isSaved = await isListingSaved(sender, currentListing.id);
     
     // Send listing card
+    console.log("🏠 [LISTINGS] Sending listing card for:", currentListing.title);
     await sendListingCard(
       sender,
       {
