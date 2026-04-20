@@ -1985,6 +1985,12 @@ async function handleIncomingMessage(sender, text = "", metadata = {}, client = 
       if (propertyAnalysis.isPropertySearch) {
         console.log("🏠 [ADVANCED NLP] Property search detected:", propertyAnalysis);
 
+        // Clean up any lingering urban help context to prevent log pollution
+        if (session.urbanHelpContext) {
+          console.log("🧹 [CLEANUP] Removing urban help context for property search");
+          delete session.urbanHelpContext;
+        }
+
         // Check for multiple bedroom options and ask user to clarify
         if (propertyAnalysis.multipleOptionsDetected && propertyAnalysis.userOptions.bedrooms) {
           console.log("🏠 [MULTIPLE OPTIONS] User asked for multiple bedroom options:", propertyAnalysis.userOptions.bedrooms);
@@ -4897,10 +4903,18 @@ async function handleShowListings(sender, session, searchCriteria = null) {
         filteredListings = await searchListingsByCriteria(searchCriteria);
         console.log(`🔍 [LISTINGS] Search complete. Found ${filteredListings?.length || 0} listings matching criteria`);
       } else {
-        // Get top listings without filtering
-        console.log("🏠 [LISTINGS] Fetching top 10 listings without filter");
-        filteredListings = await getTopListings(10);
-        console.log(`🔍 [LISTINGS] Fetched ${filteredListings?.length || 0} top listings`);
+        // Check if user has a pending property search - use those criteria instead of showing all listings
+        if (session.pendingPropertySearch && session.pendingPropertySearch.searchCriteria) {
+          console.log("🏠 [LISTINGS] Using pending property search criteria:", session.pendingPropertySearch.searchCriteria);
+          filteredListings = await searchListingsByCriteria(session.pendingPropertySearch.searchCriteria);
+          console.log(`🔍 [LISTINGS] Found ${filteredListings?.length || 0} listings from pending search`);
+        } else {
+          // Get top listings without filtering
+          console.log("🏠 [LISTINGS] Fetching top 10 listings without filter");
+          const topListingsResult = await getTopListings(10);
+          filteredListings = topListingsResult.listings || [];
+          console.log(`🔍 [LISTINGS] Fetched ${filteredListings?.length || 0} top listings`);
+        }
       }
       
       if (!filteredListings || filteredListings.length === 0) {

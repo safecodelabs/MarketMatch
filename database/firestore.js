@@ -511,6 +511,13 @@ async function searchListingsByCriteria(criteria) {
       );
     }
     
+    // Filter out urban help listings - only show housing/property listings
+    listings = listings.filter(listing => 
+      listing.category !== 'urban_help' && 
+      listing.listingtype !== 'urban_help' &&
+      listing.type !== 'urban_help'
+    );
+    
     if (criteria.location) {
       listings = listings.filter(listing => {
         const listingLocation = (listing.location || listing.city || listing.area || '').toLowerCase();
@@ -569,8 +576,15 @@ async function getTopListings(limit = 10) {
       ...doc.data()
     }));
     
-    console.log(`✅ [DB] Found ${listings.length} listings`);
-    return { listings, totalCount: listings.length };
+    // Filter out urban help listings - only show housing/property listings
+    const filteredListings = listings.filter(listing => 
+      listing.category !== 'urban_help' && 
+      listing.listingtype !== 'urban_help' &&
+      listing.type !== 'urban_help'
+    );
+    
+    console.log(`✅ [DB] Found ${filteredListings.length} listings (filtered from ${listings.length} total)`);
+    return { listings: filteredListings, totalCount: filteredListings.length };
   } catch (err) {
     console.error("❌ [DB] Error in getTopListings:", err);
     return { listings: [], totalCount: 0 };
