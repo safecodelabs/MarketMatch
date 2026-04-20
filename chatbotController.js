@@ -4859,11 +4859,29 @@ async function handleShowListings(sender, session, searchCriteria = null) {
     let currentIndex = session.housingFlow?.currentIndex || 0;
     console.log("🏠 [LISTINGS] Checking session for cached listings...");
 
-    if (searchCriteria && listingData && listingData.searchCriteria) {
-      const previousCriteria = listingData.searchCriteria || {};
-      if (JSON.stringify(previousCriteria) !== JSON.stringify(searchCriteria)) {
-        console.log("🏠 [LISTINGS] New search criteria detected, invalidating cached listing data");
-        session.housingFlow = { currentIndex: 0, listingData: null };
+    if (searchCriteria && listingData) {
+      const previousCriteria = listingData.searchCriteria || null;
+      const previousSearches = session.housingFlow.previousSearches || [];
+
+      if (!previousCriteria) {
+        console.log("🏠 [LISTINGS] Previous cached listing data has no criteria, invalidating cache for new search");
+        session.housingFlow = { ...session.housingFlow, currentIndex: 0, listingData: null };
+      } else if (JSON.stringify(previousCriteria) !== JSON.stringify(searchCriteria)) {
+        console.log("🏠 [LISTINGS] New search criteria detected, moving previous search into history and invalidating cache");
+
+        const previousEntry = {
+          searchCriteria: previousCriteria,
+          listings: listingData.listings,
+          totalCount: listingData.totalCount,
+          timestamp: Date.now()
+        };
+
+        session.housingFlow = {
+          ...session.housingFlow,
+          currentIndex: 0,
+          listingData: null,
+          previousSearches: [previousEntry, ...previousSearches].slice(0, 3)
+        };
       }
     }
 
