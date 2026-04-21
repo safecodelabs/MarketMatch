@@ -4876,7 +4876,9 @@ async function handleShowListings(sender, session, searchCriteria = null) {
         console.log("🏠 [LISTINGS] New search criteria detected, moving previous search into history and invalidating cache");
 
         const previousEntry = {
-          searchCriteria: previousCriteria,
+          searchCriteria: previousCriteria ? Object.fromEntries(
+            Object.entries(previousCriteria).filter(([, value]) => value !== undefined)
+          ) : null,
           listings: listingData.listings,
           totalCount: listingData.totalCount,
           timestamp: Date.now()
@@ -4934,12 +4936,16 @@ async function handleShowListings(sender, session, searchCriteria = null) {
       
       // Store in session
       console.log("🏠 [LISTINGS] Storing listings in session. Count:", filteredListings.length);
+      const savedSearchCriteria = searchCriteria ? Object.fromEntries(
+        Object.entries(searchCriteria).filter(([, value]) => value !== undefined)
+      ) : null;
+
       session.housingFlow = {
         currentIndex: 0,
         listingData: {
           listings: filteredListings,
           totalCount: filteredListings.length,
-          searchCriteria: searchCriteria || null
+          searchCriteria: savedSearchCriteria
         }
       };
       

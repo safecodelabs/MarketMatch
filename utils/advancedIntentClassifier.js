@@ -88,7 +88,7 @@ class AdvancedIntentClassifier {
     this.locationKeywords = [
       'delhi', 'mumbai', 'bangalore', 'chennai', 'kolkata', 'pune',
       'ahmedabad', 'jaipur', 'surat', 'kanpur', 'lucknow', 'indore',
-      'thane', 'nagpur', 'noida', 'gurgaon', 'faridabad', 'ghaziabad',
+      'thane', 'nagpur', 'noida', 'gurgaon', 'gurugram', 'faridabad', 'ghaziabad',
       'meerut', 'rajkot', 'varanasi', 'agra', 'allahabad', 'bareilly',
       'moradabad', 'aligarh', 'bijnor', 'saharanpur', 'muzaffarnagar', 'bulandshahr'
     ];
@@ -107,7 +107,7 @@ class AdvancedIntentClassifier {
     };
 
     // Extract locations using compromise
-    const cities = ['delhi', 'mumbai', 'bangalore', 'chennai', 'kolkata', 'pune', 'ahmedabad', 'jaipur', 'surat', 'kanpur', 'lucknow', 'indore', 'thane', 'nagpur', 'noida', 'gurgaon', 'faridabad', 'ghaziabad', 'meerut', 'rajkot', 'varanasi', 'agra', 'allahabad', 'bareilly', 'moradabad', 'aligarh', 'bijnor', 'saharanpur', 'muzaffarnagar', 'bulandshahr'];
+    const cities = ['delhi', 'mumbai', 'bangalore', 'chennai', 'kolkata', 'pune', 'ahmedabad', 'jaipur', 'surat', 'kanpur', 'lucknow', 'indore', 'thane', 'nagpur', 'noida', 'gurgaon', 'gurugram', 'faridabad', 'ghaziabad', 'meerut', 'rajkot', 'varanasi', 'agra', 'allahabad', 'bareilly', 'moradabad', 'aligarh', 'bijnor', 'saharanpur', 'muzaffarnagar', 'bulandshahr'];
 
     cities.forEach(city => {
       if (text.toLowerCase().includes(city)) {
@@ -312,7 +312,7 @@ class AdvancedIntentClassifier {
         // Bangalore variations
         'banglore': 'Bangalore', 'bangaluru': 'Bangalore', 'bengaluru': 'Bangalore', 'bangalore': 'Bangalore',
         // Gurugram variations
-        'gurgao': 'Gurugram', 'gurgaon': 'Gurugram', 'gurugram': 'Gurugram', 'gurgaun': 'Gurugram',
+        'gurgao': 'Gurugram', 'gurgaon': 'Gurugram', 'gurugram': 'Gurugram', 'gruugram': 'Gurugram', 'gurgaun': 'Gurugram',
         // Noida variations
         'noida': 'Noida', 'noidaa': 'Noida', 'noiada': 'Noida',
         // Hyderabad variations
@@ -414,7 +414,6 @@ class AdvancedIntentClassifier {
       if (hasPropertySearchPhrase) {
         result.searchCriteria.type = 'rent';
       } else {
-        // Default to rent for property searches
         result.searchCriteria.type = 'rent';
       }
     }
@@ -439,6 +438,15 @@ class AdvancedIntentClassifier {
         }
       }
     }
+
+    // Remove undefined values from search criteria before returning
+    const cleanedSearchCriteria = {};
+    Object.entries(result.searchCriteria).forEach(([key, value]) => {
+      if (value !== undefined) {
+        cleanedSearchCriteria[key] = value;
+      }
+    });
+    result.searchCriteria = cleanedSearchCriteria;
 
     console.log('🧠 [ADVANCED NLP] Enhanced analysis result:', result);
     return result;
